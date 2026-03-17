@@ -25,3 +25,199 @@
   status: implemented
   depends_on: [pieces.tetromino_count]
   constants: {cells_per_piece: "4"}
+- id: pieces.rotation
+  section: Pieces
+  description: Each tetromino has 4 rotation states (0, 90, 180, 270). Rotation cycles through states in order.
+  tags: [core, pieces, rotation]
+  status: draft
+  depends_on: [pieces.tetromino_cells]
+- id: pieces.srs_kicks
+  section: Pieces
+  description: Rotation uses SRS wall kick data. When a rotation collides, up to 4 alternative positions are tested before the rotation fails.
+  tags: [core, pieces, rotation]
+  status: draft
+  constants: {max_kick_tests: 4}
+  depends_on: [pieces.rotation]
+- id: pieces.spawn
+  section: Pieces
+  description: New pieces spawn at the top-center of the grid in rotation state 0
+  tags: [core, pieces]
+  status: draft
+  depends_on: [pieces.tetromino_cells, grid.dimensions]
+- id: game.state
+  section: Game
+  description: 'Game has states: Menu, Playing, Paused, GameOver. Transitions: Menu->Playing, Playing->Paused->Playing, Playing->GameOver, GameOver->Menu.'
+  tags: [core, game, state]
+  status: draft
+- id: game.collision
+  section: Game
+  description: A piece position is valid if all its cells are within grid bounds and not overlapping occupied cells
+  tags: [core, game, collision]
+  status: draft
+  depends_on: [grid.cell_state, pieces.tetromino_cells]
+- id: game.move_horizontal
+  section: Game
+  description: Pieces move left or right by one column. Move is rejected if the resulting position is invalid.
+  tags: [core, game, movement]
+  status: draft
+  depends_on: [game.collision]
+- id: game.move_down
+  section: Game
+  description: Soft drop moves the piece down one row. If the move is invalid, the piece locks in place.
+  tags: [core, game, movement]
+  status: draft
+  depends_on: [game.collision]
+- id: game.hard_drop
+  section: Game
+  description: Hard drop instantly moves the piece to the lowest valid row and locks it
+  tags: [core, game, movement]
+  status: draft
+  depends_on: [game.collision]
+- id: game.rotate
+  section: Game
+  description: Rotate piece clockwise or counter-clockwise. Uses SRS wall kicks if basic rotation collides.
+  tags: [core, game, rotation]
+  status: draft
+  depends_on: [game.collision, pieces.srs_kicks]
+- id: game.lock
+  section: Game
+  description: A piece locks into the grid when it cannot move down. Its cells become occupied in the grid.
+  tags: [core, game]
+  status: draft
+  depends_on: [game.collision, grid.cell_state]
+- id: game.line_clear
+  section: Game
+  description: When a row is fully occupied, it is cleared. All rows above shift down by one. Multiple rows can clear simultaneously.
+  tags: [core, game, scoring]
+  status: draft
+  depends_on: [game.lock]
+- id: game.level
+  section: Game
+  description: Level starts at 1 and increases every 10 lines cleared. Level determines gravity speed.
+  tags: [core, game, progression]
+  status: draft
+  constants: {lines_per_level: 10, starting_level: 1}
+  depends_on: [game.line_clear]
+- id: game.score
+  section: Game
+  description: 'Score awards points for line clears: 1 line=100, 2=300, 3=500, 4=800, multiplied by current level'
+  tags: [core, game, scoring]
+  status: draft
+  constants: {double: 300, single: 100, tetris: 800, triple: 500}
+  depends_on: [game.line_clear, game.level]
+- id: game.gravity
+  section: Game
+  description: Pieces fall automatically at a timed interval. Interval decreases as level increases.
+  tags: [core, game, timing]
+  status: draft
+  depends_on: [game.move_down, game.level]
+- id: game.next_piece
+  section: Game
+  description: The next piece to spawn is visible to the player. Uses a 7-bag randomizer so all 7 types appear before any repeats.
+  tags: [core, game]
+  status: draft
+  depends_on: [pieces.tetromino_count]
+- id: game.escalation
+  section: Game
+  description: '2-stage escalation based on stack height. Normal: baseline effects. Danger: music speeds up, effects intensify.'
+  tags: [core, game, escalation]
+  status: draft
+  constants: {danger_threshold_row: 4}
+  depends_on: [grid.dimensions]
+- id: game.game_over
+  section: Game
+  description: Game ends when a newly spawned piece immediately collides with occupied cells
+  tags: [core, game, state]
+  status: draft
+  depends_on: [game.collision, pieces.spawn]
+- id: audio.decode
+  section: Audio
+  description: Decode audio files (MP3, WAV, FLAC, OGG) to raw PCM samples. Returns sample rate, channel count, and sample data.
+  tags: [core, audio, decode]
+  status: draft
+  constants: {formats: 'mp3:wav:flac:ogg'}
+- id: audio.playback
+  section: Audio
+  description: Play decoded PCM audio through the system audio output device. Supports play, pause, and stop.
+  tags: [core, audio, playback]
+  status: draft
+  depends_on: [audio.decode]
+- id: audio.volume
+  section: Audio
+  description: Volume control scales PCM sample amplitude. Range 0.0 (mute) to 1.0 (full).
+  tags: [core, audio, playback]
+  status: draft
+  constants: {default: 0.8, max: 1.0, min: 0.0}
+  depends_on: [audio.playback]
+- id: audio.speed
+  section: Audio
+  description: Playback speed control resamples audio output. Range 0.5x to 2.0x. Used for panic escalation.
+  tags: [core, audio, playback, escalation]
+  status: draft
+  constants: {default: 1.0, max: 2.0, min: 0.5}
+  depends_on: [audio.playback]
+- id: audio.amplitude
+  section: Audio
+  description: Track real-time RMS amplitude of the audio stream per frame. Returns a normalized 0.0-1.0 value.
+  tags: [core, audio, analysis]
+  status: draft
+  depends_on: [audio.playback]
+- id: audio.beat_detect
+  section: Audio
+  description: Detect beats in real-time by tracking amplitude spikes above a rolling average. Emits beat events with timestamp.
+  tags: [core, audio, analysis]
+  status: draft
+  depends_on: [audio.amplitude]
+- id: music.scan_folder
+  section: Music
+  description: Scan a directory for supported audio files. Returns a list of file paths filtered by supported extensions.
+  tags: [core, music, filesystem]
+  status: draft
+  depends_on: [audio.decode]
+- id: music.shuffle
+  section: Music
+  description: Shuffle mode randomizes the play order of scanned files. Toggle on/off.
+  tags: [core, music, playback]
+  status: draft
+  depends_on: [music.scan_folder]
+- id: music.auto_advance
+  section: Music
+  description: When a track finishes, the next track in the list starts automatically with no gap.
+  tags: [core, music, playback]
+  status: draft
+  depends_on: [music.scan_folder, audio.playback]
+- id: music.now_playing
+  section: Music
+  description: 'Track metadata for the currently playing file: filename, duration, elapsed time.'
+  tags: [core, music, ui]
+  status: draft
+  depends_on: [audio.playback]
+- id: music.skip
+  section: Music
+  description: Skip to the next track in the list. Wraps to the beginning if at the end.
+  tags: [core, music, playback]
+  status: draft
+  depends_on: [music.scan_folder, audio.playback]
+- id: config.xdg_paths
+  section: Config
+  description: Config stored in XDG_CONFIG_HOME/rhythmgrid, data in XDG_DATA_HOME/rhythmgrid. Falls back to ~/.config and ~/.local/share.
+  tags: [core, config, filesystem]
+  status: draft
+- id: config.load_save
+  section: Config
+  description: Settings are persisted as a TOML file. Load on startup, save on change. Missing file uses defaults.
+  tags: [core, config]
+  status: draft
+  depends_on: [config.xdg_paths]
+- id: config.music_folder
+  section: Config
+  description: Music folder path is a persisted setting. If set, it is scanned on startup.
+  tags: [core, config, music]
+  status: draft
+  depends_on: [config.load_save, music.scan_folder]
+- id: audio.procedural
+  section: Audio
+  description: Generate simple procedural audio with a known BPM and beat pattern. Used as fallback when no music is configured and as a deterministic test fixture.
+  tags: [core, audio, procedural]
+  status: draft
+  constants: {default_bpm: 120}
