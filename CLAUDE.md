@@ -4,7 +4,12 @@ Audio-reactive puzzle game that turns your music library into a dynamic visual e
 
 ## Dark Factory Pipeline
 
-The pipeline is test-first agentic. The flow is: **spec → pipeline builds tests → pipeline builds source → tests pass.** We manage the spec only — do not hand-write tests or source implementations for pipeline-owned domains.
+The pipeline is test-first agentic:
+1. We write specs (via SpecDB CLI or editing `spec/spec.yaml` directly)
+2. Pipeline agent builds tests from specs
+3. Pipeline agent builds source to pass those tests
+
+**Do not hand-write tests or source for pipeline-owned domains.** We manage the spec only. See `docs/DomainPlan.md` for what the pipeline owns vs. what we co-author.
 
 ## Branching
 
@@ -27,50 +32,12 @@ The `docs/` folder contains planning and design documents. As the project grows,
 - `docs/` — product planning and documentation
 - `df-config.json` — Dark Factory pipeline config
 
-## SpecDB Usage
+## SpecDB
 
-Binary: `./specdb-linux-amd64` (auto-discovers `spec/spec.yaml` from repo root)
+Binary: `./specdb-linux-amd64` — run with no args for full help. Auto-discovers `spec/spec.yaml`.
 
-### Common Commands
-
-```bash
-# Query
-specdb query --status draft --format brief          # overview of unbuilt work
-specdb query --tags-all "store,write" --format brief # entries matching ALL tags (AND)
-specdb query --search "expir" --status draft         # substring search within status
-specdb query --rdeps some.id --format brief          # reverse deps (exclusive flag)
-
-# Add
-specdb add --id cmds.ping --section Commands \
-  --description "PING returns PONG" --tags "core,ping"
-specdb add --id cmds.mget --section Commands \
-  --description "MGET returns multiple values" \
-  --tags "core,read" --depends-on cmds.get
-
-# Update
-specdb update --id cmds.ping --status implemented
-specdb update --id cmds.ping --constants "timeout=30"
-
-# Remove / Rename
-specdb remove --id cmds.ping                          # draft only
-specdb remove --id cmds.ping --force --status-override # non-draft
-specdb rename --id cmds.old_name --new-id cmds.new_name
-
-# Validation & Diffing
-specdb validate
-specdb validate --test-dir tests
-specdb snapshot                    # copy spec.yaml → .spec-snapshot.yaml
-specdb diff                       # changes since last snapshot
-specdb impact --test-dir tests    # affected entries + test files
-```
-
-### Gotchas
-
-- `--tags` is OR (any match). Use `--tags-all` for AND (all must match).
-- `--rdeps` is exclusive — don't combine with `--status`/`--tags`/etc.
-- `--format brief` has no header row. Count = number of lines.
-- `--constants` values are always strings (`timeout=30` → `"30"`).
-- `remove` is permanent. Prefer: `specdb update --id X --status deprecated`
-- `remove` blocks non-draft entries unless `--status-override` is given.
-- `rename` updates `depends_on` refs but not test files or source code.
+Key rules:
+- `spec.yaml` is a **flat YAML list** with `- id:` items. Do NOT nest under section keys.
+- Prefer the CLI (`specdb add`, `specdb update`) over hand-editing YAML.
+- Run `specdb validate` to catch format errors.
 - Lifecycle: `draft → implemented → stale → deprecated`
