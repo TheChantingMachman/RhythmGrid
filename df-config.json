@@ -1,0 +1,19 @@
+{
+    "project_name": "RhythmGrid",
+    "language": "TODO",
+    "test_framework": "TODO",
+    "src_dir": "src/",
+    "test_dir": "tests/",
+    "spec_dir": "spec/",
+    "spec_file": "spec/spec.yaml",
+    "src_ext": "TODO",
+    "test_ext": "TODO",
+    "build_test_cmd": "",
+    "report_format": "TODO",
+    "src_include": ["src/**/*"],
+    "src_exclude": [],
+    "test_pattern": "tests/**/*",
+    "planner_hint": "",
+    "test_hint": "",
+    "coding_hint": ""
+}
