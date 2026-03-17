@@ -16,12 +16,12 @@
   section: Pieces
   description: "There are exactly 7 tetromino types: I, O, T, S, Z, J, L"
   tags: [core, pieces]
-  status: draft
+  status: implemented
   constants: {count: "7"}
 - id: pieces.tetromino_cells
   section: Pieces
   description: "Each tetromino is defined by exactly 4 cells"
   tags: [core, pieces]
-  status: draft
+  status: implemented
   depends_on: [pieces.tetromino_count]
   constants: {cells_per_piece: "4"}
