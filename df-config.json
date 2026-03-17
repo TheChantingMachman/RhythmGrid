@@ -14,6 +14,6 @@
     "src_exclude": [],
     "test_pattern": "tests/**/*.rs",
     "planner_hint": "",
-    "test_hint": "",
+    "test_hint": "The crate name is `rhythmgrid` (no underscore). Use `use rhythmgrid::` in test imports.",
     "coding_hint": ""
 }
