@@ -6,29 +6,22 @@
   description: "Grid is 10 columns wide and 20 rows tall"
   tags: [core, grid]
   status: draft
-  constants:
-    width: "10"
-    height: "20"
-
+  constants: {width: "10", height: "20"}
 - id: grid.cell_state
   section: Grid
-  description: "Each cell is either empty or occupied with a color"
+  description: Each cell is either Empty or Occupied with a piece type index (0-6, matching ALL_TETROMINOES order). The rendering layer maps type index to visual appearance via the active theme — do not store RGB color directly.
   tags: [core, grid]
   status: draft
-
 - id: pieces.tetromino_count
   section: Pieces
   description: "There are exactly 7 tetromino types: I, O, T, S, Z, J, L"
   tags: [core, pieces]
   status: draft
-  constants:
-    count: "7"
-
+  constants: {count: "7"}
 - id: pieces.tetromino_cells
   section: Pieces
   description: "Each tetromino is defined by exactly 4 cells"
   tags: [core, pieces]
   status: draft
   depends_on: [pieces.tetromino_count]
-  constants:
-    cells_per_piece: "4"
+  constants: {cells_per_piece: "4"}
