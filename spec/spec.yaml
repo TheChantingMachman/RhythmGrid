@@ -5,30 +5,23 @@
   section: Grid
   description: "Grid is 10 columns wide and 20 rows tall"
   tags: [core, grid]
-  status: draft
-  constants:
-    width: "10"
-    height: "20"
-
+  status: implemented
+  constants: {width: "10", height: "20"}
 - id: grid.cell_state
   section: Grid
   description: "Each cell is either empty or occupied with a color"
   tags: [core, grid]
-  status: draft
-
+  status: implemented
 - id: pieces.tetromino_count
   section: Pieces
   description: "There are exactly 7 tetromino types: I, O, T, S, Z, J, L"
   tags: [core, pieces]
   status: draft
-  constants:
-    count: "7"
-
+  constants: {count: "7"}
 - id: pieces.tetromino_cells
   section: Pieces
   description: "Each tetromino is defined by exactly 4 cells"
   tags: [core, pieces]
   status: draft
   depends_on: [pieces.tetromino_count]
-  constants:
-    cells_per_piece: "4"
+  constants: {cells_per_piece: "4"}
