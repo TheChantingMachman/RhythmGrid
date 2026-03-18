@@ -3,7 +3,7 @@
 
 - id: grid.dimensions
   section: Grid
-  description: "Grid is 10 columns wide and 20 rows tall"
+  description: Grid is 10 columns wide and 20 rows tall. Cells indexed as cells[row][col] with row 0 at top, row 19 at bottom, col 0 at left, col 9 at right. A new Grid initializes all cells to CellState::Empty.
   tags: [core, grid]
   status: implemented
   constants: {width: "10", height: "20"}
