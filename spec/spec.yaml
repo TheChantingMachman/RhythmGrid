@@ -16,33 +16,33 @@
   section: Pieces
   description: "There are exactly 7 tetromino types: I, O, T, S, Z, J, L"
   tags: [core, pieces]
-  status: draft
+  status: implemented
   constants: {count: "7"}
 - id: pieces.tetromino_cells
   section: Pieces
   description: "Each tetromino is defined by exactly 4 cells"
   tags: [core, pieces]
-  status: draft
+  status: implemented
   depends_on: [pieces.tetromino_count]
   constants: {cells_per_piece: "4"}
 - id: pieces.rotation
   section: Pieces
   description: 'Each tetromino has 4 rotation states (0=spawn, 1=90°CW, 2=180°, 3=270°CW). CW transform: (col,row)->(row,-col). All rotation cell data stored in a static [7][4][4] table. Coordinate convention: positive col=right, positive row=down.'
   tags: [core, pieces, rotation]
-  status: draft
+  status: implemented
   depends_on: [pieces.tetromino_cells]
 - id: pieces.srs_kicks
   section: Pieces
   description: SRS wall kick data per Tetris Guideline, converted to y-down coordinates. JLSTZ share one kick table, I-piece has a separate table, O-piece has no kicks (rotation is no-op on collision). 8 transitions (4 CW + 4 CCW), 4 kick offsets each. Offsets are (col_delta, row_delta).
   tags: [core, pieces, rotation]
-  status: draft
+  status: implemented
   constants: {max_kick_tests: 4}
   depends_on: [pieces.rotation]
 - id: pieces.spawn
   section: Pieces
   description: New pieces spawn at top-center of the grid in rotation state 0. Spawn origin is (col=4, row=0). If spawn position collides, try up to 4 rows above (vanish zone) before declaring game over.
   tags: [core, pieces]
-  status: draft
+  status: implemented
   depends_on: [pieces.tetromino_cells]
 - id: game.state
   section: Game
