@@ -13,11 +13,11 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 fn with_env<F: FnOnce()>(key: &str, value: &str, f: F) {
     let _guard = ENV_LOCK.lock().unwrap();
     let old = std::env::var(key).ok();
-    std::env::set_var(key, value);
+    unsafe { std::env::set_var(key, value) };
     f();
     match old {
-        Some(v) => std::env::set_var(key, v),
-        None    => std::env::remove_var(key),
+        Some(v) => unsafe { std::env::set_var(key, v) },
+        None    => unsafe { std::env::remove_var(key) },
     }
 }
 
@@ -25,10 +25,10 @@ fn with_env<F: FnOnce()>(key: &str, value: &str, f: F) {
 fn without_env<F: FnOnce()>(key: &str, f: F) {
     let _guard = ENV_LOCK.lock().unwrap();
     let old = std::env::var(key).ok();
-    std::env::remove_var(key);
+    unsafe { std::env::remove_var(key) };
     f();
     if let Some(v) = old {
-        std::env::set_var(key, v);
+        unsafe { std::env::set_var(key, v) };
     }
 }
 
