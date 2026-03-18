@@ -95,7 +95,7 @@
   section: Game
   description: Level starts at 1 and increases every 10 lines cleared. Level determines gravity speed.
   tags: [core, game, progression]
-  status: draft
+  status: implemented
   constants: {lines_per_level: 10, starting_level: 1}
   depends_on: [game.line_clear]
 - id: game.score

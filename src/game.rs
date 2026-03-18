@@ -316,6 +316,11 @@ impl Game {
         self.last_clear_count
     }
 
+    /// Returns the current level (1-based). Increases every 10 lines cleared.
+    pub fn level(&self) -> usize {
+        (self.total_lines_cleared / 10) + 1
+    }
+
     /// Returns the last locked piece type.
     pub fn last_locked_piece(&self) -> TetrominoType {
         self.last_locked.expect("no piece has been locked").0
