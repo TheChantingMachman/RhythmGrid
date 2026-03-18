@@ -9,7 +9,7 @@
   constants: {width: "10", height: "20"}
 - id: grid.cell_state
   section: Grid
-  description: "Each cell is either empty or occupied with a color"
+  description: Each cell is either Empty or Occupied with a piece type index (0-6, matching ALL_TETROMINOES order). The rendering layer maps type index to visual appearance via the active theme — do not store RGB color directly.
   tags: [core, grid]
   status: implemented
 - id: pieces.tetromino_count
@@ -27,13 +27,13 @@
   constants: {cells_per_piece: "4"}
 - id: pieces.rotation
   section: Pieces
-  description: Each tetromino has 4 rotation states (0, 90, 180, 270). Rotation cycles through states in order.
+  description: 'Each tetromino has 4 rotation states (0=spawn, 1=90°CW, 2=180°, 3=270°CW). CW transform: (col,row)->(row,-col). All rotation cell data is stored in a static [7][4][4] table. Coordinate convention: positive col=right, positive row=down.'
   tags: [core, pieces, rotation]
   status: implemented
   depends_on: [pieces.tetromino_cells]
 - id: pieces.srs_kicks
   section: Pieces
-  description: Rotation uses SRS wall kick data. When a rotation collides, up to 4 alternative positions are tested before the rotation fails.
+  description: SRS wall kick data per Tetris Guideline, converted to y-down coordinates. JLSTZ share one kick table, I-piece has a separate table, O-piece has no kicks (rotation is no-op on collision). 8 transitions (4 CW + 4 CCW), 4 kick offsets each. Offsets are (col_delta, row_delta) where positive col=right, positive row=down.
   tags: [core, pieces, rotation]
   status: implemented
   constants: {max_kick_tests: 4}
@@ -81,13 +81,13 @@
   depends_on: [game.collision, pieces.srs_kicks]
 - id: game.lock
   section: Game
-  description: A piece locks into the grid when it cannot move down. Its cells become occupied in the grid.
+  description: A piece locks into the grid when it cannot move down. Each cell is stored as CellState::Occupied(type_index) where type_index is the piece's zero-based index in ALL_TETROMINOES (I=0 through L=6). Lock also triggers line clearing.
   tags: [core, game]
   status: implemented
   depends_on: [game.collision, grid.cell_state]
 - id: game.line_clear
   section: Game
-  description: When a row is fully occupied, it is cleared. All rows above shift down by one. Multiple rows can clear simultaneously.
+  description: 'When a row is fully occupied, it is cleared and all rows above shift down. Multiple rows can clear simultaneously. Must return the number of lines cleared so scoring and level progression can consume it. Note: basic clearing is already implemented inside lock_cells — future builds should extend it to return the count, not rewrite it.'
   tags: [core, game, scoring]
   status: draft
   depends_on: [game.lock]
