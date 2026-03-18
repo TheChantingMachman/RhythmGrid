@@ -5,13 +5,13 @@
   section: Grid
   description: "Grid is 10 columns wide and 20 rows tall"
   tags: [core, grid]
-  status: draft
+  status: implemented
   constants: {width: "10", height: "20"}
 - id: grid.cell_state
   section: Grid
   description: Each cell is either Empty or Occupied(u32). The u32 value identifies what occupies the cell — interpretation is up to the game layer.
   tags: [core, grid]
-  status: draft
+  status: implemented
 - id: pieces.tetromino_count
   section: Pieces
   description: "There are exactly 7 tetromino types: I, O, T, S, Z, J, L"
