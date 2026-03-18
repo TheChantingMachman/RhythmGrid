@@ -41,3 +41,4 @@ Key rules:
 - Prefer the CLI (`specdb add`, `specdb update`) over hand-editing YAML.
 - Run `specdb validate` to catch format errors.
 - Lifecycle: `draft → implemented → stale → deprecated`
+- **Auto-stale:** Updating any non-status field on an `implemented` entry automatically flips it to `stale`, triggering a pipeline rebuild. For cosmetic edits that don't need a rebuild, pass `--status implemented` in the same update call.
