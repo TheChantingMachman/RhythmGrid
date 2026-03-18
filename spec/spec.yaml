@@ -48,7 +48,7 @@
   section: Game
   description: 'Game has states: Menu, Playing, Paused, GameOver. Transitions: Menu->Playing, Playing->Paused->Playing, Playing->GameOver, GameOver->Menu.'
   tags: [core, game, state]
-  status: draft
+  status: implemented
 - id: game.collision
   section: Game
   description: A piece position is valid if all its cells are within grid bounds and not overlapping occupied cells. Uses cells[row][col] indexing with positive col=right, positive row=down.
@@ -137,7 +137,7 @@
   section: Audio
   description: Play decoded PCM audio through the system audio output device. Supports play, pause, and stop.
   tags: [core, audio, playback]
-  status: draft
+  status: implemented
   depends_on: [audio.decode]
 - id: audio.volume
   section: Audio
@@ -175,7 +175,7 @@
   section: Music
   description: Scan a directory for supported audio files. Returns a list of file paths filtered by supported extensions.
   tags: [core, music, filesystem]
-  status: draft
+  status: implemented
 - id: music.shuffle
   section: Music
   description: Shuffle mode randomizes the play order of scanned files. Toggle on/off.
@@ -192,7 +192,7 @@
   section: Music
   description: 'Track metadata for the currently playing file: filename, duration, elapsed time.'
   tags: [core, music, ui]
-  status: draft
+  status: implemented
 - id: music.skip
   section: Music
   description: Skip to the next track in the list. Wraps to the beginning if at the end.
