@@ -14,7 +14,7 @@
     "src_exclude": [],
     "test_pattern": "tests/**/*.rs",
     "planner_hint": "",
-    "test_hint": "",
+    "test_hint": "Crate name is rhythm-grid. Cargo converts hyphens to underscores, so use 'use rhythm_grid::' in all test imports.",
     "coding_hint": "",
     "chunk_size": 4
 }
