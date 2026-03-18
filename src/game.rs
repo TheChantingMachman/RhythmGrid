@@ -1,5 +1,34 @@
 use crate::grid::{CellState, Grid, HEIGHT, WIDTH};
 
+// --- Game State Machine ---
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GameState {
+    Menu,
+    Playing,
+    Paused,
+    GameOver,
+}
+
+impl Default for GameState {
+    fn default() -> Self {
+        GameState::Menu
+    }
+}
+
+impl GameState {
+    pub fn transition(&self, target: GameState) -> bool {
+        matches!(
+            (self, target),
+            (GameState::Menu, GameState::Playing)
+                | (GameState::Playing, GameState::Paused)
+                | (GameState::Paused, GameState::Playing)
+                | (GameState::Playing, GameState::GameOver)
+                | (GameState::GameOver, GameState::Menu)
+        )
+    }
+}
+
 pub fn is_valid_position(grid: &Grid, cells: &[(i32, i32)], row: i32, col: i32) -> bool {
     for &(dr, dc) in cells {
         let r = row + dr;

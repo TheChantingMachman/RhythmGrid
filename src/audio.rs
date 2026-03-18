@@ -118,6 +118,54 @@ pub fn decode_audio(path: &Path) -> Result<DecodedAudio, AudioError> {
     })
 }
 
+// --- Playback State Machine ---
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlaybackState {
+    Playing,
+    Paused,
+    Stopped,
+}
+
+pub struct AudioPlayer {
+    state: PlaybackState,
+    position: usize,
+}
+
+impl AudioPlayer {
+    pub fn new(_audio: DecodedAudio) -> Self {
+        AudioPlayer {
+            state: PlaybackState::Stopped,
+            position: 0,
+        }
+    }
+
+    pub fn play(&mut self) {
+        if self.state != PlaybackState::Playing {
+            self.state = PlaybackState::Playing;
+        }
+    }
+
+    pub fn pause(&mut self) {
+        if self.state == PlaybackState::Playing {
+            self.state = PlaybackState::Paused;
+        }
+    }
+
+    pub fn stop(&mut self) {
+        self.state = PlaybackState::Stopped;
+        self.position = 0;
+    }
+
+    pub fn state(&self) -> PlaybackState {
+        self.state.clone()
+    }
+
+    pub fn position(&self) -> usize {
+        self.position
+    }
+}
+
 pub fn generate_procedural(bpm: u32, duration_secs: f32, sample_rate: u32) -> DecodedAudio {
     let num_samples = (sample_rate as f32 * duration_secs) as usize;
     let beat_period = 60.0 / bpm as f32; // seconds per beat
