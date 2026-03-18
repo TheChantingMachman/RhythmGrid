@@ -131,7 +131,7 @@
   section: Audio
   description: Decode audio files (MP3, WAV, FLAC, OGG) to raw PCM samples. Returns sample rate, channel count, and sample data.
   tags: [core, audio, decode]
-  status: implemented
+  status: draft
   constants: {formats: 'mp3:wav:flac:ogg'}
 - id: audio.playback
   section: Audio
@@ -169,7 +169,7 @@
   section: Audio
   description: Generate simple procedural audio with a known BPM and beat pattern. Used as fallback when no music is configured and as a deterministic test fixture.
   tags: [core, audio, procedural]
-  status: implemented
+  status: draft
   constants: {default_bpm: 120}
 - id: music.scan_folder
   section: Music
