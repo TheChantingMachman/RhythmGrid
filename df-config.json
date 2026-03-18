@@ -15,5 +15,6 @@
     "test_pattern": "tests/**/*.rs",
     "planner_hint": "",
     "test_hint": "",
-    "coding_hint": ""
+    "coding_hint": "",
+    "chunk_size": 4
 }
