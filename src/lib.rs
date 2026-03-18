@@ -4,3 +4,4 @@ pub mod config;
 pub mod game;
 pub mod grid;
 pub mod music;
+pub mod pieces;
