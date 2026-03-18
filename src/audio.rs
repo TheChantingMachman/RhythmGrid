@@ -10,6 +10,13 @@ use symphonia::core::probe::Hint;
 pub const SUPPORTED_FORMATS: &[&str] = &["mp3", "wav", "flac", "ogg"];
 pub const DEFAULT_BPM: u32 = 120;
 
+pub const DEFAULT_VOLUME: f32 = 0.8;
+pub const MIN_VOLUME: f32 = 0.0;
+pub const MAX_VOLUME: f32 = 1.0;
+pub const DEFAULT_SPEED: f32 = 1.0;
+pub const MIN_SPEED: f32 = 0.5;
+pub const MAX_SPEED: f32 = 2.0;
+
 #[derive(Debug)]
 pub enum AudioError {
     FileNotFound,
@@ -130,14 +137,44 @@ pub enum PlaybackState {
 pub struct AudioPlayer {
     state: PlaybackState,
     position: usize,
+    audio: DecodedAudio,
+    volume: f32,
+    speed: f32,
 }
 
 impl AudioPlayer {
-    pub fn new(_audio: DecodedAudio) -> Self {
+    pub fn new(audio: DecodedAudio) -> Self {
         AudioPlayer {
             state: PlaybackState::Stopped,
             position: 0,
+            audio,
+            volume: DEFAULT_VOLUME,
+            speed: DEFAULT_SPEED,
         }
+    }
+
+    pub fn set_volume(&mut self, v: f32) {
+        self.volume = v.clamp(MIN_VOLUME, MAX_VOLUME);
+    }
+
+    pub fn volume(&self) -> f32 {
+        self.volume
+    }
+
+    pub fn set_speed(&mut self, s: f32) {
+        self.speed = s.clamp(MIN_SPEED, MAX_SPEED);
+    }
+
+    pub fn speed(&self) -> f32 {
+        self.speed
+    }
+
+    pub fn amplitude(&self) -> f32 {
+        let samples = &self.audio.samples;
+        if samples.is_empty() {
+            return 0.0;
+        }
+        (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
     }
 
     pub fn play(&mut self) {

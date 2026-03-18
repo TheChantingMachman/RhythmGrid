@@ -143,21 +143,21 @@
   section: Audio
   description: Volume control scales PCM sample amplitude. Range 0.0 (mute) to 1.0 (full).
   tags: [core, audio, playback]
-  status: draft
+  status: implemented
   constants: {default: 0.8, max: 1.0, min: 0.0}
   depends_on: [audio.playback]
 - id: audio.speed
   section: Audio
   description: Playback speed control resamples audio output. Range 0.5x to 2.0x. Used for panic escalation.
   tags: [core, audio, playback, escalation]
-  status: draft
+  status: implemented
   constants: {default: 1.0, max: 2.0, min: 0.5}
   depends_on: [audio.playback]
 - id: audio.amplitude
   section: Audio
   description: Track real-time RMS amplitude of the audio stream per frame. Returns a normalized 0.0-1.0 value.
   tags: [core, audio, analysis]
-  status: draft
+  status: implemented
   depends_on: [audio.playback]
 - id: audio.beat_detect
   section: Audio
@@ -208,7 +208,7 @@
   section: Config
   description: Settings are persisted as a TOML file. Load on startup, save on change. Missing file uses defaults.
   tags: [core, config]
-  status: draft
+  status: implemented
   depends_on: [config.xdg_paths]
 - id: config.music_folder
   section: Config
