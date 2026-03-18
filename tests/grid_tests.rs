@@ -1,5 +1,5 @@
 // @spec-tags: core,grid
-// @invariants: GRID_WIDTH=10, GRID_HEIGHT=20; CellState has Empty and Occupied(color) variants
+// @invariants: GRID_WIDTH=10, GRID_HEIGHT=20; CellState has Empty and Occupied(type_index) variants where type_index is 0-6 matching ALL_TETROMINOES order
 // @build: 12
 
 use rhythm_grid::grid::{CellState, GRID_HEIGHT, GRID_WIDTH};
@@ -34,36 +34,32 @@ fn test_cell_state_empty_does_not_match_occupied() {
 
 #[test]
 fn test_cell_state_occupied_variant_exists() {
-    let color: u32 = 0xFF0000FF; // red, fully opaque RGBA
-    let cell = CellState::Occupied(color);
+    let cell = CellState::Occupied(0); // type_index 0 = I-piece
     assert!(matches!(cell, CellState::Occupied(_)));
 }
 
 #[test]
 fn test_cell_state_occupied_does_not_match_empty() {
-    let cell = CellState::Occupied(0x00FF00FF_u32);
+    let cell = CellState::Occupied(2); // type_index 2 = T-piece
     assert!(!matches!(cell, CellState::Empty));
 }
 
 #[test]
-fn test_cell_state_occupied_preserves_color_value() {
-    let color: u32 = 0x1A2B3C4D;
-    let cell = CellState::Occupied(color);
+fn test_cell_state_occupied_preserves_type_index() {
+    let cell = CellState::Occupied(3); // type_index 3 = S-piece
     if let CellState::Occupied(stored) = cell {
-        assert_eq!(stored, color);
+        assert_eq!(stored, 3u32);
     } else {
         panic!("Expected Occupied variant");
     }
 }
 
 #[test]
-fn test_cell_state_occupied_distinct_colors_are_distinct() {
-    let red: u32 = 0xFF0000FF;
-    let blue: u32 = 0x0000FFFF;
-    let cell_red = CellState::Occupied(red);
-    let cell_blue = CellState::Occupied(blue);
-    if let (CellState::Occupied(r), CellState::Occupied(b)) = (cell_red, cell_blue) {
-        assert_ne!(r, b);
+fn test_cell_state_occupied_distinct_type_indices_are_distinct() {
+    let cell_i = CellState::Occupied(0); // I-piece index
+    let cell_l = CellState::Occupied(6); // L-piece index
+    if let (CellState::Occupied(i), CellState::Occupied(l)) = (cell_i, cell_l) {
+        assert_ne!(i, l);
     } else {
         panic!("Expected two Occupied variants");
     }

@@ -89,7 +89,7 @@
   section: Game
   description: 'When a row is fully occupied, it is cleared and all rows above shift down. Multiple rows can clear simultaneously. Must return the number of lines cleared so scoring and level progression can consume it. Note: basic clearing is already implemented inside lock_cells — future builds should extend it to return the count, not rewrite it.'
   tags: [core, game, scoring]
-  status: draft
+  status: implemented
   depends_on: [game.lock]
 - id: game.level
   section: Game

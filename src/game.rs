@@ -33,6 +33,10 @@ pub struct Game {
     pub current_piece: Option<Piece>,
     /// The next piece that will spawn after the current one locks.
     pub next_piece: TetrominoType,
+    /// Total lines cleared since game start.
+    pub total_lines_cleared: usize,
+    /// Lines cleared in the most recent lock.
+    last_clear_count: usize,
     /// 7-bag: remaining pieces in the current bag, drawn from the end.
     bag: Vec<TetrominoType>,
     rng: u64,
@@ -73,6 +77,8 @@ impl Game {
             grid: [[CellState::Empty; W]; H],
             current_piece: None,
             next_piece,
+            total_lines_cleared: 0,
+            last_clear_count: 0,
             bag,
             rng,
             last_locked: None,
@@ -110,6 +116,8 @@ impl Game {
             self.grid = [[CellState::Empty; W]; H];
             self.current_piece = None;
             self.last_locked = None;
+            self.total_lines_cleared = 0;
+            self.last_clear_count = 0;
             self.bag = ALL_TETROMINOES.to_vec();
             shuffle_bag(&mut self.rng, &mut self.bag);
             self.next_piece = self.bag.pop().unwrap();
@@ -298,6 +306,16 @@ impl Game {
         self.next_piece
     }
 
+    /// Returns the total lines cleared since game start.
+    pub fn lines_cleared(&self) -> usize {
+        self.total_lines_cleared
+    }
+
+    /// Returns the number of lines cleared in the most recent lock.
+    pub fn last_clear_count(&self) -> usize {
+        self.last_clear_count
+    }
+
     /// Returns the last locked piece type.
     pub fn last_locked_piece(&self) -> TetrominoType {
         self.last_locked.expect("no piece has been locked").0
@@ -324,15 +342,21 @@ impl Game {
             }
         }
         self.last_locked = Some((pt, col, row));
-        self.clear_lines();
+        let cleared = self.clear_lines();
+        self.last_clear_count = cleared;
+        self.total_lines_cleared += cleared;
     }
 
     /// Remove fully occupied rows and shift everything above down.
-    fn clear_lines(&mut self) {
+    /// Returns the number of rows cleared.
+    fn clear_lines(&mut self) -> usize {
         let mut dst: isize = (H as isize) - 1;
+        let mut cleared = 0usize;
         for src in (0..H).rev() {
             let full = self.grid[src].iter().all(|c| *c != CellState::Empty);
-            if !full {
+            if full {
+                cleared += 1;
+            } else {
                 if dst != src as isize {
                     self.grid[dst as usize] = self.grid[src];
                 }
@@ -344,6 +368,7 @@ impl Game {
             self.grid[dst as usize] = [CellState::Empty; W];
             dst -= 1;
         }
+        cleared
     }
 
     /// Spawn `next_piece` as the current piece and draw a new `next_piece` from the bag.
