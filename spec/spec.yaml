@@ -114,12 +114,12 @@
   section: Game
   description: The next piece to spawn is visible to the player. Uses a 7-bag randomizer so all 7 types appear before any repeats.
   tags: [core, game]
-  status: draft
+  status: implemented
 - id: game.escalation
   section: Game
   description: '2-stage escalation based on stack height. Normal: baseline effects. Danger: music speeds up, effects intensify.'
   tags: [core, game, escalation]
-  status: draft
+  status: implemented
   constants: {danger_threshold_row: 4}
 - id: game.game_over
   section: Game
@@ -131,7 +131,7 @@
   section: Audio
   description: Decode audio files (MP3, WAV, FLAC, OGG) to raw PCM samples. Returns sample rate, channel count, and sample data.
   tags: [core, audio, decode]
-  status: draft
+  status: implemented
   constants: {formats: 'mp3:wav:flac:ogg'}
 - id: audio.playback
   section: Audio
@@ -169,7 +169,7 @@
   section: Audio
   description: Generate simple procedural audio with a known BPM and beat pattern. Used as fallback when no music is configured and as a deterministic test fixture.
   tags: [core, audio, procedural]
-  status: draft
+  status: implemented
   constants: {default_bpm: 120}
 - id: music.scan_folder
   section: Music
