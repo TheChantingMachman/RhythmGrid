@@ -58,37 +58,37 @@
   section: Game
   description: Pieces move left or right by one column. Move is rejected if the resulting position is invalid.
   tags: [core, game, movement]
-  status: draft
+  status: implemented
   depends_on: [game.collision]
 - id: game.move_down
   section: Game
   description: Soft drop moves the piece down one row. If the move is invalid, the piece locks in place.
   tags: [core, game, movement]
-  status: draft
+  status: implemented
   depends_on: [game.collision]
 - id: game.hard_drop
   section: Game
   description: Hard drop instantly moves the piece to the lowest valid row and locks it.
   tags: [core, game, movement]
-  status: draft
+  status: implemented
   depends_on: [game.collision]
 - id: game.rotate
   section: Game
   description: Rotate piece clockwise or counter-clockwise. Tries unshifted rotation first, then SRS wall kicks if it collides.
   tags: [core, game, rotation]
-  status: draft
+  status: implemented
   depends_on: [game.collision]
 - id: game.lock
   section: Game
   description: A piece locks into the grid when it cannot move down. Each cell stored as CellState::Occupied(type_index) where type_index is the piece's zero-based index (I=0, O=1, T=2, S=3, Z=4, J=5, L=6). Lock triggers line clearing.
   tags: [core, game]
-  status: draft
+  status: implemented
   depends_on: [game.collision]
 - id: game.line_clear
   section: Game
   description: When a row is fully occupied, it is cleared and all rows above shift down. Multiple rows can clear simultaneously. Returns the number of lines cleared so scoring and level can consume it.
   tags: [core, game, scoring]
-  status: draft
+  status: implemented
   depends_on: [game.lock]
 - id: game.level
   section: Game
