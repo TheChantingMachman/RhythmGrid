@@ -1,0 +1,21 @@
+{
+  "modules": [
+    {
+      "file": "src/grid.rs",
+      "sections": ["Grid"],
+      "tags": ["grid"],
+      "primary": true
+    },
+    {
+      "file": "src/pieces.rs",
+      "sections": ["Pieces"],
+      "tags": ["pieces"],
+      "primary": true
+    },
+    {
+      "file": "src/lib.rs",
+      "sections": [],
+      "tags": []
+    }
+  ]
+}

@@ -95,6 +95,7 @@ Two-panel side-by-side presentation:
 
 ### Visual Layer
 - **3D rendering** — volumetric blocks, basic lighting/shading, camera in 3D space
+- **Block appearance** — V1: plain cubes. Future: small pixel art tiles (8x8, 16x16, or 32x32) that define block faces, projections, or extruded shapes. Blocks should not be architecturally locked to "plain cube" — the rendering should support swappable block visuals.
 - **Camera:** Fixed perspective for V1. Future: reactive camera movement on beats/escalation, player-controlled orbit/zoom
 - **Screen shake** — triggered on line clears and hard drops
 - **Momentum/inertia** — board slightly overshoots and settles back on impacts (delayed spring effect)
@@ -104,7 +105,7 @@ Two-panel side-by-side presentation:
 - Future: color palette shifts, multiple visual themes
 
 ### Architecture Note — Effects Modularity
-Sound effects and visual effects should be behind trait interfaces, not hardcoded. A "theme" is conceptually a bundle of: particle behavior, color palette, sound effect set, camera behavior. V1 ships one theme, but the architecture doesn't preclude adding theme packs later. No plugin system needed — just clean trait boundaries.
+Sound effects and visual effects should be behind trait interfaces, not hardcoded. A "theme" is conceptually a bundle of: particle behavior, color palette, sound effect set, camera behavior, and block appearance (pixel art tiles). V1 ships one theme with plain cubes, but the architecture doesn't preclude adding theme packs later. No plugin system needed — just clean trait boundaries.
 
 ### Player Experience
 - Simple onboarding — start playing immediately with the bundled track
