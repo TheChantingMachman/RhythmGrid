@@ -53,7 +53,7 @@
   section: Game
   description: A piece position is valid if all its cells are within grid bounds and not overlapping occupied cells. Uses cells[row][col] indexing with positive col=right, positive row=down.
   tags: [core, game, collision]
-  status: draft
+  status: implemented
 - id: game.move_horizontal
   section: Game
   description: Pieces move left or right by one column. Move is rejected if the resulting position is invalid.
@@ -131,7 +131,7 @@
   section: Audio
   description: Decode audio files (MP3, WAV, FLAC, OGG) to raw PCM samples. Returns sample rate, channel count, and sample data.
   tags: [core, audio, decode]
-  status: draft
+  status: implemented
   constants: {formats: 'mp3:wav:flac:ogg'}
 - id: audio.playback
   section: Audio
@@ -169,7 +169,7 @@
   section: Audio
   description: Generate simple procedural audio with a known BPM and beat pattern. Used as fallback when no music is configured and as a deterministic test fixture.
   tags: [core, audio, procedural]
-  status: draft
+  status: implemented
   constants: {default_bpm: 120}
 - id: music.scan_folder
   section: Music
@@ -203,7 +203,7 @@
   section: Config
   description: Config stored in XDG_CONFIG_HOME/rhythmgrid, data in XDG_DATA_HOME/rhythmgrid. Falls back to ~/.config and ~/.local/share.
   tags: [core, config, filesystem]
-  status: draft
+  status: implemented
 - id: config.load_save
   section: Config
   description: Settings are persisted as a TOML file. Load on startup, save on change. Missing file uses defaults.
