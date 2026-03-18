@@ -29,49 +29,49 @@
   section: Pieces
   description: Each tetromino has 4 rotation states (0, 90, 180, 270). Rotation cycles through states in order.
   tags: [core, pieces, rotation]
-  status: draft
+  status: implemented
   depends_on: [pieces.tetromino_cells]
 - id: pieces.srs_kicks
   section: Pieces
   description: Rotation uses SRS wall kick data. When a rotation collides, up to 4 alternative positions are tested before the rotation fails.
   tags: [core, pieces, rotation]
-  status: draft
+  status: implemented
   constants: {max_kick_tests: 4}
   depends_on: [pieces.rotation]
 - id: pieces.spawn
   section: Pieces
   description: New pieces spawn at the top-center of the grid in rotation state 0
   tags: [core, pieces]
-  status: draft
+  status: implemented
   depends_on: [pieces.tetromino_cells, grid.dimensions]
 - id: game.state
   section: Game
   description: 'Game has states: Menu, Playing, Paused, GameOver. Transitions: Menu->Playing, Playing->Paused->Playing, Playing->GameOver, GameOver->Menu.'
   tags: [core, game, state]
-  status: draft
+  status: implemented
 - id: game.collision
   section: Game
   description: A piece position is valid if all its cells are within grid bounds and not overlapping occupied cells
   tags: [core, game, collision]
-  status: draft
+  status: implemented
   depends_on: [grid.cell_state, pieces.tetromino_cells]
 - id: game.move_horizontal
   section: Game
   description: Pieces move left or right by one column. Move is rejected if the resulting position is invalid.
   tags: [core, game, movement]
-  status: draft
+  status: implemented
   depends_on: [game.collision]
 - id: game.move_down
   section: Game
   description: Soft drop moves the piece down one row. If the move is invalid, the piece locks in place.
   tags: [core, game, movement]
-  status: draft
+  status: implemented
   depends_on: [game.collision]
 - id: game.hard_drop
   section: Game
   description: Hard drop instantly moves the piece to the lowest valid row and locks it
   tags: [core, game, movement]
-  status: draft
+  status: implemented
   depends_on: [game.collision]
 - id: game.rotate
   section: Game
@@ -83,7 +83,7 @@
   section: Game
   description: A piece locks into the grid when it cannot move down. Its cells become occupied in the grid.
   tags: [core, game]
-  status: draft
+  status: implemented
   depends_on: [game.collision, grid.cell_state]
 - id: game.line_clear
   section: Game
@@ -115,7 +115,7 @@
   section: Game
   description: The next piece to spawn is visible to the player. Uses a 7-bag randomizer so all 7 types appear before any repeats.
   tags: [core, game]
-  status: draft
+  status: implemented
   depends_on: [pieces.tetromino_count]
 - id: game.escalation
   section: Game
