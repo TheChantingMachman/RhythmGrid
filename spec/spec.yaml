@@ -247,7 +247,7 @@
   section: Input
   description: 'Maps keyboard inputs to game actions. Default mapping: Left=MoveLeft, Right=MoveRight, Down=SoftDrop, Up=RotateCW, Z=RotateCCW, Space=HardDrop, P=TogglePause, Escape=BackToMenu, Enter=StartGame. Function map_key(key: KeyCode) -> Option<GameAction> returns the action for a key press. GameAction is an enum: MoveLeft, MoveRight, SoftDrop, HardDrop, RotateCW, RotateCCW, TogglePause, BackToMenu, StartGame.'
   tags: [input, controls]
-  status: draft
+  status: implemented
   depends_on: [game.state]
 - id: game.tick
   section: Game
