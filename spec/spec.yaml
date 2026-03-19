@@ -221,14 +221,14 @@
   section: Render
   description: 'Each tetromino type maps to an RGBA color: I=(0,255,255,255) cyan, O=(255,255,0,255) yellow, T=(128,0,128,255) purple, S=(0,255,0,255) green, Z=(255,0,0,255) red, J=(0,0,255,255) blue, L=(255,165,0,255) orange. Function piece_color(type_index: u32) -> [u8; 4] returns the color.'
   tags: [render, color]
-  status: draft
+  status: implemented
   constants: {I: '0:255:255:255', J: '0:0:255:255', L: '255:165:0:255', O: '255:255:0:255', S: '0:255:0:255', T: '128:0:128:255', Z: '255:0:0:255'}
   depends_on: [pieces.tetromino_count]
 - id: render.board_layout
   section: Render
   description: Board layout defines pixel geometry for rendering. Cell size is 30x30 pixels. Board origin (top-left of cell 0,0) is at pixel (board_x, board_y). Board pixel dimensions are cell_size*WIDTH x cell_size*HEIGHT = 300x600. Function cell_rect(row, col, board_x, board_y, cell_size) -> (px_x, px_y, px_w, px_h) returns the pixel rectangle for a grid cell.
   tags: [render, layout]
-  status: draft
+  status: implemented
   constants: {board_height_px: 600, board_width_px: 300, cell_size: 30}
   depends_on: [grid.dimensions]
 - id: render.cell_quads
