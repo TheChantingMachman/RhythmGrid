@@ -194,9 +194,9 @@ impl GameWorld {
             push_quad(&mut verts, &mut indices, bx, by + row as f32 * cs, bw, 1.0, line, 0.015);
         }
 
-        // Board glow (outer soft edge)
-        let glow = rgba_to_f32([20, 40, 80, 40]);
-        let gw = 6.0;
+        // Board glow (neon edge)
+        let glow = rgba_to_f32([25, 50, 100, 50]);
+        let gw = 8.0;
         push_quad(&mut verts, &mut indices, bx - gw, by - gw, bw + gw * 2.0, gw, glow, 0.018);
         push_quad(&mut verts, &mut indices, bx - gw, by + bh, bw + gw * 2.0, gw, glow, 0.018);
         push_quad(&mut verts, &mut indices, bx - gw, by, gw, bh, glow, 0.018);
@@ -267,7 +267,6 @@ impl GameWorld {
         let pc = preview_cell as f32;
         let preview_cx = hx + panel_w / 2.0;
         let preview_cy = np_y + 58.0;
-        // Smooth iso spin for the preview piece
         let preview_iso_dx = self.preview_angle.cos() * 1.2;
         let preview_iso_dy = -self.preview_angle.sin().abs() * 0.8;
         for &(dr, dc) in &next_cells {

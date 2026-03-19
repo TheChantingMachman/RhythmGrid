@@ -66,8 +66,20 @@ pub fn push_block_cam(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let dx = depth * iso_dx;
     let dy = depth * iso_dy;
 
-    // Front face
-    let front = brighten(color, 1.0);
+    // Neon glow — soft halo behind the block in its own color
+    let glow_spread = 3.0;
+    let glow_color = [color[0], color[1], color[2], color[3] * 0.15];
+    let (gx0, gy0) = px_to_ndc(x - glow_spread, y - glow_spread, ww, wh);
+    let (gx1, gy1) = px_to_ndc(x + s + glow_spread, y + s + glow_spread, ww, wh);
+    let base = verts.len() as u32;
+    verts.push(Vertex { position: [gx0, gy0, z_order - 0.003], color: glow_color });
+    verts.push(Vertex { position: [gx1, gy0, z_order - 0.003], color: glow_color });
+    verts.push(Vertex { position: [gx1, gy1, z_order - 0.003], color: glow_color });
+    verts.push(Vertex { position: [gx0, gy1, z_order - 0.003], color: glow_color });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+
+    // Front face (bright core)
+    let front = brighten(color, 1.1);
     let (x0, y0) = px_to_ndc(x, y, ww, wh);
     let (x1, y1) = px_to_ndc(x + s, y + s, ww, wh);
     let base = verts.len() as u32;
@@ -75,6 +87,18 @@ pub fn push_block_cam(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     verts.push(Vertex { position: [x1, y0, z_order], color: front });
     verts.push(Vertex { position: [x1, y1, z_order], color: front });
     verts.push(Vertex { position: [x0, y1, z_order], color: front });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+
+    // Inner highlight (hot center of neon tube)
+    let highlight = brighten(color, 1.6);
+    let inset = s * 0.2;
+    let (hx0, hy0) = px_to_ndc(x + inset, y + inset, ww, wh);
+    let (hx1, hy1) = px_to_ndc(x + s - inset, y + s - inset, ww, wh);
+    let base = verts.len() as u32;
+    verts.push(Vertex { position: [hx0, hy0, z_order + 0.001], color: highlight });
+    verts.push(Vertex { position: [hx1, hy0, z_order + 0.001], color: highlight });
+    verts.push(Vertex { position: [hx1, hy1, z_order + 0.001], color: highlight });
+    verts.push(Vertex { position: [hx0, hy1, z_order + 0.001], color: highlight });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
     // Top face (brighter)
