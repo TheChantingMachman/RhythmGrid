@@ -6,6 +6,8 @@ pub mod theme;
 pub mod renderer;
 pub mod world;
 pub mod app;
+pub mod audio_output;
+pub mod particles;
 mod font;
 mod drawing;
 mod input_bridge;

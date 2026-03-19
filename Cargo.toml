@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
+cpal = "0.15"
 pollster = "0.4"
 serde = { version = "1.0.228", features = ["derive"] }
 symphonia = { version = "0.5", features = ["mp3", "wav", "flac", "ogg", "vorbis"] }

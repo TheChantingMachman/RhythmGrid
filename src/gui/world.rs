@@ -1,27 +1,37 @@
 // Game world — wraps pipeline's GameSession with GUI-specific state.
 
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use rhythm_grid::audio::DEFAULT_BPM;
 use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
 use rhythm_grid::render::*;
 
+use super::audio_output::{self, AudioState};
 use super::drawing::*;
+use super::particles::ParticleSystem;
 use super::theme::*;
 
 pub struct GameWorld {
     pub session: GameSession,
     pub last_tick: Instant,
     pub camera_angle: f32,
-    preview_angle: f32,     // continuous rotation angle for next piece preview
-    preview_rotation: usize, // current discrete rotation state (0-3)
-    preview_timer: f32,     // seconds accumulated toward next rotation
+    preview_angle: f32,
+    preview_rotation: usize,
+    preview_timer: f32,
+    pub audio: Arc<Mutex<AudioState>>,
+    pub beat_intensity: f32,
+    pub amplitude: f32,
+    pub particles: ParticleSystem,
+    prev_beat: bool, // edge detect for beat spawning
 }
 
 impl GameWorld {
     pub fn new() -> Self {
+        let audio = audio_output::start_audio(DEFAULT_BPM);
         GameWorld {
             session: GameSession::new(),
             last_tick: Instant::now(),
@@ -29,6 +39,11 @@ impl GameWorld {
             preview_angle: 0.0,
             preview_rotation: 0,
             preview_timer: 0.0,
+            audio,
+            beat_intensity: 0.0,
+            amplitude: 0.0,
+            particles: ParticleSystem::new(),
+            prev_beat: false,
         }
     }
 
@@ -63,8 +78,33 @@ impl GameWorld {
         let now = Instant::now();
         let dt = now.duration_since(self.last_tick).as_secs_f64();
 
+        // Pull audio state for rendering
+        let mut got_beat = false;
+        if let Ok(mut audio) = self.audio.try_lock() {
+            audio.tick(dt as f32);
+            self.beat_intensity = audio.beat_intensity;
+            self.amplitude = audio.amplitude;
+            got_beat = audio.beat_intensity > 0.9; // fresh beat
+        }
+
+        // Spawn beat particles (edge-triggered)
+        if got_beat && !self.prev_beat {
+            let t = &THEME;
+            let cs = CELL_SIZE as f32 * t.board_scale;
+            let (px, py) = self.board_parallax();
+            let bx = t.board_margin_left + px;
+            let by = t.board_margin_top + py;
+            let bw = WIDTH as f32 * cs;
+            let bh = HEIGHT as f32 * cs;
+            self.particles.spawn_beat_pulse(bx, by, bw, bh, 1.0);
+        }
+        self.prev_beat = got_beat;
+
+        // Update particles
+        self.particles.update(dt as f32);
+
         // Always advance preview rotation (even when paused)
-        self.preview_angle += dt as f32 * 0.8; // radians/sec for smooth visual
+        self.preview_angle += dt as f32 * 0.8;
         self.preview_timer += dt as f32;
         const ROTATION_INTERVAL: f32 = 1.5; // seconds per 90° step
         if self.preview_timer >= ROTATION_INTERVAL {
@@ -114,6 +154,9 @@ impl GameWorld {
                 }
                 GameAction::HardDrop => {
                     let lines = hard_drop(&mut self.session.grid, &self.session.active_piece);
+                    if lines > 0 {
+                        self.spawn_line_clear_particles(lines);
+                    }
                     self.session.total_lines += lines;
                     let level = level_for_lines(self.session.total_lines);
                     self.session.score += score_for_lines(lines, level);
@@ -144,12 +187,41 @@ impl GameWorld {
     }
 
     fn lock_and_spawn(&mut self) {
-        let s = &mut self.session;
-        let lines = lock_piece(&mut s.grid, &s.active_piece);
-        s.total_lines += lines;
-        let level = level_for_lines(s.total_lines);
-        s.score += score_for_lines(lines, level);
+        let lines = lock_piece(&mut self.session.grid, &self.session.active_piece);
+        if lines > 0 {
+            self.spawn_line_clear_particles(lines);
+        }
+        self.session.total_lines += lines;
+        let level = level_for_lines(self.session.total_lines);
+        self.session.score += score_for_lines(lines, level);
         self.spawn_or_game_over();
+    }
+
+    fn spawn_line_clear_particles(&mut self, lines: u32) {
+        let t = &THEME;
+        let cs = CELL_SIZE as f32 * t.board_scale;
+        let (px, py) = self.board_parallax();
+        let bx = t.board_margin_left + px;
+        let by = t.board_margin_top + py;
+        let bw = WIDTH as f32 * cs;
+        // Find the lowest occupied row to approximate where clears happened
+        let mut lowest_row = HEIGHT - 1;
+        for row in (0..HEIGHT).rev() {
+            if self.session.grid.cells[row].iter().any(|c| *c != CellState::Empty) {
+                lowest_row = row;
+                break;
+            }
+        }
+        let row_y = by + (lowest_row as f32 + 1.0) * cs;
+        let color = match lines {
+            1 => [0.5, 0.8, 1.0, 0.8],
+            2 => [0.4, 1.0, 0.6, 0.9],
+            3 => [1.0, 0.8, 0.2, 0.9],
+            _ => [1.0, 0.3, 0.8, 1.0], // tetris — magenta burst
+        };
+        for _ in 0..lines {
+            self.particles.spawn_line_clear(row_y, bx, bw, color);
+        }
     }
 
     fn spawn_or_game_over(&mut self) {
@@ -179,13 +251,22 @@ impl GameWorld {
 
         let text_col = rgba_to_f32(t.text_color);
         let dim_col = rgba_to_f32(t.dim_color);
+        let beat = self.beat_intensity;
+        let _amp = self.amplitude; // available for future visual reactivity
 
         // Black expanse
         let bg = rgba_to_f32(t.bg);
         push_quad(&mut verts, &mut indices, 0.0, 0.0, t.win_w as f32, t.win_h as f32, bg, 0.0);
 
-        // Grid skeleton — lines only, no filled floor
-        let line = rgba_to_f32(t.grid_line_color);
+        // Grid skeleton — lines pulse with beat
+        let line_base = t.grid_line_color;
+        let line_boost = (beat * 40.0) as u8;
+        let line = rgba_to_f32([
+            line_base[0].saturating_add(line_boost),
+            line_base[1].saturating_add(line_boost),
+            line_base[2].saturating_add(line_boost * 2),
+            line_base[3],
+        ]);
         for col in 0..=WIDTH {
             push_quad(&mut verts, &mut indices, bx + col as f32 * cs, by, 1.0, bh, line, 0.015);
         }
@@ -193,16 +274,29 @@ impl GameWorld {
             push_quad(&mut verts, &mut indices, bx, by + row as f32 * cs, bw, 1.0, line, 0.015);
         }
 
-        // Board glow (neon edge)
-        let glow = rgba_to_f32([25, 50, 100, 50]);
-        let gw = 8.0;
+        // Board glow (neon edge — pulses with beat)
+        let glow_alpha = 50 + (beat * 80.0) as u8;
+        let glow_spread = 8.0 + beat * 6.0;
+        let glow = rgba_to_f32([
+            25 + (beat * 30.0) as u8,
+            50 + (beat * 40.0) as u8,
+            100 + (beat * 50.0) as u8,
+            glow_alpha.min(200),
+        ]);
+        let gw = glow_spread;
         push_quad(&mut verts, &mut indices, bx - gw, by - gw, bw + gw * 2.0, gw, glow, 0.018);
         push_quad(&mut verts, &mut indices, bx - gw, by + bh, bw + gw * 2.0, gw, glow, 0.018);
         push_quad(&mut verts, &mut indices, bx - gw, by, gw, bh, glow, 0.018);
         push_quad(&mut verts, &mut indices, bx + bw, by, gw, bh, glow, 0.018);
 
-        // Board border (crisp)
-        let border = rgba_to_f32(t.grid_border_color);
+        // Board border (crisp — brightens with beat)
+        let bc = t.grid_border_color;
+        let border = rgba_to_f32([
+            bc[0].saturating_add((beat * 40.0) as u8),
+            bc[1].saturating_add((beat * 50.0) as u8),
+            bc[2].saturating_add((beat * 60.0) as u8),
+            bc[3],
+        ]);
         let bb = 1.0;
         push_quad(&mut verts, &mut indices, bx - bb, by - bb, bw + bb * 2.0, bb, border, 0.02);
         push_quad(&mut verts, &mut indices, bx - bb, by + bh, bw + bb * 2.0, bb, border, 0.02);
@@ -249,6 +343,9 @@ impl GameWorld {
                 }
             }
         }
+
+        // --- Particles ---
+        self.particles.render(&mut verts, &mut indices);
 
         // --- HUD Panels ---
         let hx = bx + bw + 24.0;
