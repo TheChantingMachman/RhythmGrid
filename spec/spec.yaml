@@ -214,7 +214,7 @@
   section: Config
   description: Music folder path is a persisted setting. If set, it is scanned on startup.
   tags: [core, config, music]
-  status: draft
+  status: implemented
   depends_on: [config.load_save, music.scan_folder]
   modifies: [Settings]
 - id: render.piece_colors
