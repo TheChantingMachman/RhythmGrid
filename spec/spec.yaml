@@ -94,14 +94,14 @@
   section: Game
   description: Level starts at 1 and increases every 10 lines cleared. Level determines gravity speed.
   tags: [core, game, progression]
-  status: draft
+  status: implemented
   constants: {lines_per_level: 10, starting_level: 1}
   depends_on: [game.line_clear]
 - id: game.score
   section: Game
   description: 'Score awards points for line clears: 1 line=100, 2=300, 3=500, 4=800, multiplied by current level.'
   tags: [core, game, scoring]
-  status: draft
+  status: implemented
   constants: {double: 300, single: 100, tetris: 800, triple: 500}
   depends_on: [game.line_clear, game.level]
 - id: game.gravity
