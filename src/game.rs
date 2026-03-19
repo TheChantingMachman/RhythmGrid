@@ -201,6 +201,35 @@ pub fn escalation_stage(grid: &Grid) -> EscalationStage {
     EscalationStage::Normal
 }
 
+// --- Gravity ---
+
+pub fn gravity_interval_ms(level: u32) -> u64 {
+    let level = level.max(1);
+    let interval = 1000u64.saturating_sub((level as u64 - 1) * 100);
+    interval.max(100)
+}
+
+pub fn gravity_tick(
+    grid: &Grid,
+    piece: &mut ActivePiece,
+    accumulated_ms: u64,
+    level: u32,
+) -> (bool, u64) {
+    let interval = gravity_interval_ms(level);
+    if accumulated_ms >= interval && move_down(grid, piece) {
+        (true, 0)
+    } else {
+        (false, accumulated_ms)
+    }
+}
+
+// --- Game Over Detection ---
+
+pub fn is_game_over(grid: &Grid, piece: &ActivePiece) -> bool {
+    let cells = piece_cells(piece.piece_type, piece.rotation);
+    !is_valid_position(grid, &cells, piece.row, piece.col)
+}
+
 // --- 7-Bag Piece Randomizer ---
 
 pub struct PieceBag {

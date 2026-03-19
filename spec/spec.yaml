@@ -108,7 +108,7 @@
   section: Game
   description: Pieces fall automatically at a timed interval. Interval decreases as level increases.
   tags: [core, game, timing]
-  status: draft
+  status: implemented
   depends_on: [game.move_down, game.level]
 - id: game.next_piece
   section: Game
@@ -125,7 +125,7 @@
   section: Game
   description: Game ends when a newly spawned piece immediately collides with occupied cells.
   tags: [core, game, state]
-  status: draft
+  status: implemented
   depends_on: [game.collision]
 - id: audio.decode
   section: Audio
@@ -180,13 +180,13 @@
   section: Music
   description: Shuffle mode randomizes the play order of scanned files. Toggle on/off.
   tags: [core, music, playback]
-  status: draft
+  status: implemented
   depends_on: [music.scan_folder]
 - id: music.auto_advance
   section: Music
   description: When a track finishes, the next track in the list starts automatically with no gap.
   tags: [core, music, playback]
-  status: draft
+  status: implemented
   depends_on: [music.scan_folder]
 - id: music.now_playing
   section: Music
@@ -197,7 +197,7 @@
   section: Music
   description: Skip to the next track in the list. Wraps to the beginning if at the end.
   tags: [core, music, playback]
-  status: draft
+  status: implemented
   depends_on: [music.scan_folder]
 - id: config.xdg_paths
   section: Config
