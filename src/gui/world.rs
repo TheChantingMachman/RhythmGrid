@@ -347,9 +347,13 @@ impl GameWorld {
             for col in 0..WIDTH {
                 if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
                     let color = rgba_to_f32(piece_color(ti));
-                    let row_z = 0.04 - (row as f32 * 0.001); // higher rows draw in front
+                    // Z-order: top rows in front of bottom rows (iso extrudes upward),
+                    // right columns in front when camera is right (iso extrudes rightward),
+                    // flip column order when camera flips
+                    let col_factor = if iso_dx >= 0.0 { col as f32 } else { (WIDTH - 1 - col) as f32 };
+                    let block_z = 0.04 - (row as f32 * 0.001) + (col_factor * 0.0001);
                     push_block_ex(&mut verts, &mut indices,
-                        bx + col as f32 * cs, by + row as f32 * cs, cs, color, depth, row_z, iso_dx, iso_dy, amp * 2.0);
+                        bx + col as f32 * cs, by + row as f32 * cs, cs, color, depth, block_z, iso_dx, iso_dy, amp * 2.0);
                 }
             }
         }
@@ -378,7 +382,8 @@ impl GameWorld {
                 let r = self.session.active_piece.row + dr;
                 let c = self.session.active_piece.col + dc;
                 if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                    let row_z = 0.05 - (r as f32 * 0.001);
+                    let col_f = if iso_dx >= 0.0 { c as f32 } else { (WIDTH as i32 - 1 - c) as f32 };
+                    let row_z = 0.05 - (r as f32 * 0.001) + (col_f * 0.0001);
                     push_block_ex(&mut verts, &mut indices,
                         bx + c as f32 * cs, by + r as f32 * cs, cs, color, depth, row_z, iso_dx, iso_dy, amp * 2.0);
                 }

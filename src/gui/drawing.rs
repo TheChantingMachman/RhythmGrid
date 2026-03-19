@@ -74,22 +74,29 @@ pub fn push_block_ex(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let dx = depth * iso_dx;
     let dy = depth * iso_dy;
 
-    // --- Outer glow (neon halo, amplified by glow_boost) ---
-    let glow_alpha = (0.12 + glow_boost * 0.2).min(0.5);
-    let glow_spread = 4.0 + glow_boost * 4.0;
-    let glow_color = [color[0], color[1], color[2], color[3] * glow_alpha];
-    let glow_edge = [color[0] * 0.5, color[1] * 0.5, color[2] * 0.5, 0.0]; // fades to transparent
-    let (gx0, gy0) = px_to_ndc(x - glow_spread, y - glow_spread, ww, wh);
-    let (gx1, gy1) = px_to_ndc(x + s + glow_spread, y + s + glow_spread, ww, wh);
-    let (gmx, gmy) = px_to_ndc(x + s * 0.5, y + s * 0.5, ww, wh);
-    // Glow as 4 triangles from center to corners (radial fade)
-    let base = verts.len() as u32;
-    verts.push(Vertex { position: [gmx, gmy, z_order - 0.003], color: glow_color }); // center
-    verts.push(Vertex { position: [gx0, gy0, z_order - 0.003], color: glow_edge });
-    verts.push(Vertex { position: [gx1, gy0, z_order - 0.003], color: glow_edge });
-    verts.push(Vertex { position: [gx1, gy1, z_order - 0.003], color: glow_edge });
-    verts.push(Vertex { position: [gx0, gy1, z_order - 0.003], color: glow_edge });
-    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3, base, base+3, base+4, base, base+4, base+1]);
+    // --- Multi-layer bloom glow (fake bloom via stacked radial fades) ---
+    let layers: [(f32, f32); 3] = [
+        (12.0 + glow_boost * 8.0, 0.04 + glow_boost * 0.03),  // outer soft
+        (7.0 + glow_boost * 5.0,  0.07 + glow_boost * 0.06),  // mid
+        (4.0 + glow_boost * 3.0,  0.12 + glow_boost * 0.10),  // inner bright
+    ];
+    let cx = x + s * 0.5;
+    let cy = y + s * 0.5;
+    for (spread, alpha) in &layers {
+        let a = alpha.min(0.5);
+        let gc = [color[0], color[1], color[2], color[3] * a];
+        let ge = [color[0] * 0.3, color[1] * 0.3, color[2] * 0.3, 0.0];
+        let (gx0, gy0) = px_to_ndc(x - spread, y - spread, ww, wh);
+        let (gx1, gy1) = px_to_ndc(x + s + spread, y + s + spread, ww, wh);
+        let (gmx, gmy) = px_to_ndc(cx, cy, ww, wh);
+        let base = verts.len() as u32;
+        verts.push(Vertex { position: [gmx, gmy, z_order - 0.004], color: gc });
+        verts.push(Vertex { position: [gx0, gy0, z_order - 0.004], color: ge });
+        verts.push(Vertex { position: [gx1, gy0, z_order - 0.004], color: ge });
+        verts.push(Vertex { position: [gx1, gy1, z_order - 0.004], color: ge });
+        verts.push(Vertex { position: [gx0, gy1, z_order - 0.004], color: ge });
+        indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3, base, base+3, base+4, base, base+4, base+1]);
+    }
 
     // --- Front face with per-vertex gradient (beveled look) ---
     let edge_dark = darken(color, 0.5);
