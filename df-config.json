@@ -15,6 +15,6 @@
     "test_pattern": "tests/**/*.rs",
     "planner_hint": "",
     "test_hint": "Crate name is rhythm-grid. Cargo converts hyphens to underscores, so use 'use rhythm_grid::' in all test imports.",
-    "coding_hint": "Rust 2024 edition: std::env::set_var and remove_var are unsafe. Wrap in unsafe blocks. Do not use crates that are not already in Cargo.toml — check dependencies before importing.",
+    "coding_hint": "Rust 2024 edition: std::env::set_var and remove_var are unsafe. Wrap in unsafe blocks. Do not use crates that are not already in Cargo.toml — check dependencies before importing. Tuples are accessed with .0, .1, etc — not bracket indexing. type Quad = (i32, i32, i32, i32, [u8; 4]) means the color is q.4, not q[4].",
     "chunk_size": 4
 }
