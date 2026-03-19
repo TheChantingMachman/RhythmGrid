@@ -156,9 +156,17 @@ impl GameWorld {
                     self.session.gravity_accumulator_ms = 0;
                 }
                 GameAction::HardDrop => {
+                    // Find landing row (lowest cell) before hard_drop
+                    let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
+                    let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
+                    let mut land_row = self.session.active_piece.row;
+                    while is_valid_position(&self.session.grid, &cells, land_row + 1, self.session.active_piece.col) {
+                        land_row += 1;
+                    }
+                    let land_bottom = land_row + max_dr;
                     let lines = hard_drop(&mut self.session.grid, &self.session.active_piece);
                     if lines > 0 {
-                        self.spawn_line_clear_particles(lines);
+                        self.spawn_line_clear_particles(lines, land_bottom);
                     }
                     self.session.total_lines += lines;
                     let level = level_for_lines(self.session.total_lines);
@@ -190,9 +198,13 @@ impl GameWorld {
     }
 
     fn lock_and_spawn(&mut self) {
+        // Find the lowest cell of the piece (where clears happen)
+        let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
+        let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
+        let piece_row = self.session.active_piece.row + max_dr;
         let lines = lock_piece(&mut self.session.grid, &self.session.active_piece);
         if lines > 0 {
-            self.spawn_line_clear_particles(lines);
+            self.spawn_line_clear_particles(lines, piece_row);
         }
         self.session.total_lines += lines;
         let level = level_for_lines(self.session.total_lines);
@@ -200,22 +212,17 @@ impl GameWorld {
         self.spawn_or_game_over();
     }
 
-    fn spawn_line_clear_particles(&mut self, lines: u32) {
+    fn spawn_line_clear_particles(&mut self, lines: u32, piece_row: i32) {
         let t = &THEME;
         let cs = CELL_SIZE as f32 * t.board_scale;
         let (px, py) = self.board_parallax();
         let bx = t.board_margin_left + px;
         let by = t.board_margin_top + py;
         let bw = WIDTH as f32 * cs;
-        // Find the lowest occupied row to approximate where clears happened
-        let mut lowest_row = HEIGHT - 1;
-        for row in (0..HEIGHT).rev() {
-            if self.session.grid.cells[row].iter().any(|c| *c != CellState::Empty) {
-                lowest_row = row;
-                break;
-            }
-        }
-        let row_y = by + (lowest_row as f32 + 1.0) * cs;
+        // piece_row is the bottom of the piece; clears happen upward from there
+        let bottom_y = by + (piece_row.max(0) as f32 + 1.0) * cs;
+        let clear_height = lines as f32 * cs;
+        let top_y = bottom_y - clear_height;
         let color = match lines {
             1 => [0.5, 0.8, 1.0, 0.8],
             2 => [0.4, 1.0, 0.6, 0.9],
@@ -223,7 +230,7 @@ impl GameWorld {
             _ => [1.0, 0.3, 0.8, 1.0], // tetris — magenta burst
         };
         for _ in 0..lines {
-            self.particles.spawn_line_clear(row_y, bx, bw, color);
+            self.particles.spawn_line_clear(top_y, clear_height, bx, bw, color);
         }
     }
 
@@ -255,11 +262,40 @@ impl GameWorld {
         let text_col = rgba_to_f32(t.text_color);
         let dim_col = rgba_to_f32(t.dim_color);
         let beat = self.beat_intensity;
-        let _amp = self.amplitude; // available for future visual reactivity
+        let amp = self.amplitude;
 
         // Black expanse
         let bg = rgba_to_f32(t.bg);
         push_quad(&mut verts, &mut indices, 0.0, 0.0, t.win_w as f32, t.win_h as f32, bg, 0.0);
+
+        // Ambient radial field behind board — pulses with amplitude
+        let field_intensity = (amp * 1.5 + beat * 0.5).min(1.0);
+        if field_intensity > 0.01 {
+            let cx = bx + bw * 0.5;
+            let cy = by + bh * 0.5;
+            let radius = bh * 0.7;
+            let field_color = [0.05 * field_intensity, 0.08 * field_intensity, 0.2 * field_intensity, 0.4 * field_intensity];
+            let field_edge = [0.0, 0.0, 0.02 * field_intensity, 0.0];
+            // Radial glow as 8 triangles from center
+            let segments = 8;
+            let base = verts.len() as u32;
+            verts.push(Vertex { position: [
+                (cx / t.win_w as f32) * 2.0 - 1.0,
+                1.0 - (cy / t.win_h as f32) * 2.0,
+                0.005
+            ], color: field_color });
+            for i in 0..segments {
+                let angle = (i as f32 / segments as f32) * std::f32::consts::TAU;
+                let ex = cx + angle.cos() * radius;
+                let ey = cy + angle.sin() * radius;
+                let (nx, ny) = px_to_ndc(ex, ey, t.win_w as f32, t.win_h as f32);
+                verts.push(Vertex { position: [nx, ny, 0.005], color: field_edge });
+            }
+            for i in 0..segments {
+                let next = (i + 1) % segments;
+                indices.extend_from_slice(&[base, base + 1 + i as u32, base + 1 + next as u32]);
+            }
+        }
 
         // Grid skeleton — lines pulse with beat
         let line_base = t.grid_line_color;
@@ -311,8 +347,9 @@ impl GameWorld {
             for col in 0..WIDTH {
                 if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
                     let color = rgba_to_f32(piece_color(ti));
-                    push_block_cam(&mut verts, &mut indices,
-                        bx + col as f32 * cs, by + row as f32 * cs, cs, color, depth, 0.04, iso_dx, iso_dy);
+                    let row_z = 0.04 - (row as f32 * 0.001); // higher rows draw in front
+                    push_block_ex(&mut verts, &mut indices,
+                        bx + col as f32 * cs, by + row as f32 * cs, cs, color, depth, row_z, iso_dx, iso_dy, amp * 2.0);
                 }
             }
         }
@@ -341,8 +378,9 @@ impl GameWorld {
                 let r = self.session.active_piece.row + dr;
                 let c = self.session.active_piece.col + dc;
                 if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                    push_block_cam(&mut verts, &mut indices,
-                        bx + c as f32 * cs, by + r as f32 * cs, cs, color, depth, 0.05, iso_dx, iso_dy);
+                    let row_z = 0.05 - (r as f32 * 0.001);
+                    push_block_ex(&mut verts, &mut indices,
+                        bx + c as f32 * cs, by + r as f32 * cs, cs, color, depth, row_z, iso_dx, iso_dy, amp * 2.0);
                 }
             }
         }

@@ -34,7 +34,7 @@ pub fn brighten(c: [f32; 4], factor: f32) -> [f32; 4] {
     [(c[0] * factor).min(1.0), (c[1] * factor).min(1.0), (c[2] * factor).min(1.0), c[3]]
 }
 
-fn px_to_ndc(px_x: f32, px_y: f32, win_w: f32, win_h: f32) -> (f32, f32) {
+pub fn px_to_ndc(px_x: f32, px_y: f32, win_w: f32, win_h: f32) -> (f32, f32) {
     let nx = (px_x / win_w) * 2.0 - 1.0;
     let ny = 1.0 - (px_y / win_h) * 2.0;
     (nx, ny)
@@ -54,9 +54,17 @@ pub fn push_quad(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
+/// High-fidelity block with gradient faces, edge bevel, and specular highlight.
+/// `glow_boost` (0.0-1.0+) amplifies the outer glow (for amplitude reactivity).
 pub fn push_block_cam(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                       px_x: f32, px_y: f32, size: f32, color: [f32; 4], depth: f32, z_order: f32,
                       iso_dx: f32, iso_dy: f32) {
+    push_block_ex(verts, indices, px_x, px_y, size, color, depth, z_order, iso_dx, iso_dy, 0.0);
+}
+
+pub fn push_block_ex(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+                     px_x: f32, px_y: f32, size: f32, color: [f32; 4], depth: f32, z_order: f32,
+                     iso_dx: f32, iso_dy: f32, glow_boost: f32) {
     let ww = THEME.win_w as f32;
     let wh = THEME.win_h as f32;
     let gap = 1.0;
@@ -66,70 +74,119 @@ pub fn push_block_cam(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let dx = depth * iso_dx;
     let dy = depth * iso_dy;
 
-    // Neon glow — soft halo behind the block in its own color
-    let glow_spread = 3.0;
-    let glow_color = [color[0], color[1], color[2], color[3] * 0.15];
+    // --- Outer glow (neon halo, amplified by glow_boost) ---
+    let glow_alpha = (0.12 + glow_boost * 0.2).min(0.5);
+    let glow_spread = 4.0 + glow_boost * 4.0;
+    let glow_color = [color[0], color[1], color[2], color[3] * glow_alpha];
+    let glow_edge = [color[0] * 0.5, color[1] * 0.5, color[2] * 0.5, 0.0]; // fades to transparent
     let (gx0, gy0) = px_to_ndc(x - glow_spread, y - glow_spread, ww, wh);
     let (gx1, gy1) = px_to_ndc(x + s + glow_spread, y + s + glow_spread, ww, wh);
+    let (gmx, gmy) = px_to_ndc(x + s * 0.5, y + s * 0.5, ww, wh);
+    // Glow as 4 triangles from center to corners (radial fade)
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [gx0, gy0, z_order - 0.003], color: glow_color });
-    verts.push(Vertex { position: [gx1, gy0, z_order - 0.003], color: glow_color });
-    verts.push(Vertex { position: [gx1, gy1, z_order - 0.003], color: glow_color });
-    verts.push(Vertex { position: [gx0, gy1, z_order - 0.003], color: glow_color });
-    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+    verts.push(Vertex { position: [gmx, gmy, z_order - 0.003], color: glow_color }); // center
+    verts.push(Vertex { position: [gx0, gy0, z_order - 0.003], color: glow_edge });
+    verts.push(Vertex { position: [gx1, gy0, z_order - 0.003], color: glow_edge });
+    verts.push(Vertex { position: [gx1, gy1, z_order - 0.003], color: glow_edge });
+    verts.push(Vertex { position: [gx0, gy1, z_order - 0.003], color: glow_edge });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3, base, base+3, base+4, base, base+4, base+1]);
 
-    // Front face (bright core)
-    let front = brighten(color, 1.1);
+    // --- Front face with per-vertex gradient (beveled look) ---
+    let edge_dark = darken(color, 0.5);
+    let face_bright = brighten(color, 1.15);
+    let bevel = s * 0.12; // bevel inset
+
     let (x0, y0) = px_to_ndc(x, y, ww, wh);
     let (x1, y1) = px_to_ndc(x + s, y + s, ww, wh);
+    let (ix0, iy0) = px_to_ndc(x + bevel, y + bevel, ww, wh);
+    let (ix1, iy1) = px_to_ndc(x + s - bevel, y + s - bevel, ww, wh);
+
+    // Outer edge ring (4 quads forming bevel)
+    // Top bevel
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [x0, y0, z_order], color: front });
-    verts.push(Vertex { position: [x1, y0, z_order], color: front });
-    verts.push(Vertex { position: [x1, y1, z_order], color: front });
-    verts.push(Vertex { position: [x0, y1, z_order], color: front });
+    let top_edge = brighten(color, 0.9);
+    verts.push(Vertex { position: [x0, y0, z_order], color: edge_dark });
+    verts.push(Vertex { position: [x1, y0, z_order], color: edge_dark });
+    verts.push(Vertex { position: [ix1, iy0, z_order], color: top_edge });
+    verts.push(Vertex { position: [ix0, iy0, z_order], color: top_edge });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
-    // Inner highlight (hot center of neon tube)
-    let highlight = brighten(color, 1.6);
-    let inset = s * 0.2;
-    let (hx0, hy0) = px_to_ndc(x + inset, y + inset, ww, wh);
-    let (hx1, hy1) = px_to_ndc(x + s - inset, y + s - inset, ww, wh);
+    // Bottom bevel
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [hx0, hy0, z_order + 0.001], color: highlight });
-    verts.push(Vertex { position: [hx1, hy0, z_order + 0.001], color: highlight });
-    verts.push(Vertex { position: [hx1, hy1, z_order + 0.001], color: highlight });
-    verts.push(Vertex { position: [hx0, hy1, z_order + 0.001], color: highlight });
+    verts.push(Vertex { position: [ix0, iy1, z_order], color: darken(color, 0.7) });
+    verts.push(Vertex { position: [ix1, iy1, z_order], color: darken(color, 0.7) });
+    verts.push(Vertex { position: [x1, y1, z_order], color: edge_dark });
+    verts.push(Vertex { position: [x0, y1, z_order], color: edge_dark });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
-    // Top face (brighter)
-    let top = brighten(color, 1.15);
+    // Left bevel
+    let base = verts.len() as u32;
+    verts.push(Vertex { position: [x0, y0, z_order], color: edge_dark });
+    verts.push(Vertex { position: [ix0, iy0, z_order], color: darken(color, 0.8) });
+    verts.push(Vertex { position: [ix0, iy1, z_order], color: darken(color, 0.7) });
+    verts.push(Vertex { position: [x0, y1, z_order], color: edge_dark });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+
+    // Right bevel
+    let base = verts.len() as u32;
+    verts.push(Vertex { position: [ix1, iy0, z_order], color: brighten(color, 0.85) });
+    verts.push(Vertex { position: [x1, y0, z_order], color: edge_dark });
+    verts.push(Vertex { position: [x1, y1, z_order], color: edge_dark });
+    verts.push(Vertex { position: [ix1, iy1, z_order], color: darken(color, 0.65) });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+
+    // Inner face (gradient: bright top-left to darker bottom-right)
+    let base = verts.len() as u32;
+    let tl = brighten(face_bright, 1.1);  // top-left: brightest (specular)
+    let tr = face_bright;
+    let br = darken(color, 0.8);           // bottom-right: darkest
+    let bl = darken(color, 0.9);
+    verts.push(Vertex { position: [ix0, iy0, z_order + 0.001], color: tl });
+    verts.push(Vertex { position: [ix1, iy0, z_order + 0.001], color: tr });
+    verts.push(Vertex { position: [ix1, iy1, z_order + 0.001], color: br });
+    verts.push(Vertex { position: [ix0, iy1, z_order + 0.001], color: bl });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+
+    // Specular highlight dot (upper-left of inner face)
+    let spec_size = s * 0.15;
+    let spec_color = [1.0f32.min(color[0] + 0.5), 1.0f32.min(color[1] + 0.5), 1.0f32.min(color[2] + 0.5), color[3] * 0.6];
+    let spec_edge = [spec_color[0], spec_color[1], spec_color[2], 0.0];
+    let (sx0, sy0) = px_to_ndc(x + bevel + spec_size * 0.5, y + bevel + spec_size * 0.5, ww, wh);
+    let (sx1, sy1) = px_to_ndc(x + bevel + spec_size * 2.5, y + bevel + spec_size * 2.5, ww, wh);
+    let (smx, smy) = px_to_ndc(x + bevel + spec_size, y + bevel + spec_size, ww, wh);
+    let base = verts.len() as u32;
+    verts.push(Vertex { position: [smx, smy, z_order + 0.002], color: spec_color });
+    verts.push(Vertex { position: [sx0, sy0, z_order + 0.002], color: spec_edge });
+    verts.push(Vertex { position: [sx1, sy0, z_order + 0.002], color: spec_edge });
+    verts.push(Vertex { position: [sx1, sy1, z_order + 0.002], color: spec_edge });
+    verts.push(Vertex { position: [sx0, sy1, z_order + 0.002], color: spec_edge });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3, base, base+3, base+4, base, base+4, base+1]);
+
+    // --- Top face (iso extrusion, gradient light→dark) ---
+    let top_lit = brighten(color, 1.2);
+    let top_dark = brighten(color, 0.7);
     let (tx0, ty0) = px_to_ndc(x + dx, y + dy, ww, wh);
     let (tx1, ty1) = px_to_ndc(x + s + dx, y + dy, ww, wh);
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [tx0, ty0, z_order - 0.001], color: top });
-    verts.push(Vertex { position: [tx1, ty1, z_order - 0.001], color: top });
-    verts.push(Vertex { position: [x1, y0, z_order - 0.001], color: top });
-    verts.push(Vertex { position: [x0, y0, z_order - 0.001], color: top });
+    verts.push(Vertex { position: [tx0, ty0, z_order - 0.001], color: top_lit });
+    verts.push(Vertex { position: [tx1, ty1, z_order - 0.001], color: top_lit });
+    verts.push(Vertex { position: [x1, y0, z_order - 0.001], color: top_dark });
+    verts.push(Vertex { position: [x0, y0, z_order - 0.001], color: top_dark });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
-    // Side face (darker) — adapts to camera direction
-    let side = darken(color, 0.6);
-    let (sx, sy) = if iso_dx >= 0.0 {
-        // Camera from right → show right side
-        (x + s, y)
-    } else {
-        // Camera from left → show left side
-        (x, y)
-    };
-    let (rx0, ry0) = px_to_ndc(sx, sy, ww, wh);
-    let (rx1, ry1) = px_to_ndc(sx + dx, sy + dy, ww, wh);
-    let (rx2, ry2) = px_to_ndc(sx + dx, sy + s + dy, ww, wh);
-    let (rx3, ry3) = px_to_ndc(sx, sy + s, ww, wh);
+    // --- Side face (darker, gradient) ---
+    let side_lit = darken(color, 0.55);
+    let side_dark = darken(color, 0.35);
+    let (side_x, side_y) = if iso_dx >= 0.0 { (x + s, y) } else { (x, y) };
+    let (rx0, ry0) = px_to_ndc(side_x, side_y, ww, wh);
+    let (rx1, ry1) = px_to_ndc(side_x + dx, side_y + dy, ww, wh);
+    let (rx2, ry2) = px_to_ndc(side_x + dx, side_y + s + dy, ww, wh);
+    let (rx3, ry3) = px_to_ndc(side_x, side_y + s, ww, wh);
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [rx0, ry0, z_order - 0.001], color: side });
-    verts.push(Vertex { position: [rx1, ry1, z_order - 0.001], color: side });
-    verts.push(Vertex { position: [rx2, ry2, z_order - 0.001], color: side });
-    verts.push(Vertex { position: [rx3, ry3, z_order - 0.001], color: side });
+    verts.push(Vertex { position: [rx0, ry0, z_order - 0.001], color: side_lit });
+    verts.push(Vertex { position: [rx1, ry1, z_order - 0.001], color: side_dark });
+    verts.push(Vertex { position: [rx2, ry2, z_order - 0.001], color: side_dark });
+    verts.push(Vertex { position: [rx3, ry3, z_order - 0.001], color: side_lit });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
