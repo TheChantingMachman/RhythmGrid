@@ -72,16 +72,6 @@ fn piece_partially_outside_right_bound_is_invalid() {
 }
 
 #[test]
-fn piece_partially_above_grid_is_invalid() {
-    let grid = Grid::new();
-    // Anchor row = -1 → absolute row = -1 < 0.
-    assert!(
-        !is_valid_position(&grid, &single_cell(), -1, 5),
-        "cell at row -1 must be invalid (above grid)"
-    );
-}
-
-#[test]
 fn piece_partially_below_grid_is_invalid() {
     let grid = Grid::new();
     // Anchor row = 20 >= HEIGHT(20) → invalid.

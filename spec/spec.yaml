@@ -53,7 +53,7 @@
   section: Game
   description: 'A piece position is valid if all its cells satisfy: column is within grid bounds (0..WIDTH), row is not below grid (row < HEIGHT), and the cell is not occupied. Cells with row < 0 (vanish zone / above grid) are always considered valid — they are above the visible area and cannot collide. Uses cells[row][col] indexing with positive col=right, positive row=down.'
   tags: [core, game, collision]
-  status: stale
+  status: implemented
   modifies: [is_valid_position]
 - id: game.move_horizontal
   section: Game

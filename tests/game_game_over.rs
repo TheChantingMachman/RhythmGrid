@@ -86,13 +86,14 @@ fn is_game_over_true_when_all_spawn_cells_blocked() {
 // ── Game over (invalid position: out-of-bounds) ───────────────────────────────
 
 #[test]
-fn is_game_over_true_when_piece_row_is_negative() {
+fn is_game_over_false_when_piece_entirely_in_vanish_zone() {
     let grid = Grid::new();
-    // T rot-0 at row=-1: top cell (-1+(-1),0+5) = (-2,5) — out of bounds
+    // T rot-0 at row=-1, col=5: cells (-1+(-1),5+0)=(-2,5), (-1+0,5+(-1))=(-1,4), (-1+0,5+0)=(-1,5), (-1+0,5+1)=(-1,6)
+    // All absolute rows < 0 → all in vanish zone → all unconditionally valid → is_game_over returns false
     let piece = ActivePiece { piece_type: TetrominoType::T, rotation: 0, row: -1, col: 5 };
     assert!(
-        is_game_over(&grid, &piece),
-        "piece with cells above row 0 must be game over"
+        !is_game_over(&grid, &piece),
+        "piece entirely in the vanish zone (all rows < 0) must not be game over"
     );
 }
 
