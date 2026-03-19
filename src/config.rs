@@ -5,11 +5,13 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     pub volume: f32,
     pub speed: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub music_folder: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { volume: 0.8, speed: 1.0 }
+        Settings { volume: 0.8, speed: 1.0, music_folder: None }
     }
 }
 
