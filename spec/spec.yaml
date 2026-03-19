@@ -216,3 +216,42 @@
   tags: [core, config, music]
   status: draft
   depends_on: [config.load_save, music.scan_folder]
+  modifies: [Settings]
+- id: render.piece_colors
+  section: Render
+  description: 'Each tetromino type maps to an RGBA color: I=(0,255,255,255) cyan, O=(255,255,0,255) yellow, T=(128,0,128,255) purple, S=(0,255,0,255) green, Z=(255,0,0,255) red, J=(0,0,255,255) blue, L=(255,165,0,255) orange. Function piece_color(type_index: u32) -> [u8; 4] returns the color.'
+  tags: [render, color]
+  status: draft
+  constants: {I: '0:255:255:255', J: '0:0:255:255', L: '255:165:0:255', O: '255:255:0:255', S: '0:255:0:255', T: '128:0:128:255', Z: '255:0:0:255'}
+  depends_on: [pieces.tetromino_count]
+- id: render.board_layout
+  section: Render
+  description: Board layout defines pixel geometry for rendering. Cell size is 30x30 pixels. Board origin (top-left of cell 0,0) is at pixel (board_x, board_y). Board pixel dimensions are cell_size*WIDTH x cell_size*HEIGHT = 300x600. Function cell_rect(row, col, board_x, board_y, cell_size) -> (px_x, px_y, px_w, px_h) returns the pixel rectangle for a grid cell.
+  tags: [render, layout]
+  status: draft
+  constants: {board_height_px: 600, board_width_px: 300, cell_size: 30}
+  depends_on: [grid.dimensions]
+- id: render.cell_quads
+  section: Render
+  description: 'Converts game state to a list of drawable quads. Each quad is (px_x, px_y, px_w, px_h, rgba). Function board_quads(grid, active_piece, board_x, board_y, cell_size) returns: one quad per occupied grid cell colored by its type_index, plus one quad per active piece cell colored by its type. Empty cells are not included. Ghost piece (hard drop preview) included as same color with alpha=80.'
+  tags: [render, draw]
+  status: draft
+  depends_on: [render.board_layout, render.piece_colors, game.collision]
+- id: render.next_piece_preview
+  section: Render
+  description: Renders a preview of the next piece from the bag. Function next_piece_quads(piece_type, preview_x, preview_y, cell_size) returns quads for the 4 cells of the piece in spawn rotation (rotation=0), positioned relative to (preview_x, preview_y). Uses piece_color for coloring.
+  tags: [render, draw, ui]
+  status: draft
+  depends_on: [render.piece_colors, game.next_piece]
+- id: input.key_map
+  section: Input
+  description: 'Maps keyboard inputs to game actions. Default mapping: Left=MoveLeft, Right=MoveRight, Down=SoftDrop, Up=RotateCW, Z=RotateCCW, Space=HardDrop, P=TogglePause, Escape=BackToMenu, Enter=StartGame. Function map_key(key: KeyCode) -> Option<GameAction> returns the action for a key press. GameAction is an enum: MoveLeft, MoveRight, SoftDrop, HardDrop, RotateCW, RotateCCW, TogglePause, BackToMenu, StartGame.'
+  tags: [input, controls]
+  status: draft
+  depends_on: [game.state]
+- id: game.tick
+  section: Game
+  description: 'Orchestrates one game frame. tick(state, dt_secs) advances the gravity timer by dt_secs. When accumulated time exceeds gravity interval, applies move_down. If move_down fails (piece locks), clears lines, updates score/level, spawns next piece. If spawn fails, transitions to GameOver. Returns a TickResult indicating what happened: Nothing, PieceMoved, PieceLocked{lines_cleared}, GameOver. Only runs when GameState is Playing.'
+  tags: [core, game, timing]
+  status: draft
+  depends_on: [game.gravity, game.move_down, game.lock, game.line_clear, game.next_piece, game.game_over, game.score, game.level]

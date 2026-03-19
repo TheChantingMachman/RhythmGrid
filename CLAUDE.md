@@ -2,14 +2,28 @@
 
 Audio-reactive puzzle game that turns your music library into a dynamic visual experience.
 
-## Dark Factory Pipeline
+## Roles
 
-The pipeline is test-first agentic:
+### Dark Factory Pipeline (autonomous agent)
+Test-first agentic builder:
 1. We write specs (via SpecDB CLI or editing `spec/spec.yaml` directly)
 2. Pipeline agent builds tests from specs
 3. Pipeline agent builds source to pass those tests
 
-**Do not hand-write tests or source for pipeline-owned domains.** We manage the spec only. See `docs/DomainPlan.md` for what the pipeline owns vs. what we co-author.
+**Do not hand-write tests or source for pipeline-owned domains.** The pipeline owns all headless/logic domains: grid, pieces, game logic, audio engine, music management, config/infrastructure. It can also own **testable GUI logic** — coordinate mapping, input→action mapping, render state derivation, color schemes, layout math, animation state machines — anything where behavior can be verified without a real screen.
+
+### Us (Claude + human, co-authored)
+We own:
+- **Spec authorship** — writing and managing `spec/spec.yaml`
+- **GUI scaffolding** — windowing, render pipeline setup, game loop (wgpu/winit/cpal wiring)
+- **Render glue** — thin code that takes pipeline-built render state and issues actual draw calls
+- **Visual/Feel tuning** — shaders, particle appearance, color palette aesthetics, animation polish
+- **Smoke testing** — verifying the integrated experience works end-to-end
+- **Architecture decisions** — module structure, event flow, platform choices, src-map maintenance
+- **Design** — core mechanic, UX flow, session pacing
+
+### Guiding Principle
+Maximize what the pipeline builds by speccing testable logic layers beneath GUI features. Our hand-written code should be a thin shell over pipeline-built logic.
 
 ## Branching
 
@@ -42,3 +56,5 @@ Key rules:
 - Run `specdb validate` to catch format errors.
 - Lifecycle: `draft → implemented → stale → deprecated`
 - **Auto-stale:** Updating any non-status field on an `implemented` entry automatically flips it to `stale`, triggering a pipeline rebuild. For cosmetic edits that don't need a rebuild, pass `--status implemented` in the same update call.
+- **`modifies` field (v2.8.0):** When a spec extends a shared type (e.g. adds a field to a struct), declare it: `--modifies Settings`. This lets `specdb validate` emit a `type_breakage_risk` warning when `modifies` targets exist and dependent specs are still `implemented`. The warning signals the pipeline to handle refactoring of affected tests.
+- **When to use `modifies`:** Ask: "will implementing this draft change a type that other specs' tests construct?" If yes, add `modifies`. Common cases: adding struct fields, extending enums, changing function signatures on shared types.

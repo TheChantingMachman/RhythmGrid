@@ -15,7 +15,7 @@
     {
       "file": "src/game.rs",
       "sections": ["Game"],
-      "tags": ["game", "state", "collision", "movement", "scoring", "progression"],
+      "tags": ["game", "state", "collision", "movement", "scoring", "progression", "timing"],
       "primary": true
     },
     {
@@ -34,6 +34,18 @@
       "file": "src/config.rs",
       "sections": ["Config"],
       "tags": ["config"],
+      "primary": true
+    },
+    {
+      "file": "src/render.rs",
+      "sections": ["Render"],
+      "tags": ["render", "color", "layout", "draw", "ui"],
+      "primary": true
+    },
+    {
+      "file": "src/input.rs",
+      "sections": ["Input"],
+      "tags": ["input", "controls"],
       "primary": true
     },
     {
