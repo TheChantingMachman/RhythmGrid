@@ -132,6 +132,16 @@ pub fn srs_kicks(piece: TetrominoType, from_rotation: usize, clockwise: bool) ->
     }
 }
 
+pub const TETROMINO_TYPES: [TetrominoType; 7] = [
+    TetrominoType::I,
+    TetrominoType::O,
+    TetrominoType::T,
+    TetrominoType::S,
+    TetrominoType::Z,
+    TetrominoType::J,
+    TetrominoType::L,
+];
+
 /// Tries to spawn the piece at top-center of the grid (col=4).
 /// Tries spawn rows 0, -1, -2, -3, -4 in order.
 /// For each candidate row, only checks cells where row_delta + spawn_row >= 0.

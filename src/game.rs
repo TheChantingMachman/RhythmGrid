@@ -1,5 +1,5 @@
 use crate::grid::{CellState, Grid, HEIGHT, WIDTH};
-use crate::pieces::{piece_cells, srs_kicks, TetrominoType};
+use crate::pieces::{piece_cells, srs_kicks, try_spawn, TetrominoType, TETROMINO_TYPES};
 
 // --- Game State Machine ---
 
@@ -275,5 +275,82 @@ impl PieceBag {
             shuffle_bag(&mut fresh);
             fresh[0]
         }
+    }
+}
+
+// --- Tick Result ---
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TickResult {
+    Nothing,
+    PieceMoved,
+    PieceLocked { lines_cleared: u32 },
+    GameOver,
+}
+
+// --- Game Session ---
+
+pub struct GameSession {
+    pub grid: Grid,
+    pub active_piece: ActivePiece,
+    pub bag: PieceBag,
+    pub gravity_accumulator_ms: u64,
+    pub score: u32,
+    pub total_lines: u32,
+    pub state: GameState,
+}
+
+impl GameSession {
+    pub fn new() -> Self {
+        let mut bag = PieceBag::new();
+        let piece_type = TETROMINO_TYPES[bag.next()];
+        let grid = Grid::new();
+        let (row, col) = try_spawn(piece_type, &grid).expect("empty grid spawn should succeed");
+        GameSession {
+            grid,
+            active_piece: ActivePiece { piece_type, rotation: 0, row, col },
+            bag,
+            gravity_accumulator_ms: 0,
+            score: 0,
+            total_lines: 0,
+            state: GameState::Playing,
+        }
+    }
+}
+
+pub fn tick(session: &mut GameSession, dt_secs: f64) -> TickResult {
+    if session.state != GameState::Playing {
+        return TickResult::Nothing;
+    }
+
+    session.gravity_accumulator_ms += (dt_secs * 1000.0) as u64;
+
+    let level = level_for_lines(session.total_lines);
+    let interval = gravity_interval_ms(level);
+
+    if session.gravity_accumulator_ms >= interval {
+        if move_down(&session.grid, &mut session.active_piece) {
+            session.gravity_accumulator_ms = 0;
+            return TickResult::PieceMoved;
+        } else {
+            let lines_cleared = lock_piece(&mut session.grid, &session.active_piece);
+            let next_type = TETROMINO_TYPES[session.bag.next()];
+            match try_spawn(next_type, &session.grid) {
+                None => {
+                    session.state = GameState::GameOver;
+                    TickResult::GameOver
+                }
+                Some((row, col)) => {
+                    session.active_piece = ActivePiece { piece_type: next_type, rotation: 0, row, col };
+                    session.total_lines += lines_cleared;
+                    let new_level = level_for_lines(session.total_lines);
+                    session.score += score_for_lines(lines_cleared, new_level);
+                    session.gravity_accumulator_ms = 0;
+                    TickResult::PieceLocked { lines_cleared }
+                }
+            }
+        }
+    } else {
+        TickResult::Nothing
     }
 }

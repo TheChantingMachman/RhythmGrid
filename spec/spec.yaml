@@ -163,7 +163,7 @@
   section: Audio
   description: Detect beats in real-time by tracking amplitude spikes above a rolling average. Emits beat events with timestamp.
   tags: [core, audio, analysis]
-  status: draft
+  status: implemented
   depends_on: [audio.amplitude]
 - id: audio.procedural
   section: Audio
@@ -235,13 +235,13 @@
   section: Render
   description: 'Converts game state to a list of drawable quads. Each quad is (px_x, px_y, px_w, px_h, rgba). Function board_quads(grid, active_piece, board_x, board_y, cell_size) returns: one quad per occupied grid cell colored by its type_index, plus one quad per active piece cell colored by its type. Empty cells are not included. Ghost piece (hard drop preview) included as same color with alpha=80.'
   tags: [render, draw]
-  status: draft
+  status: implemented
   depends_on: [render.board_layout, render.piece_colors, game.collision]
 - id: render.next_piece_preview
   section: Render
   description: Renders a preview of the next piece from the bag. Function next_piece_quads(piece_type, preview_x, preview_y, cell_size) returns quads for the 4 cells of the piece in spawn rotation (rotation=0), positioned relative to (preview_x, preview_y). Uses piece_color for coloring.
   tags: [render, draw, ui]
-  status: draft
+  status: implemented
   depends_on: [render.piece_colors, game.next_piece]
 - id: input.key_map
   section: Input
@@ -253,5 +253,5 @@
   section: Game
   description: 'Orchestrates one game frame. tick(state, dt_secs) advances the gravity timer by dt_secs. When accumulated time exceeds gravity interval, applies move_down. If move_down fails (piece locks), clears lines, updates score/level, spawns next piece. If spawn fails, transitions to GameOver. Returns a TickResult indicating what happened: Nothing, PieceMoved, PieceLocked{lines_cleared}, GameOver. Only runs when GameState is Playing.'
   tags: [core, game, timing]
-  status: draft
+  status: implemented
   depends_on: [game.gravity, game.move_down, game.lock, game.line_clear, game.next_piece, game.game_over, game.score, game.level]

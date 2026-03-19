@@ -203,6 +203,49 @@ impl AudioPlayer {
     }
 }
 
+// --- Beat Detection ---
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeatEvent {
+    pub timestamp_secs: f64,
+}
+
+pub struct BeatDetector {
+    window: [f32; 43],
+    window_pos: usize,
+    window_count: usize,
+    last_beat_secs: f64,
+}
+
+impl BeatDetector {
+    pub fn new() -> Self {
+        BeatDetector {
+            window: [0.0; 43],
+            window_pos: 0,
+            window_count: 0,
+            last_beat_secs: f64::NEG_INFINITY,
+        }
+    }
+
+    pub fn detect(&mut self, amplitude: f32, timestamp_secs: f64) -> Option<BeatEvent> {
+        self.window[self.window_pos] = amplitude;
+        self.window_pos = (self.window_pos + 1) % 43;
+        if self.window_count < 43 {
+            self.window_count += 1;
+        }
+
+        let count = self.window_count;
+        let mean: f32 = self.window[..count].iter().sum::<f32>() / count as f32;
+
+        if amplitude > mean * 1.5 && (timestamp_secs - self.last_beat_secs) >= 0.3 {
+            self.last_beat_secs = timestamp_secs;
+            Some(BeatEvent { timestamp_secs })
+        } else {
+            None
+        }
+    }
+}
+
 pub fn generate_procedural(bpm: u32, duration_secs: f32, sample_rate: u32) -> DecodedAudio {
     let num_samples = (sample_rate as f32 * duration_secs) as usize;
     let beat_period = 60.0 / bpm as f32; // seconds per beat
