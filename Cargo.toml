@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+pixels = "0.15"
 serde = { version = "1.0.228", features = ["derive"] }
 symphonia = { version = "0.5", features = ["mp3", "wav", "flac", "ogg", "vorbis"] }
 toml = "1.0.7"
+winit = "0.30"
