@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use rhythm_grid::audio::DEFAULT_BPM;
+use rhythm_grid::config::{config_dir, load_settings};
 use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
@@ -31,7 +31,10 @@ pub struct GameWorld {
 
 impl GameWorld {
     pub fn new() -> Self {
-        let audio = audio_output::start_audio(DEFAULT_BPM);
+        // Load settings to check for music folder
+        let settings_path = config_dir().join("settings.toml");
+        let settings = load_settings(&settings_path);
+        let audio = audio_output::start_audio(settings.music_folder.as_deref());
         GameWorld {
             session: GameSession::new(),
             last_tick: Instant::now(),
@@ -403,6 +406,21 @@ impl GameWorld {
         push_text(&mut verts, &mut indices, kx, ky + 48.0, "UP  CW", dim_col, 2.0);
         push_text(&mut verts, &mut indices, kx, ky + 64.0, "Z   CCW", dim_col, 2.0);
         push_text(&mut verts, &mut indices, kx, ky + 80.0, "P  PAUSE", dim_col, 2.0);
+
+        // Now playing
+        let track_name = if let Ok(audio) = self.audio.try_lock() {
+            audio.track_name.clone()
+        } else {
+            String::new()
+        };
+        if !track_name.is_empty() {
+            let np_panel_y = cp_y + 123.0;
+            push_panel(&mut verts, &mut indices, hx, np_panel_y, panel_w, 30.0, 0.03);
+            push_text(&mut verts, &mut indices, hx + 8.0, np_panel_y + 6.0, "NOW", dim_col, 1.0);
+            // Truncate long names to fit panel
+            let display_name: String = track_name.chars().take(15).collect();
+            push_text(&mut verts, &mut indices, hx + 8.0, np_panel_y + 16.0, &display_name.to_uppercase(), text_col, 1.0);
+        }
 
         // State overlays
         if self.session.state == GameState::GameOver {
