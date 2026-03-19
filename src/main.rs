@@ -1,41 +1,64 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use pixels::{Pixels, SurfaceTexture};
+use wgpu::util::DeviceExt;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::{KeyCode as WinitKeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
+use rhythm_grid::input::{self, GameAction, KeyCode as RgKeyCode};
 use rhythm_grid::pieces::*;
+use rhythm_grid::render::*;
 
-// --- Inline render constants (will be replaced by pipeline render module) ---
-const CELL_SIZE: u32 = 30;
-const BOARD_W: u32 = WIDTH as u32 * CELL_SIZE;
-const BOARD_H: u32 = HEIGHT as u32 * CELL_SIZE;
+// --- Layout constants ---
 const SIDEBAR_W: u32 = 160;
-const WIN_W: u32 = BOARD_W + SIDEBAR_W;
-const WIN_H: u32 = BOARD_H;
-const BG: [u8; 4] = [20, 20, 30, 255];
-const SIDEBAR_BG: [u8; 4] = [30, 30, 45, 255];
-const TEXT_COLOR: [u8; 4] = [180, 180, 200, 255];
-const DIM_COLOR: [u8; 4] = [100, 100, 120, 255];
+const WIN_W: u32 = BOARD_WIDTH_PX + SIDEBAR_W;
+const WIN_H: u32 = BOARD_HEIGHT_PX;
 
-fn piece_color(type_index: u32) -> [u8; 4] {
-    match type_index {
-        0 => [0, 255, 255, 255],   // I - cyan
-        1 => [255, 255, 0, 255],   // O - yellow
-        2 => [128, 0, 128, 255],   // T - purple
-        3 => [0, 255, 0, 255],     // S - green
-        4 => [255, 0, 0, 255],     // Z - red
-        5 => [0, 0, 255, 255],     // J - blue
-        6 => [255, 165, 0, 255],   // L - orange
-        _ => [128, 128, 128, 255],
+// --- GPU Vertex ---
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 4],
+}
+
+impl Vertex {
+    const ATTRIBS: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
+
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS,
+        }
     }
 }
+
+// --- Shader ---
+const SHADER_SRC: &str = r#"
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) position: vec3<f32>, @location(1) color: vec4<f32>) -> VertexOutput {
+    var out: VertexOutput;
+    out.clip_position = vec4<f32>(position, 1.0);
+    out.color = color;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return in.color;
+}
+"#;
 
 // --- Tiny 3x5 bitmap font for HUD ---
 const FONT: &[(char, [u8; 5])] = &[
@@ -54,6 +77,7 @@ const FONT: &[(char, [u8; 5])] = &[
     ('C', [0b111, 0b100, 0b100, 0b100, 0b111]),
     ('D', [0b110, 0b101, 0b101, 0b101, 0b110]),
     ('E', [0b111, 0b100, 0b111, 0b100, 0b111]),
+    ('F', [0b111, 0b100, 0b111, 0b100, 0b100]),
     ('G', [0b111, 0b100, 0b101, 0b101, 0b111]),
     ('H', [0b101, 0b101, 0b111, 0b101, 0b101]),
     ('I', [0b111, 0b010, 0b010, 0b010, 0b111]),
@@ -76,19 +100,45 @@ const FONT: &[(char, [u8; 5])] = &[
     (' ', [0b000, 0b000, 0b000, 0b000, 0b000]),
 ];
 
-fn draw_char(frame: &mut [u8], stride: usize, x: usize, y: usize, ch: char, color: [u8; 4], scale: usize) {
-    let upper = ch.to_ascii_uppercase();
-    let glyph = FONT.iter().find(|(c, _)| *c == upper).map(|(_, g)| g);
-    let glyph = match glyph {
-        Some(g) => g,
-        None => return,
-    };
-    for (row, bits) in glyph.iter().enumerate() {
-        for col in 0..3 {
-            if bits & (1 << (2 - col)) != 0 {
-                for sy in 0..scale {
-                    for sx in 0..scale {
-                        set_pixel(frame, stride, x + col * scale + sx, y + row * scale + sy, color);
+// --- Coordinate helpers ---
+fn px_to_ndc(px_x: f32, px_y: f32, win_w: f32, win_h: f32) -> (f32, f32) {
+    let nx = (px_x / win_w) * 2.0 - 1.0;
+    let ny = 1.0 - (px_y / win_h) * 2.0;
+    (nx, ny)
+}
+
+fn rgba_to_f32(c: [u8; 4]) -> [f32; 4] {
+    [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, c[3] as f32 / 255.0]
+}
+
+fn push_quad(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+             x: f32, y: f32, w: f32, h: f32, color: [f32; 4], z: f32) {
+    let ww = WIN_W as f32;
+    let wh = WIN_H as f32;
+    let (x0, y0) = px_to_ndc(x, y, ww, wh);
+    let (x1, y1) = px_to_ndc(x + w, y + h, ww, wh);
+    let base = verts.len() as u32;
+    verts.push(Vertex { position: [x0, y0, z], color });
+    verts.push(Vertex { position: [x1, y0, z], color });
+    verts.push(Vertex { position: [x1, y1, z], color });
+    verts.push(Vertex { position: [x0, y1, z], color });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+}
+
+fn push_text(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+             x: f32, y: f32, text: &str, color: [f32; 4], scale: f32) {
+    for (i, ch) in text.chars().enumerate() {
+        let upper = ch.to_ascii_uppercase();
+        let glyph = FONT.iter().find(|(c, _)| *c == upper).map(|(_, g)| g);
+        if let Some(glyph) = glyph {
+            let cx = x + i as f32 * 4.0 * scale;
+            for (row, bits) in glyph.iter().enumerate() {
+                for col in 0..3 {
+                    if bits & (1 << (2 - col)) != 0 {
+                        push_quad(verts, indices,
+                            cx + col as f32 * scale,
+                            y + row as f32 * scale,
+                            scale, scale, color, 0.0);
                     }
                 }
             }
@@ -96,31 +146,15 @@ fn draw_char(frame: &mut [u8], stride: usize, x: usize, y: usize, ch: char, colo
     }
 }
 
-fn draw_text(frame: &mut [u8], stride: usize, x: usize, y: usize, text: &str, color: [u8; 4], scale: usize) {
-    for (i, ch) in text.chars().enumerate() {
-        draw_char(frame, stride, x + i * (3 * scale + scale), y, ch, color, scale);
-    }
-}
-
-// --- Vanish-zone-aware position check ---
-// Pipeline's is_valid_position rejects r < 0, but try_spawn allows it.
-// This wrapper permits cells above the grid (vanish zone).
+// --- Vanish-zone-aware helpers (same as before, pipeline's is_valid_position rejects r<0) ---
 fn is_valid_position_vz(grid: &Grid, cells: &[(i32, i32)], row: i32, col: i32) -> bool {
     for &(dr, dc) in cells {
         let r = row + dr;
         let c = col + dc;
-        if c < 0 || c as usize >= WIDTH {
-            return false;
-        }
-        if r < 0 {
-            continue; // above grid = vanish zone, allowed
-        }
-        if r as usize >= HEIGHT {
-            return false;
-        }
-        if grid.cells[r as usize][c as usize] != CellState::Empty {
-            return false;
-        }
+        if c < 0 || c as usize >= WIDTH { return false; }
+        if r < 0 { continue; }
+        if r as usize >= HEIGHT { return false; }
+        if grid.cells[r as usize][c as usize] != CellState::Empty { return false; }
     }
     true
 }
@@ -128,342 +162,376 @@ fn is_valid_position_vz(grid: &Grid, cells: &[(i32, i32)], row: i32, col: i32) -
 fn move_horizontal_vz(grid: &Grid, piece: &mut ActivePiece, delta: i32) -> bool {
     let cells = piece_cells(piece.piece_type, piece.rotation);
     let new_col = piece.col + delta;
-    if is_valid_position_vz(grid, &cells, piece.row, new_col) {
-        piece.col = new_col;
-        true
-    } else {
-        false
-    }
+    if is_valid_position_vz(grid, &cells, piece.row, new_col) { piece.col = new_col; true } else { false }
 }
 
 fn move_down_vz(grid: &Grid, piece: &mut ActivePiece) -> bool {
     let cells = piece_cells(piece.piece_type, piece.rotation);
-    let new_row = piece.row + 1;
-    if is_valid_position_vz(grid, &cells, new_row, piece.col) {
-        piece.row = new_row;
-        true
-    } else {
-        false
-    }
+    if is_valid_position_vz(grid, &cells, piece.row + 1, piece.col) { piece.row += 1; true } else { false }
 }
 
 fn rotate_vz(grid: &Grid, piece: &mut ActivePiece, clockwise: bool) -> bool {
-    let new_rotation = if clockwise {
-        (piece.rotation + 1) % 4
-    } else {
-        (piece.rotation + 3) % 4
-    };
-    let cells = piece_cells(piece.piece_type, new_rotation);
-
+    let new_rot = if clockwise { (piece.rotation + 1) % 4 } else { (piece.rotation + 3) % 4 };
+    let cells = piece_cells(piece.piece_type, new_rot);
     if is_valid_position_vz(grid, &cells, piece.row, piece.col) {
-        piece.rotation = new_rotation;
-        return true;
+        piece.rotation = new_rot; return true;
     }
-
     let kicks = srs_kicks(piece.piece_type, piece.rotation, clockwise);
     for k in &kicks {
-        let test_col = piece.col + k.0;
-        let test_row = piece.row + k.1;
-        if is_valid_position_vz(grid, &cells, test_row, test_col) {
-            piece.rotation = new_rotation;
-            piece.col = test_col;
-            piece.row = test_row;
-            return true;
+        if is_valid_position_vz(grid, &cells, piece.row + k.1, piece.col + k.0) {
+            piece.rotation = new_rot; piece.col += k.0; piece.row += k.1; return true;
         }
     }
     false
 }
 
-// --- Game World ---
+// --- Winit key to pipeline key ---
+fn winit_to_rg(key: WinitKeyCode) -> RgKeyCode {
+    match key {
+        WinitKeyCode::ArrowLeft => RgKeyCode::Left,
+        WinitKeyCode::ArrowRight => RgKeyCode::Right,
+        WinitKeyCode::ArrowDown => RgKeyCode::Down,
+        WinitKeyCode::ArrowUp => RgKeyCode::Up,
+        WinitKeyCode::KeyZ => RgKeyCode::Z,
+        WinitKeyCode::Space | WinitKeyCode::KeyX => RgKeyCode::Space,
+        WinitKeyCode::KeyP => RgKeyCode::P,
+        WinitKeyCode::Escape => RgKeyCode::Escape,
+        WinitKeyCode::Enter => RgKeyCode::Enter,
+        _ => RgKeyCode::Other,
+    }
+}
+
+// --- Game World (wraps pipeline GameSession with vanish-zone movement) ---
 struct GameWorld {
-    grid: Grid,
-    piece: ActivePiece,
-    bag: PieceBag,
-    state: GameState,
-    gravity_acc_ms: u64,
-    total_lines: u32,
-    score: u32,
+    session: GameSession,
     last_tick: Instant,
 }
 
 impl GameWorld {
     fn new() -> Self {
-        let mut bag = PieceBag::new();
-        let piece_idx = bag.next();
-        let tt = tetromino_from_index(piece_idx);
-        let grid = Grid::new();
-        let (row, col) = try_spawn(tt, &grid).unwrap_or((0, 4));
-        GameWorld {
-            grid,
-            piece: ActivePiece { piece_type: tt, rotation: 0, row, col },
-            bag,
-            state: GameState::Playing,
-            gravity_acc_ms: 0,
-            total_lines: 0,
-            score: 0,
-            last_tick: Instant::now(),
-        }
-    }
-
-    fn spawn_next(&mut self) -> bool {
-        let idx = self.bag.next();
-        let tt = tetromino_from_index(idx);
-        if let Some((r, c)) = try_spawn(tt, &self.grid) {
-            self.piece = ActivePiece { piece_type: tt, rotation: 0, row: r, col: c };
-            true
-        } else {
-            false
-        }
-    }
-
-    fn lock_and_clear(&mut self) {
-        let lines = lock_piece(&mut self.grid, &self.piece);
-        self.total_lines += lines;
-        let level = level_for_lines(self.total_lines);
-        self.score += score_for_lines(lines, level);
-        if !self.spawn_next() {
-            self.state = GameState::GameOver;
-        }
+        GameWorld { session: GameSession::new(), last_tick: Instant::now() }
     }
 
     fn tick(&mut self) {
-        if self.state != GameState::Playing { return; }
+        if self.session.state != GameState::Playing { return; }
         let now = Instant::now();
-        let dt = now.duration_since(self.last_tick).as_millis() as u64;
+        let dt = now.duration_since(self.last_tick).as_secs_f64();
         self.last_tick = now;
-        self.gravity_acc_ms += dt;
 
-        let level = level_for_lines(self.total_lines);
+        // Use pipeline tick for gravity/locking/spawning
+        self.session.gravity_accumulator_ms += (dt * 1000.0) as u64;
+        let level = level_for_lines(self.session.total_lines);
         let interval = gravity_interval_ms(level);
-        if self.gravity_acc_ms >= interval {
-            if !move_down_vz(&self.grid, &mut self.piece) {
-                self.lock_and_clear();
+        if self.session.gravity_accumulator_ms >= interval {
+            if !move_down_vz(&self.session.grid, &mut self.session.active_piece) {
+                let lines = lock_piece(&mut self.session.grid, &self.session.active_piece);
+                let next_type = TETROMINO_TYPES[self.session.bag.next()];
+                match try_spawn(next_type, &self.session.grid) {
+                    None => { self.session.state = GameState::GameOver; }
+                    Some((row, col)) => {
+                        self.session.active_piece = ActivePiece {
+                            piece_type: next_type, rotation: 0, row, col
+                        };
+                        self.session.total_lines += lines;
+                        let new_level = level_for_lines(self.session.total_lines);
+                        self.session.score += score_for_lines(lines, new_level);
+                    }
+                }
             }
-            self.gravity_acc_ms = 0;
+            self.session.gravity_accumulator_ms = 0;
         }
     }
 
-    fn handle_key(&mut self, key: KeyCode) {
-        match self.state {
-            GameState::Playing => match key {
-                KeyCode::ArrowLeft => { move_horizontal_vz(&self.grid, &mut self.piece, -1); }
-                KeyCode::ArrowRight => { move_horizontal_vz(&self.grid, &mut self.piece, 1); }
-                KeyCode::ArrowDown => {
-                    if !move_down_vz(&self.grid, &mut self.piece) {
-                        self.lock_and_clear();
-                        self.gravity_acc_ms = 0;
+    fn handle_action(&mut self, action: GameAction) {
+        match self.session.state {
+            GameState::Playing => match action {
+                GameAction::MoveLeft => { move_horizontal_vz(&self.session.grid, &mut self.session.active_piece, -1); }
+                GameAction::MoveRight => { move_horizontal_vz(&self.session.grid, &mut self.session.active_piece, 1); }
+                GameAction::SoftDrop => {
+                    if !move_down_vz(&self.session.grid, &mut self.session.active_piece) {
+                        self.lock_and_spawn();
                     }
+                    self.session.gravity_accumulator_ms = 0;
                 }
-                KeyCode::ArrowUp => { rotate_vz(&self.grid, &mut self.piece, true); }
-                KeyCode::KeyZ => { rotate_vz(&self.grid, &mut self.piece, false); }
-                KeyCode::Space | KeyCode::KeyX => {
-                    let lines = hard_drop(&mut self.grid, &self.piece);
-                    self.total_lines += lines;
-                    let level = level_for_lines(self.total_lines);
-                    self.score += score_for_lines(lines, level);
-                    if !self.spawn_next() {
-                        self.state = GameState::GameOver;
-                    }
-                    self.gravity_acc_ms = 0;
+                GameAction::HardDrop => {
+                    let lines = hard_drop(&mut self.session.grid, &self.session.active_piece);
+                    self.session.total_lines += lines;
+                    let level = level_for_lines(self.session.total_lines);
+                    self.session.score += score_for_lines(lines, level);
+                    self.spawn_or_game_over();
+                    self.session.gravity_accumulator_ms = 0;
                 }
-                KeyCode::KeyP => { self.state = GameState::Paused; }
+                GameAction::RotateCW => { rotate_vz(&self.session.grid, &mut self.session.active_piece, true); }
+                GameAction::RotateCCW => { rotate_vz(&self.session.grid, &mut self.session.active_piece, false); }
+                GameAction::TogglePause => { self.session.state = GameState::Paused; }
                 _ => {}
             }
             GameState::Paused => {
-                if key == KeyCode::KeyP { self.state = GameState::Playing; self.last_tick = Instant::now(); }
+                if action == GameAction::TogglePause {
+                    self.session.state = GameState::Playing;
+                    self.last_tick = Instant::now();
+                }
             }
             GameState::GameOver | GameState::Menu => {
-                if key == KeyCode::Enter { *self = GameWorld::new(); }
+                if action == GameAction::StartGame {
+                    *self = GameWorld::new();
+                }
             }
         }
     }
 
-    fn draw(&self, frame: &mut [u8]) {
-        // Clear background
-        for pixel in frame.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&BG);
-        }
+    fn lock_and_spawn(&mut self) {
+        let s = &mut self.session;
+        let lines = lock_piece(&mut s.grid, &s.active_piece);
+        s.total_lines += lines;
+        let level = level_for_lines(s.total_lines);
+        s.score += score_for_lines(lines, level);
+        self.spawn_or_game_over();
+    }
 
-        let stride = WIN_W as usize;
-
-        // Draw sidebar background
-        for y in 0..WIN_H as usize {
-            for x in (BOARD_W as usize + 1)..WIN_W as usize {
-                set_pixel(frame, stride, x, y, SIDEBAR_BG);
+    fn spawn_or_game_over(&mut self) {
+        let s = &mut self.session;
+        let next_type = TETROMINO_TYPES[s.bag.next()];
+        match try_spawn(next_type, &s.grid) {
+            None => { s.state = GameState::GameOver; }
+            Some((r, c)) => {
+                s.active_piece = ActivePiece { piece_type: next_type, rotation: 0, row: r, col: c };
             }
         }
+    }
 
-        // Draw grid border
-        for r in 0..BOARD_H as usize {
-            set_pixel(frame, stride, BOARD_W as usize, r, [60, 60, 80, 255]);
+    fn build_vertices(&self) -> (Vec<Vertex>, Vec<u32>) {
+        let mut verts = Vec::new();
+        let mut indices = Vec::new();
+
+        let bg = rgba_to_f32([20, 20, 30, 255]);
+        push_quad(&mut verts, &mut indices, 0.0, 0.0, WIN_W as f32, WIN_H as f32, bg, 0.0);
+
+        // Sidebar
+        let sidebar_bg = rgba_to_f32([30, 30, 45, 255]);
+        push_quad(&mut verts, &mut indices,
+            BOARD_WIDTH_PX as f32 + 1.0, 0.0, SIDEBAR_W as f32, WIN_H as f32, sidebar_bg, 0.01);
+
+        // Grid border
+        let border = rgba_to_f32([60, 60, 80, 255]);
+        push_quad(&mut verts, &mut indices,
+            BOARD_WIDTH_PX as f32, 0.0, 1.0, WIN_H as f32, border, 0.02);
+
+        // Board quads from pipeline
+        let quads = board_quads(&self.session.grid, &self.session.active_piece, 0, 0, CELL_SIZE);
+        for (px_x, px_y, pw, ph, color) in &quads {
+            let gap = 1.0;
+            let fc = rgba_to_f32(*color);
+            let z = if color[3] < 255 { 0.03 } else { 0.04 };
+            push_quad(&mut verts, &mut indices,
+                *px_x as f32 + gap, *px_y as f32 + gap,
+                *pw as f32 - gap * 2.0, *ph as f32 - gap * 2.0, fc, z);
         }
 
-        // Draw occupied cells
-        for row in 0..HEIGHT {
-            for col in 0..WIDTH {
-                if let CellState::Occupied(ti) = self.grid.cells[row][col] {
-                    fill_cell(frame, stride, row, col, piece_color(ti));
-                }
-            }
+        // Next piece preview
+        let sx = BOARD_WIDTH_PX as f32 + 12.0;
+        let text_col = rgba_to_f32([180, 180, 200, 255]);
+        let dim_col = rgba_to_f32([100, 100, 120, 255]);
+
+        push_text(&mut verts, &mut indices, sx, 10.0, "NEXT", text_col, 2.0);
+        let preview_cell = 20; // smaller cells for preview to fit sidebar
+        let preview_quads = next_piece_quads(
+            self.session.bag.peek(), sx as i32 + 20, 35, preview_cell);
+        for (px_x, px_y, pw, ph, color) in &preview_quads {
+            let fc = rgba_to_f32(*color);
+            push_quad(&mut verts, &mut indices,
+                *px_x as f32 + 1.0, *px_y as f32 + 1.0,
+                *pw as f32 - 2.0, *ph as f32 - 2.0, fc, 0.05);
         }
 
-        // Draw ghost piece
-        if self.state == GameState::Playing {
-            let cells = piece_cells(self.piece.piece_type, self.piece.rotation);
-            let mut ghost_row = self.piece.row;
-            while is_valid_position_vz(&self.grid, &cells, ghost_row + 1, self.piece.col) { ghost_row += 1; }
+        // Score/Level/Lines
+        push_text(&mut verts, &mut indices, sx, 140.0, "SCORE", text_col, 2.0);
+        push_text(&mut verts, &mut indices, sx, 160.0,
+            &format!("{}", self.session.score), text_col, 2.0);
 
-            let mut ghost_color = piece_color(self.piece.piece_type as u32);
-            ghost_color[3] = 80;
-            for &(dr, dc) in &cells {
-                let r = ghost_row + dr;
-                let c = self.piece.col + dc;
-                if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                    fill_cell_alpha(frame, stride, r as usize, c as usize, ghost_color);
-                }
-            }
+        let level = level_for_lines(self.session.total_lines);
+        push_text(&mut verts, &mut indices, sx, 195.0, "LEVEL", text_col, 2.0);
+        push_text(&mut verts, &mut indices, sx, 215.0,
+            &format!("{}", level), text_col, 2.0);
 
-            // Draw active piece
-            let color = piece_color(self.piece.piece_type as u32);
-            for &(dr, dc) in &cells {
-                let r = self.piece.row + dr;
-                let c = self.piece.col + dc;
-                if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                    fill_cell(frame, stride, r as usize, c as usize, color);
-                }
-            }
-        }
-
-        // --- Sidebar ---
-        let sx = BOARD_W as usize + 12;
-
-        // Next piece label + preview
-        draw_text(frame, stride, sx, 10, "NEXT", TEXT_COLOR, 2);
-        let next_type = tetromino_from_index(self.bag.peek());
-        let next_cells = piece_cells(next_type, 0);
-        let color = piece_color(next_type as u32);
-        for &(dr, dc) in &next_cells {
-            let px = sx as i32 + 10 + (dc + 1) * CELL_SIZE as i32;
-            let py = 30 + (dr + 1) * CELL_SIZE as i32;
-            if px >= 0 && py >= 0 {
-                fill_rect(frame, stride, px as usize, py as usize,
-                    CELL_SIZE as usize - 1, CELL_SIZE as usize - 1, color);
-            }
-        }
-
-        // Score
-        draw_text(frame, stride, sx, 140, "SCORE", TEXT_COLOR, 2);
-        let score_str = format!("{}", self.score);
-        draw_text(frame, stride, sx, 160, &score_str, TEXT_COLOR, 2);
-
-        // Level
-        let level = level_for_lines(self.total_lines);
-        draw_text(frame, stride, sx, 195, "LEVEL", TEXT_COLOR, 2);
-        let level_str = format!("{}", level);
-        draw_text(frame, stride, sx, 215, &level_str, TEXT_COLOR, 2);
-
-        // Lines
-        draw_text(frame, stride, sx, 250, "LINES", TEXT_COLOR, 2);
-        let lines_str = format!("{}", self.total_lines);
-        draw_text(frame, stride, sx, 270, &lines_str, TEXT_COLOR, 2);
+        push_text(&mut verts, &mut indices, sx, 250.0, "LINES", text_col, 2.0);
+        push_text(&mut verts, &mut indices, sx, 270.0,
+            &format!("{}", self.session.total_lines), text_col, 2.0);
 
         // Controls
-        let cy = 330;
-        draw_text(frame, stride, sx, cy, "CONTROLS", DIM_COLOR, 1);
-        draw_text(frame, stride, sx, cy + 14, "MOVE  L-R", DIM_COLOR, 1);
-        draw_text(frame, stride, sx, cy + 26, "DROP  DOWN", DIM_COLOR, 1);
-        draw_text(frame, stride, sx, cy + 38, "HARD  SPC-X", DIM_COLOR, 1);
-        draw_text(frame, stride, sx, cy + 50, "CW    UP", DIM_COLOR, 1);
-        draw_text(frame, stride, sx, cy + 62, "CCW   Z", DIM_COLOR, 1);
-        draw_text(frame, stride, sx, cy + 74, "PAUSE P", DIM_COLOR, 1);
+        let cy = 320.0;
+        push_text(&mut verts, &mut indices, sx, cy, "CONTROLS", dim_col, 2.0);
+        push_text(&mut verts, &mut indices, sx, cy + 22.0, "L-R MOVE", dim_col, 2.0);
+        push_text(&mut verts, &mut indices, sx, cy + 44.0, "DN  DROP", dim_col, 2.0);
+        push_text(&mut verts, &mut indices, sx, cy + 66.0, "SPC HARD", dim_col, 2.0);
+        push_text(&mut verts, &mut indices, sx, cy + 88.0, "UP  CW", dim_col, 2.0);
+        push_text(&mut verts, &mut indices, sx, cy + 110.0, "Z   CCW", dim_col, 2.0);
+        push_text(&mut verts, &mut indices, sx, cy + 132.0, "P  PAUSE", dim_col, 2.0);
 
         // State overlays
-        if self.state == GameState::GameOver {
-            // Tint the board red
-            for row in 0..HEIGHT {
-                for col in 0..WIDTH {
-                    fill_cell_alpha(frame, stride, row, col, [200, 0, 0, 120]);
-                }
-            }
-            draw_text(frame, stride, sx, 500, "GAME OVER", [255, 80, 80, 255], 2);
-            draw_text(frame, stride, sx, 525, "ENTER", DIM_COLOR, 1);
+        if self.session.state == GameState::GameOver {
+            let red_overlay = rgba_to_f32([200, 0, 0, 120]);
+            push_quad(&mut verts, &mut indices, 0.0, 0.0,
+                BOARD_WIDTH_PX as f32, BOARD_HEIGHT_PX as f32, red_overlay, 0.08);
+            push_text(&mut verts, &mut indices, sx, 500.0, "GAME OVER",
+                rgba_to_f32([255, 80, 80, 255]), 2.0);
+            push_text(&mut verts, &mut indices, sx, 525.0, "ENTER", dim_col, 1.0);
         }
 
-        if self.state == GameState::Paused {
-            // Dim the board
-            for row in 0..HEIGHT {
-                for col in 0..WIDTH {
-                    fill_cell_alpha(frame, stride, row, col, [0, 0, 0, 100]);
-                }
-            }
-            draw_text(frame, stride, sx, 500, "PAUSED", [255, 255, 100, 255], 2);
-            draw_text(frame, stride, sx, 525, "P", DIM_COLOR, 1);
+        if self.session.state == GameState::Paused {
+            let dim_overlay = rgba_to_f32([0, 0, 0, 100]);
+            push_quad(&mut verts, &mut indices, 0.0, 0.0,
+                BOARD_WIDTH_PX as f32, BOARD_HEIGHT_PX as f32, dim_overlay, 0.08);
+            push_text(&mut verts, &mut indices, sx, 500.0, "PAUSED",
+                rgba_to_f32([255, 255, 100, 255]), 2.0);
+            push_text(&mut verts, &mut indices, sx, 525.0, "P", dim_col, 1.0);
         }
+
+        (verts, indices)
     }
 }
 
-fn set_pixel(frame: &mut [u8], stride: usize, x: usize, y: usize, color: [u8; 4]) {
-    if x < stride && y < WIN_H as usize {
-        let idx = (y * stride + x) * 4;
-        if idx + 3 < frame.len() {
-            frame[idx..idx + 4].copy_from_slice(&color);
-        }
+// --- GPU State ---
+struct GpuState {
+    surface: wgpu::Surface<'static>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    config: wgpu::SurfaceConfiguration,
+    pipeline: wgpu::RenderPipeline,
+}
+
+impl GpuState {
+    fn new(window: Arc<Window>) -> Self {
+        let size = window.inner_size();
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+        let surface = instance.create_surface(window).expect("create surface");
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        })).expect("request adapter");
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor::default(), None,
+        )).expect("request device");
+
+        let caps = surface.get_capabilities(&adapter);
+        let format = caps.formats.iter()
+            .find(|f| f.is_srgb())
+            .copied()
+            .unwrap_or(caps.formats[0]);
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &config);
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shader"),
+            source: wgpu::ShaderSource::Wgsl(SHADER_SRC.into()),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pipeline_layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("render_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Vertex::desc()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        GpuState { surface, device, queue, config, pipeline }
     }
-}
 
-fn fill_rect(frame: &mut [u8], stride: usize, x: usize, y: usize, w: usize, h: usize, color: [u8; 4]) {
-    for dy in 0..h {
-        for dx in 0..w {
-            set_pixel(frame, stride, x + dx, y + dy, color);
-        }
+    fn resize(&mut self, width: u32, height: u32) {
+        self.config.width = width.max(1);
+        self.config.height = height.max(1);
+        self.surface.configure(&self.device, &self.config);
     }
-}
 
-fn fill_cell(frame: &mut [u8], stride: usize, row: usize, col: usize, color: [u8; 4]) {
-    let x = col * CELL_SIZE as usize;
-    let y = row * CELL_SIZE as usize;
-    fill_rect(frame, stride, x, y, CELL_SIZE as usize - 1, CELL_SIZE as usize - 1, color);
-}
+    fn render(&self, verts: &[Vertex], indices: &[u32]) {
+        let output = match self.surface.get_current_texture() {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        let view = output.texture.create_view(&Default::default());
 
-fn fill_cell_alpha(frame: &mut [u8], stride: usize, row: usize, col: usize, color: [u8; 4]) {
-    let x = col * CELL_SIZE as usize;
-    let y = row * CELL_SIZE as usize;
-    let alpha = color[3] as u16;
-    for dy in 0..CELL_SIZE as usize - 1 {
-        for dx in 0..CELL_SIZE as usize - 1 {
-            let px = x + dx;
-            let py = y + dy;
-            if px < stride && py < WIN_H as usize {
-                let idx = (py * stride + px) * 4;
-                if idx + 3 < frame.len() {
-                    frame[idx] = ((color[0] as u16 * alpha + frame[idx] as u16 * (255 - alpha)) / 255) as u8;
-                    frame[idx + 1] = ((color[1] as u16 * alpha + frame[idx + 1] as u16 * (255 - alpha)) / 255) as u8;
-                    frame[idx + 2] = ((color[2] as u16 * alpha + frame[idx + 2] as u16 * (255 - alpha)) / 255) as u8;
-                    frame[idx + 3] = 255;
-                }
-            }
+        let vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vertex_buffer"),
+            contents: bytemuck::cast_slice(verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("index_buffer"),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.08, g: 0.08, b: 0.12, a: 1.0 }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_vertex_buffer(0, vb.slice(..));
+            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
         }
-    }
-}
-
-fn tetromino_from_index(i: usize) -> TetrominoType {
-    match i {
-        0 => TetrominoType::I,
-        1 => TetrominoType::O,
-        2 => TetrominoType::T,
-        3 => TetrominoType::S,
-        4 => TetrominoType::Z,
-        5 => TetrominoType::J,
-        6 => TetrominoType::L,
-        _ => TetrominoType::T,
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
     }
 }
 
 // --- Winit App ---
 struct App {
     window: Option<Arc<Window>>,
-    pixels: Option<Pixels<'static>>,
+    gpu: Option<GpuState>,
     world: GameWorld,
+    pending_resize: Option<(u32, u32)>,
 }
 
 impl ApplicationHandler for App {
@@ -473,16 +541,9 @@ impl ApplicationHandler for App {
             .with_title("RhythmGrid")
             .with_inner_size(winit::dpi::LogicalSize::new(WIN_W, WIN_H))
             .with_min_inner_size(winit::dpi::LogicalSize::new(WIN_W / 2, WIN_H / 2));
-        let window = Arc::new(event_loop.create_window(attrs).expect("failed to create window"));
-
-        let size = window.inner_size();
-        let surface = SurfaceTexture::new(size.width, size.height, window.clone());
-        let px = Pixels::new(WIN_W, WIN_H, surface).expect("failed to create pixels");
-        // SAFETY: Pixels borrows the window's surface, but we hold the Arc<Window> for the
-        // entire lifetime of App, so the borrow is valid for the program's duration.
-        let px: Pixels<'static> = unsafe { std::mem::transmute(px) };
-
-        self.pixels = Some(px);
+        let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+        let gpu = GpuState::new(window.clone());
+        self.gpu = Some(gpu);
         self.window = Some(window);
     }
 
@@ -490,19 +551,24 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(new_size) => {
-                if let Some(px) = &mut self.pixels {
-                    px.resize_surface(new_size.width.max(1), new_size.height.max(1)).ok();
-                }
+                self.pending_resize = Some((new_size.width, new_size.height));
             }
             WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Pressed, .. }, .. } => {
-                self.world.handle_key(code);
+                let rg_key = winit_to_rg(code);
+                if let Some(action) = input::map_key(rg_key) {
+                    self.world.handle_action(action);
+                }
             }
             WindowEvent::RedrawRequested => {
+                if let Some((w, h)) = self.pending_resize.take() {
+                    if let Some(gpu) = &mut self.gpu {
+                        gpu.resize(w, h);
+                    }
+                }
                 self.world.tick();
-                if let Some(px) = &mut self.pixels {
-                    let frame: &mut [u8] = px.frame_mut();
-                    self.world.draw(frame);
-                    px.render().ok();
+                let (verts, indices) = self.world.build_vertices();
+                if let Some(gpu) = &self.gpu {
+                    gpu.render(&verts, &indices);
                 }
                 if let Some(w) = &self.window {
                     w.request_redraw();
@@ -514,11 +580,12 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
-    let event_loop = EventLoop::new().expect("failed to create event loop");
+    let event_loop = EventLoop::new().expect("create event loop");
     let mut app = App {
         window: None,
-        pixels: None,
+        gpu: None,
         world: GameWorld::new(),
+        pending_resize: None,
     };
-    event_loop.run_app(&mut app).expect("event loop failed");
+    event_loop.run_app(&mut app).expect("event loop");
 }
