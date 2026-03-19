@@ -29,6 +29,7 @@ Maximize what the pipeline builds by speccing testable logic layers beneath GUI 
 
 - Develop on `dev`. Merge into `main` for major versions only.
 - Default working branch is `dev`. Do not commit directly to `main`.
+- Co-authored GUI/rendering work: develop on `gui/rendering`, squash-merge to `dev` at milestones (no PR needed). Pull `dev` into `gui/rendering` to pick up pipeline builds.
 
 ## Documentation Hygiene
 
@@ -40,10 +41,12 @@ The `docs/` folder contains planning and design documents. As the project grows,
 
 ## Project Structure
 
-- `src/` — Rust source code
-- `tests/` — test files
+- `src/` — Pipeline-owned Rust library code (game logic, audio, render state, input mapping)
+- `src/gui/` — **Co-authored** GUI code (wgpu renderer, windowing, visual effects, theme). Pipeline must not modify these files. Excluded via `df-config.json` `src_exclude`.
+- `src/main.rs` — Thin launcher, also excluded from pipeline.
+- `tests/` — Pipeline-owned test files
 - `spec/` — SpecDB spec files
-- `docs/` — product planning and documentation
+- `docs/` — Product planning and documentation
 - `df-config.json` — Dark Factory pipeline config
 
 ## SpecDB

@@ -10,7 +10,6 @@ pub struct Theme {
     pub block_depth: f32,
     pub grid_line_color: [u8; 4],
     pub grid_border_color: [u8; 4],
-    pub grid_floor_color: [u8; 4],
     pub panel_bg: [u8; 4],
     pub panel_border: [u8; 4],
     pub text_color: [u8; 4],
@@ -27,7 +26,6 @@ pub const THEME: Theme = Theme {
     block_depth: 8.0,
     grid_line_color: [18, 22, 35, 255],
     grid_border_color: [35, 60, 100, 180],
-    grid_floor_color: [3, 3, 8, 255],
     panel_bg: [8, 8, 16, 220],
     panel_border: [25, 40, 65, 150],
     text_color: [160, 170, 200, 255],
@@ -35,4 +33,3 @@ pub const THEME: Theme = Theme {
 };
 
 pub const DEFAULT_CAM_ANGLE: f32 = 0.6;
-pub const RENDER_SCALE: u32 = 2; // internal render resolution multiplier
