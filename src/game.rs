@@ -156,6 +156,30 @@ pub fn clear_lines(grid: &mut Grid) -> u32 {
     cleared
 }
 
+// --- Level and Score ---
+
+pub const LINES_PER_LEVEL: u32 = 10;
+pub const STARTING_LEVEL: u32 = 1;
+pub const SCORE_SINGLE: u32 = 100;
+pub const SCORE_DOUBLE: u32 = 300;
+pub const SCORE_TRIPLE: u32 = 500;
+pub const SCORE_TETRIS: u32 = 800;
+
+pub fn level_for_lines(lines_cleared: u32) -> u32 {
+    STARTING_LEVEL + lines_cleared / LINES_PER_LEVEL
+}
+
+pub fn score_for_lines(lines: u32, level: u32) -> u32 {
+    let base = match lines {
+        1 => SCORE_SINGLE,
+        2 => SCORE_DOUBLE,
+        3 => SCORE_TRIPLE,
+        4 => SCORE_TETRIS,
+        _ => return 0,
+    };
+    base * level
+}
+
 // --- Escalation ---
 
 pub const DANGER_THRESHOLD_ROW: usize = 4;
