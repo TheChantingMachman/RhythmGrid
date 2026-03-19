@@ -1,8 +1,9 @@
 // Audio output via cpal — streams PCM samples to system audio device.
-// Loads real music from a folder if configured, falls back to procedural.
+// Supports real music with auto-advance and streaming decode.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rhythm_grid::audio::{decode_audio, generate_procedural, BeatDetector, DEFAULT_BPM};
 use rhythm_grid::music::{scan_folder, Playlist};
@@ -34,7 +35,6 @@ impl AudioState {
             let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
             self.amplitude = self.amplitude * 0.7 + rms * 0.3;
         }
-
         let chunk_duration = samples.len() as f64 / sample_rate as f64;
         self.elapsed_secs += chunk_duration;
 
@@ -57,42 +57,24 @@ impl AudioState {
     }
 }
 
-/// Load audio samples — tries music folder first, falls back to procedural.
-fn load_audio(music_folder: Option<&str>, sample_rate: u32) -> (Vec<f32>, u16, Option<Playlist>, String) {
-    if let Some(folder) = music_folder {
-        let path = Path::new(folder);
-        let files = scan_folder(path);
-        if !files.is_empty() {
-            let mut playlist = Playlist::new(files);
-            if let Some(track_path) = playlist.current() {
-                let track_name = track_path.file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "Unknown".to_string());
-                match decode_audio(track_path) {
-                    Ok(audio) => {
-                        // Resample if needed (simple nearest-neighbor for now)
-                        let samples = if audio.sample_rate == sample_rate {
-                            audio.samples
-                        } else {
-                            resample(&audio.samples, audio.sample_rate, sample_rate, audio.channels)
-                        };
-                        return (samples, audio.channels, Some(playlist), track_name);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to decode {}: {}", track_path.display(), e);
-                        playlist.advance();
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback: procedural
-    let audio = generate_procedural(DEFAULT_BPM, 300.0, sample_rate);
-    (audio.samples, 1, None, "Procedural 120 BPM".to_string())
+/// Ring buffer of decoded samples shared between decode thread and audio callback.
+struct SampleBuffer {
+    samples: VecDeque<f32>,
+    channels: usize,
+    finished: bool, // true when current track is fully decoded
 }
 
-/// Simple nearest-neighbor resampling (mono or interleaved).
+impl SampleBuffer {
+    fn new(channels: usize) -> Self {
+        SampleBuffer {
+            samples: VecDeque::with_capacity(44100 * 2 * 10), // ~10s buffer
+            channels,
+            finished: false,
+        }
+    }
+}
+
+/// Simple nearest-neighbor resampling.
 fn resample(samples: &[f32], from_rate: u32, to_rate: u32, channels: u16) -> Vec<f32> {
     let ratio = from_rate as f64 / to_rate as f64;
     let ch = channels as usize;
@@ -108,6 +90,59 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32, channels: u16) -> Vec
     out
 }
 
+fn track_name_from_path(path: &PathBuf) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+/// Decode a track and push samples into the shared buffer in chunks.
+/// Returns false if decode failed.
+fn stream_decode_track(
+    path: &PathBuf,
+    target_sample_rate: u32,
+    buffer: &Arc<Mutex<SampleBuffer>>,
+) -> bool {
+    let audio = match decode_audio(path) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("Failed to decode {}: {}", path.display(), e);
+            return false;
+        }
+    };
+
+    let samples = if audio.sample_rate == target_sample_rate {
+        audio.samples
+    } else {
+        resample(&audio.samples, audio.sample_rate, target_sample_rate, audio.channels)
+    };
+
+    let channels = audio.channels as usize;
+
+    // Push in chunks to avoid holding the lock too long
+    let chunk_size = 44100 * channels; // ~1 second chunks
+    for chunk in samples.chunks(chunk_size) {
+        // Wait if buffer is too full (back-pressure)
+        loop {
+            if let Ok(buf) = buffer.try_lock() {
+                if buf.samples.len() < 44100 * channels * 20 { // ~20s max buffer
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if let Ok(mut buf) = buffer.lock() {
+            buf.channels = channels;
+            buf.samples.extend(chunk);
+        }
+    }
+
+    if let Ok(mut buf) = buffer.lock() {
+        buf.finished = true;
+    }
+    true
+}
+
 /// Starts the audio output stream. Returns shared state for the game loop.
 pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
     let state = Arc::new(Mutex::new(AudioState::new()));
@@ -120,7 +155,6 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
             Some(d) => d,
             None => { eprintln!("No audio output device found"); return; }
         };
-
         let supported_config = match device.default_output_config() {
             Ok(c) => c,
             Err(e) => { eprintln!("No audio output config: {}", e); return; }
@@ -129,23 +163,96 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
         let sample_rate = supported_config.sample_rate().0;
         let out_channels = supported_config.channels() as usize;
 
-        let (samples, src_channels, playlist, track_name) =
-            load_audio(folder_owned.as_deref(), sample_rate);
+        // Set up playlist or procedural fallback
+        let mut playlist: Option<Playlist> = None;
+        let mut use_procedural = true;
 
-        // Set initial track name
-        if let Ok(mut s) = state_clone.lock() {
-            s.reset_for_new_track(&track_name);
+        if let Some(folder) = &folder_owned {
+            let files = scan_folder(Path::new(folder));
+            if !files.is_empty() {
+                playlist = Some(Playlist::new(files));
+                use_procedural = false;
+            }
         }
 
-        let samples = Arc::new(samples);
-        let src_channels = src_channels as usize;
-        let position = Arc::new(Mutex::new(0usize));
-        let playlist = Arc::new(Mutex::new(playlist));
+        // Shared sample buffer between decode thread and audio callback
+        let buffer = Arc::new(Mutex::new(SampleBuffer::new(2)));
 
-        let samples_c = samples.clone();
-        let position_c = position.clone();
-        let state_c = state_clone.clone();
-        let _playlist_c = playlist.clone();
+        if use_procedural {
+            // Load procedural immediately (it's fast)
+            let audio = generate_procedural(DEFAULT_BPM, 300.0, sample_rate);
+            if let Ok(mut buf) = buffer.lock() {
+                buf.channels = 1;
+                buf.samples.extend(&audio.samples);
+                buf.finished = true; // will loop
+            }
+            if let Ok(mut s) = state_clone.lock() {
+                s.reset_for_new_track("Procedural 120 BPM");
+            }
+        }
+
+        // Decode thread — handles streaming decode and track advancement
+        let buffer_decode = buffer.clone();
+        let state_decode = state_clone.clone();
+        let playlist_shared = Arc::new(Mutex::new(playlist));
+        let playlist_decode = playlist_shared.clone();
+
+        std::thread::spawn(move || {
+            if use_procedural { return; } // nothing to decode
+
+            loop {
+                let track_path;
+                let track_name;
+                {
+                    let pl = playlist_decode.lock().unwrap();
+                    match pl.as_ref().and_then(|p| p.current()) {
+                        Some(path) => {
+                            track_path = path.clone();
+                            track_name = track_name_from_path(&track_path);
+                        }
+                        None => return,
+                    }
+                }
+
+                if let Ok(mut s) = state_decode.lock() {
+                    s.reset_for_new_track(&track_name);
+                }
+
+                // Reset buffer for new track
+                if let Ok(mut buf) = buffer_decode.lock() {
+                    buf.samples.clear();
+                    buf.finished = false;
+                }
+
+                let ok = stream_decode_track(&track_path, sample_rate, &buffer_decode);
+
+                if !ok {
+                    // Skip broken track
+                }
+
+                // Wait for playback to finish (buffer drained and finished flag set)
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    if let Ok(buf) = buffer_decode.try_lock() {
+                        if buf.finished && buf.samples.is_empty() {
+                            break;
+                        }
+                    }
+                }
+
+                // Advance to next track
+                {
+                    let mut pl = playlist_decode.lock().unwrap();
+                    if let Some(p) = pl.as_mut() {
+                        p.advance();
+                    }
+                }
+            }
+        });
+
+        // Audio output callback
+        let buffer_play = buffer.clone();
+        let state_play = state_clone.clone();
 
         let config = cpal::StreamConfig {
             channels: out_channels as u16,
@@ -153,46 +260,47 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
             buffer_size: cpal::BufferSize::Default,
         };
 
+        let is_procedural = use_procedural;
+
         let stream = device.build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let mut pos = position_c.lock().unwrap();
-                let src = &samples_c;
                 let mut chunk_mono = Vec::with_capacity(data.len() / out_channels);
 
-                for frame in data.chunks_mut(out_channels) {
-                    // Read from source (may be mono or stereo)
-                    let sample_offset = *pos;
+                if let Ok(mut buf) = buffer_play.try_lock() {
+                    let src_ch = buf.channels.max(1);
 
-                    if sample_offset < src.len() {
-                        // Mix source channels to mono for beat detection
-                        let mut mono = 0.0f32;
-                        for ch in 0..src_channels {
-                            let idx = sample_offset + ch;
-                            if idx < src.len() {
-                                mono += src[idx];
+                    for frame in data.chunks_mut(out_channels) {
+                        if buf.samples.len() >= src_ch {
+                            // Read one frame from buffer
+                            let mut mono = 0.0f32;
+                            for out_s in frame.iter_mut() {
+                                *out_s = 0.0;
                             }
-                        }
-                        mono /= src_channels as f32;
-                        chunk_mono.push(mono);
-
-                        // Write to output channels
-                        for (out_ch, s) in frame.iter_mut().enumerate() {
-                            let src_ch = out_ch % src_channels;
-                            let idx = sample_offset + src_ch;
-                            *s = if idx < src.len() { src[idx] * 0.5 } else { 0.0 };
-                        }
-                        *pos += src_channels;
-                    } else {
-                        // Loop back to start
-                        *pos = 0;
-                        for s in frame.iter_mut() {
-                            *s = 0.0;
+                            for ch in 0..src_ch {
+                                if let Some(sample) = buf.samples.pop_front() {
+                                    mono += sample;
+                                    // Map source channel to output channels
+                                    let out_ch_idx = ch % out_channels;
+                                    frame[out_ch_idx] += sample * 0.5;
+                                }
+                            }
+                            chunk_mono.push(mono / src_ch as f32);
+                        } else if is_procedural && buf.finished {
+                            // Procedural: loop by re-reading (buffer was drained)
+                            // This shouldn't happen with 5min of procedural, but safety:
+                            for s in frame.iter_mut() { *s = 0.0; }
+                        } else {
+                            // Buffer underrun — silence while waiting for decode
+                            for s in frame.iter_mut() { *s = 0.0; }
                         }
                     }
+                } else {
+                    // Couldn't get lock — silence
+                    for s in data.iter_mut() { *s = 0.0; }
                 }
 
-                if let Ok(mut state) = state_c.try_lock() {
+                if let Ok(mut state) = state_play.try_lock() {
                     state.update_from_samples(&chunk_mono, sample_rate);
                 }
             },
