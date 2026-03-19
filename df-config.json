@@ -11,7 +11,7 @@
     "build_test_cmd": "",
     "report_format": "cargo-json",
     "src_include": ["src/**/*.rs"],
-    "src_exclude": [],
+    "src_exclude": ["src/gui/**", "src/main.rs"],
     "test_pattern": "tests/**/*.rs",
     "planner_hint": "",
     "test_hint": "Crate name is rhythm-grid. Cargo converts hyphens to underscores, so use 'use rhythm_grid::' in all test imports.",
