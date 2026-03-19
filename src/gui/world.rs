@@ -10,7 +10,6 @@ use rhythm_grid::render::*;
 
 use super::drawing::*;
 use super::theme::*;
-use super::vanish_zone::*;
 
 pub struct GameWorld {
     pub session: GameSession,
@@ -83,7 +82,7 @@ impl GameWorld {
         let level = level_for_lines(self.session.total_lines);
         let interval = gravity_interval_ms(level);
         if self.session.gravity_accumulator_ms >= interval {
-            if !move_down_vz(&self.session.grid, &mut self.session.active_piece) {
+            if !move_down(&self.session.grid, &mut self.session.active_piece) {
                 let lines = lock_piece(&mut self.session.grid, &self.session.active_piece);
                 let next_type = TETROMINO_TYPES[self.session.bag.next()];
                 match try_spawn(next_type, &self.session.grid) {
@@ -105,10 +104,10 @@ impl GameWorld {
     pub fn handle_action(&mut self, action: GameAction) {
         match self.session.state {
             GameState::Playing => match action {
-                GameAction::MoveLeft => { move_horizontal_vz(&self.session.grid, &mut self.session.active_piece, -1); }
-                GameAction::MoveRight => { move_horizontal_vz(&self.session.grid, &mut self.session.active_piece, 1); }
+                GameAction::MoveLeft => { move_horizontal(&self.session.grid, &mut self.session.active_piece, -1); }
+                GameAction::MoveRight => { move_horizontal(&self.session.grid, &mut self.session.active_piece, 1); }
                 GameAction::SoftDrop => {
-                    if !move_down_vz(&self.session.grid, &mut self.session.active_piece) {
+                    if !move_down(&self.session.grid, &mut self.session.active_piece) {
                         self.lock_and_spawn();
                     }
                     self.session.gravity_accumulator_ms = 0;
@@ -121,8 +120,8 @@ impl GameWorld {
                     self.spawn_or_game_over();
                     self.session.gravity_accumulator_ms = 0;
                 }
-                GameAction::RotateCW => { rotate_vz(&self.session.grid, &mut self.session.active_piece, true); }
-                GameAction::RotateCCW => { rotate_vz(&self.session.grid, &mut self.session.active_piece, false); }
+                GameAction::RotateCW => { rotate(&self.session.grid, &mut self.session.active_piece, true); }
+                GameAction::RotateCCW => { rotate(&self.session.grid, &mut self.session.active_piece, false); }
                 GameAction::TogglePause => { self.session.state = GameState::Paused; }
                 _ => {}
             }
@@ -225,7 +224,7 @@ impl GameWorld {
         if self.session.state == GameState::Playing {
             let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
             let mut ghost_row = self.session.active_piece.row;
-            while is_valid_position_vz(&self.session.grid, &cells, ghost_row + 1, self.session.active_piece.col) {
+            while is_valid_position(&self.session.grid, &cells, ghost_row + 1, self.session.active_piece.col) {
                 ghost_row += 1;
             }
             let base_color = piece_color(self.session.active_piece.piece_type as u32);

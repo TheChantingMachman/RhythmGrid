@@ -8,5 +8,4 @@ pub mod world;
 pub mod app;
 mod font;
 mod drawing;
-mod vanish_zone;
 mod input_bridge;
