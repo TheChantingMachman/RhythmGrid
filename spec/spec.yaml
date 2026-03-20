@@ -54,7 +54,6 @@
   description: 'A piece position is valid if all its cells satisfy: column is within grid bounds (0..WIDTH), row is not below grid (row < HEIGHT), and the cell is not occupied. Cells with row < 0 (vanish zone / above grid) are always considered valid — they are above the visible area and cannot collide. Uses cells[row][col] indexing with positive col=right, positive row=down.'
   tags: [core, game, collision]
   status: implemented
-  modifies: [is_valid_position]
 - id: game.move_horizontal
   section: Game
   description: Pieces move left or right by one column. Move is rejected if the resulting position is invalid.
@@ -217,7 +216,7 @@
   tags: [core, config, music]
   status: implemented
   depends_on: [config.load_save, music.scan_folder]
-  modifies: [Settings]
+  modifies: [config.load_save]
 - id: render.piece_colors
   section: Render
   description: 'Each tetromino type maps to an RGBA color: I=(0,255,255,255) cyan, O=(255,255,0,255) yellow, T=(128,0,128,255) purple, S=(0,255,0,255) green, Z=(255,0,0,255) red, J=(0,0,255,255) blue, L=(255,165,0,255) orange. Function piece_color(type_index: u32) -> [u8; 4] returns the color.'
@@ -270,4 +269,4 @@
   status: draft
   constants: {delay_ms: 500, max_resets: 15}
   depends_on: [game.lock, game.move_down, game.tick]
-  modifies: [GameSession, tick]
+  modifies: [game.tick]

@@ -59,7 +59,10 @@ Key rules:
 - Run `specdb validate` to catch format errors.
 - Lifecycle: `draft → implemented → stale → deprecated`
 - **Auto-stale:** Updating any non-status field on an `implemented` entry automatically flips it to `stale`, triggering a pipeline rebuild. For cosmetic edits that don't need a rebuild, pass `--status implemented` in the same update call.
-- **`modifies` field (v2.8.0):** When a spec extends a shared type (e.g. adds a field to a struct), declare it: `--modifies Settings`. This lets `specdb validate` emit a `type_breakage_risk` warning when `modifies` targets exist and dependent specs are still `implemented`. The warning signals the pipeline to handle refactoring of affected tests.
-- **When to use `modifies`:** Ask: "will implementing this draft change a type that other specs' tests construct?" If yes, add `modifies`. Common cases: adding struct fields, extending enums, changing function signatures on shared types.
-- **Stale dependencies on behavior change:** If a new spec changes the *behavior* of an existing spec's function (not just its type), the existing spec must be manually marked stale. The `modifies` warning flags the risk but does not auto-stale. Example: `game.lock_delay` changes how `tick()` handles locking — `game.tick` must go stale so its tests get refactored. Ask: "does this new entry change what an existing function *returns* or *does* in certain cases?" If yes, stale the dependency.
-- **Proposed CLI enhancement:** Auto-stale implemented dependencies whose defined types/functions appear in a building spec's `modifies` field. Currently requires manual stale — request filed with SpecDB owner.
+- **`modifies` field:** Declares which existing spec entries this spec will affect. Takes **spec IDs** (not type names): `--modifies config.load_save,game.tick`. Triggers three validate checks:
+  - `dangling_modifies` — hard error if modifies ID doesn't exist
+  - `unlinked_modifies` — warning if modifies ID not in `depends_on`
+  - `type_breakage_risk` — warning if modified spec is `implemented`
+- **When to use `modifies`:** Ask: "will implementing this draft change behavior or types that another spec's tests assert?" If yes, add `--modifies <that-spec-id>`. Common cases: adding struct fields, changing function return values, altering function behavior.
+- **Auto-stale:** The pipeline auto-stales `implemented` entries that appear in a building spec's `modifies` field. No manual stale needed — just set `modifies` correctly and the pipeline handles the rest.
+- **Inline hints:** The CLI emits stderr hints at add/update time if modifies IDs are not in depends_on or if they're implemented.
