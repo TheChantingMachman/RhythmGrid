@@ -235,32 +235,41 @@ pub fn is_game_over(grid: &Grid, piece: &ActivePiece) -> bool {
 
 // --- 7-Bag Piece Randomizer ---
 
+#[derive(Debug, Clone)]
 pub struct PieceBag {
     bag: [usize; 7],
     index: usize,
+    rng_state: u64,
 }
 
-fn shuffle_bag(bag: &mut [usize; 7]) {
-    // Fisher-Yates with a fixed-seed LCG for determinism
-    let mut state: u64 = 0x123456789abcdef0;
+fn shuffle_bag(bag: &mut [usize; 7], state: &mut u64) {
     for i in (1..7usize).rev() {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        let j = (state >> 33) as usize % (i + 1);
+        *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let j = (*state >> 33) as usize % (i + 1);
         bag.swap(i, j);
     }
 }
 
 impl PieceBag {
     pub fn new() -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        Self::new_seeded(nanos)
+    }
+
+    pub fn new_seeded(seed: u64) -> Self {
         let mut bag = [0, 1, 2, 3, 4, 5, 6];
-        shuffle_bag(&mut bag);
-        PieceBag { bag, index: 0 }
+        let mut rng_state = seed;
+        shuffle_bag(&mut bag, &mut rng_state);
+        PieceBag { bag, index: 0, rng_state }
     }
 
     pub fn next(&mut self) -> usize {
         if self.index >= 7 {
             self.bag = [0, 1, 2, 3, 4, 5, 6];
-            shuffle_bag(&mut self.bag);
+            shuffle_bag(&mut self.bag, &mut self.rng_state);
             self.index = 0;
         }
         let piece = self.bag[self.index];
@@ -272,10 +281,9 @@ impl PieceBag {
         if self.index < 7 {
             self.bag[self.index]
         } else {
-            // Bag is exhausted; next() would refill. Peek returns first of a fresh bag.
-            // Since shuffle is deterministic with a fixed seed, this is always consistent.
+            let mut cloned_state = self.rng_state;
             let mut fresh = [0usize, 1, 2, 3, 4, 5, 6];
-            shuffle_bag(&mut fresh);
+            shuffle_bag(&mut fresh, &mut cloned_state);
             fresh[0]
         }
     }

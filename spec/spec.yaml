@@ -115,7 +115,7 @@
   section: Game
   description: The next piece to spawn is visible to the player. Uses a 7-bag randomizer so all 7 types appear before any repeats. Bag is shuffled with a time-based seed (system time at creation) for unique sequences each game.
   tags: [core, game]
-  status: stale
+  status: implemented
 - id: game.escalation
   section: Game
   description: '2-stage escalation based on stack height. Normal: baseline effects. Danger: music speeds up, effects intensify.'
