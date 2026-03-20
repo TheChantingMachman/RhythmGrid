@@ -25,8 +25,12 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     // Background geometry
     build_background(&mut sv, &mut si, world, gw, gh);
 
-    // Grid floor
-    let floor_color = rgba_to_f32([5, 5, 12, 200]);
+    // Grid floor (brightens on level up)
+    let lf = world.level_up_flash;
+    let floor_r = (5.0 + lf * 40.0).min(255.0) as u8;
+    let floor_g = (5.0 + lf * 80.0).min(255.0) as u8;
+    let floor_b = (12.0 + lf * 100.0).min(255.0) as u8;
+    let floor_color = rgba_to_f32([floor_r, floor_g, floor_b, 200]);
     push_grid_floor(&mut sv, &mut si, gw, gh, floor_color);
 
     // Grid lines — beat + highs drive shimmer

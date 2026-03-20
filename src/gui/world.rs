@@ -33,6 +33,8 @@ pub struct GameWorld {
     pub(super) clearing_cells: Vec<ClearingCell>,
     pub(super) bg_rings: Vec<BgRing>,
     pub(super) danger_level: f32,
+    pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
+    last_level: u32,
     pub(super) window_aspect: f32,
     pub(super) hud_opacity: f32,  // 0.0 = invisible, 1.0 = full
     hud_fade_timer: f32,          // seconds until fade starts
@@ -82,6 +84,8 @@ impl GameWorld {
             clearing_cells: Vec::new(),
             bg_rings: Vec::new(),
             danger_level: 0.0,
+            level_up_flash: 0.0,
+            last_level: 1,
             window_aspect: THEME.win_w as f32 / THEME.win_h as f32,
             hud_opacity: 1.0,
             hud_fade_timer: 3.0,
@@ -161,6 +165,46 @@ impl GameWorld {
             cell.scale = 1.0 - progress; // shrink to 0
         }
         self.clearing_cells.retain(|c| c.timer > 0.0);
+
+        // Level up detection
+        let current_level = level_for_lines(self.session.total_lines);
+        if current_level > self.last_level {
+            self.level_up_flash = 1.0;
+            self.hud_opacity = 1.0;
+            self.hud_fade_timer = 2.0;
+            // Spawn celebratory rings
+            for i in 0..3 {
+                self.bg_rings.push(BgRing {
+                    radius: 0.5 + i as f32 * 0.3,
+                    max_radius: 25.0,
+                    life: 2.5 - i as f32 * 0.3,
+                    max_life: 2.5 - i as f32 * 0.3,
+                    color: [0.3, 0.8, 1.0, 0.5], // bright cyan
+                });
+            }
+            // Burst of particles from board center
+            let w = THEME.win_w as f32;
+            let h = THEME.win_h as f32;
+            let cx = w / 2.0;
+            let cy = h / 2.0;
+            for _ in 0..40 {
+                let angle = self.preview_angle + (self.particles.particles.len() as f32 * 0.7);
+                let speed = 50.0 + (angle.sin().abs() * 80.0);
+                let vx = angle.cos() * speed;
+                let vy = angle.sin() * speed;
+                self.particles.particles.push(super::particles::Particle {
+                    x: cx + (angle * 3.0).cos() * 20.0,
+                    y: cy + (angle * 3.0).sin() * 20.0,
+                    vx, vy,
+                    life: 1.5,
+                    max_life: 1.5,
+                    color: [0.4, 0.9, 1.0, 0.9],
+                    size: 3.0,
+                });
+            }
+            self.last_level = current_level;
+        }
+        self.level_up_flash = (self.level_up_flash - dt as f32 * 1.5).max(0.0);
 
         // Smooth escalation transition
         let target_danger = if escalation_stage(&self.session.grid) == EscalationStage::Danger { 1.0 } else { 0.0 };
@@ -321,6 +365,8 @@ impl GameWorld {
                     self.clearing_cells.clear();
                     self.bg_rings.clear();
                     self.danger_level = 0.0;
+                    self.level_up_flash = 0.0;
+                    self.last_level = 1;
                 }
             }
         }
