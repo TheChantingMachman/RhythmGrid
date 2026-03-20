@@ -5,7 +5,6 @@ use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use super::drawing::Vertex;
-use super::theme::THEME;
 
 const SCENE_SHADER: &str = r#"
 struct Uniforms { view_proj: mat4x4<f32> };

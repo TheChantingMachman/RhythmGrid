@@ -13,7 +13,7 @@ use super::audio_output::{self, AudioState};
 use super::drawing::{Vertex, rgba_to_f32};
 use super::particles::ParticleSystem;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
-use super::theme::*;
+use super::theme::{DEFAULT_CAM_ANGLE, THEME};
 
 pub struct GameWorld {
     pub session: GameSession,
@@ -52,7 +52,7 @@ pub(super) struct ClearingCell {
     pub col: i32,
     pub row: i32,
     pub timer: f32,
-    pub color: [f32; 4],   // original piece color
+    pub _color: [f32; 4],  // original piece color (reserved for future non-white dissolve)
     pub scale: f32,         // 1.0 → 0.0 as it dissolves
 }
 
@@ -260,7 +260,7 @@ impl GameWorld {
                                     self.clearing_cells.push(ClearingCell {
                                         col: col as i32, row: row as i32,
                                         timer: LINE_CLEAR_DURATION,
-                                        color: rgba_to_f32(piece_color(ti)),
+                                        _color: rgba_to_f32(piece_color(ti)),
                                         scale: 1.0,
                                     });
                                 }
@@ -336,12 +336,12 @@ impl GameWorld {
                 rows_to_clear.push(row);
                 for col in 0..WIDTH {
                     if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
-                        let color = rgba_to_f32(piece_color(ti));
+                        let _color = rgba_to_f32(piece_color(ti));
                         self.clearing_cells.push(ClearingCell {
                             col: col as i32,
                             row: row as i32,
                             timer: LINE_CLEAR_DURATION,
-                            color,
+                            _color,
                             scale: 1.0,
                         });
                     }
