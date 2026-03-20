@@ -47,6 +47,9 @@ impl ApplicationHandler for App {
                     self.world.handle_action(action);
                 }
             }
+            WindowEvent::CursorMoved { .. } => {
+                self.world.on_mouse_activity();
+            }
             WindowEvent::RedrawRequested => {
                 if let Some((w, h)) = self.pending_resize.take() {
                     if let Some(gpu) = &mut self.gpu {

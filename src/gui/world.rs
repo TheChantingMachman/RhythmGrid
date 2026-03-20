@@ -33,7 +33,9 @@ pub struct GameWorld {
     pub(super) clearing_cells: Vec<ClearingCell>,
     pub(super) bg_rings: Vec<BgRing>,
     pub(super) danger_level: f32,
-    pub(super) window_aspect: f32, // actual window aspect ratio for HUD scaling
+    pub(super) window_aspect: f32,
+    pub(super) hud_opacity: f32,  // 0.0 = invisible, 1.0 = full
+    hud_fade_timer: f32,          // seconds until fade starts
 }
 
 /// Expanding ring in the background
@@ -81,6 +83,8 @@ impl GameWorld {
             bg_rings: Vec::new(),
             danger_level: 0.0,
             window_aspect: THEME.win_w as f32 / THEME.win_h as f32,
+            hud_opacity: 1.0,
+            hud_fade_timer: 3.0,
         }
     }
 
@@ -140,6 +144,17 @@ impl GameWorld {
 
         // Update particles and line clear animations
         self.particles.update(dt as f32);
+        // HUD auto-fade
+        self.hud_fade_timer -= dt as f32;
+        if self.hud_fade_timer <= 0.0 {
+            self.hud_opacity = (self.hud_opacity - dt as f32 * 2.5).max(0.0);
+        }
+        // Full opacity when paused or game over
+        if self.session.state == GameState::Paused || self.session.state == GameState::GameOver {
+            self.hud_opacity = 1.0;
+            self.hud_fade_timer = 3.0;
+        }
+
         for cell in &mut self.clearing_cells {
             cell.timer -= dt as f32;
             let progress = 1.0 - (cell.timer / LINE_CLEAR_DURATION).max(0.0);
@@ -192,6 +207,12 @@ impl GameWorld {
             }
             self.session.gravity_accumulator_ms = 0;
         }
+    }
+
+    /// Call when mouse moves to reveal HUD
+    pub fn on_mouse_activity(&mut self) {
+        self.hud_opacity = 1.0;
+        self.hud_fade_timer = 3.0;
     }
 
     pub fn handle_action(&mut self, action: GameAction) {

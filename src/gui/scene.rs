@@ -236,11 +236,15 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     let text_col = rgba_to_f32(t.text_color);
     let dim_col = rgba_to_f32(t.dim_color);
 
-    // Next piece — top right corner
+    // --- Fadeable HUD elements (affected by hud_opacity) ---
+
+    // Next piece panel background (fades with HUD)
     let np_x = w - 120.0;
     let np_y = 12.0;
     push_panel(&mut verts, &mut indices, np_x, np_y, 108.0, 85.0, 0.03);
-    push_text(&mut verts, &mut indices, np_x + 6.0, np_y + 6.0, "NEXT", dim_col, 1.0);
+
+    // Mark where preview piece starts (won't be faded)
+    let preview_start_vert = verts.len();
     let next_type_idx = world.session.bag.peek();
     let next_type = TETROMINO_TYPES[next_type_idx];
     let next_cells = piece_cells(next_type, 0);
@@ -331,6 +335,8 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         }
     }
 
+    let preview_end_vert = verts.len();
+
     // Score
     push_text(&mut verts, &mut indices, 12.0, 12.0, "SCORE", dim_col, 1.0);
     push_text(&mut verts, &mut indices, 12.0, 24.0, &format!("{}", world.session.score), text_col, 2.0);
@@ -382,8 +388,22 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 98.0, "P RESUME", dim_col, 1.0);
     }
 
-    // Particles
+    // Particles (always visible, not affected by HUD fade)
     world.particles.render(&mut verts, &mut indices);
+
+    // Apply HUD opacity — skip preview piece and particles
+    let opacity = world.hud_opacity;
+    if opacity < 0.99 {
+        let particle_verts = world.particles.particles.len() * 4;
+        let hud_vert_count = verts.len().saturating_sub(particle_verts);
+        for (i, v) in verts[..hud_vert_count].iter_mut().enumerate() {
+            // Skip preview piece vertices (always visible)
+            if i >= preview_start_vert && i < preview_end_vert {
+                continue;
+            }
+            v.color[3] *= opacity;
+        }
+    }
 
     (verts, indices)
 }
