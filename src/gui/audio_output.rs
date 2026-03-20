@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rhythm_grid::audio::{decode_audio, generate_procedural, BeatDetector, DEFAULT_BPM};
+use rhythm_grid::audio::{decode_audio, fft_bands, generate_procedural, BeatDetector, DEFAULT_BPM};
 use rhythm_grid::music::{scan_folder, Playlist};
 
 /// Shared state between the audio thread and the game loop.
@@ -13,9 +13,14 @@ pub struct AudioState {
     pub amplitude: f32,
     pub beat: bool,
     pub beat_intensity: f32,
+    pub bass: f32,
+    pub mids: f32,
+    pub highs: f32,
     pub track_name: String,
     beat_detector: BeatDetector,
     elapsed_secs: f64,
+    fft_buffer: Vec<f32>, // accumulate samples for FFT window
+    fft_sample_rate: u32,
 }
 
 impl AudioState {
@@ -24,9 +29,14 @@ impl AudioState {
             amplitude: 0.0,
             beat: false,
             beat_intensity: 0.0,
+            bass: 0.0,
+            mids: 0.0,
+            highs: 0.0,
             track_name: String::new(),
             beat_detector: BeatDetector::new(),
             elapsed_secs: 0.0,
+            fft_buffer: Vec::with_capacity(2048),
+            fft_sample_rate: 44100,
         }
     }
 
@@ -42,6 +52,23 @@ impl AudioState {
         if let Some(_event) = self.beat_detector.detect(self.amplitude, self.elapsed_secs) {
             self.beat = true;
             self.beat_intensity = 1.0;
+        }
+
+        // Accumulate samples for FFT
+        self.fft_sample_rate = sample_rate;
+        self.fft_buffer.extend_from_slice(samples);
+        const FFT_WINDOW: usize = 2048;
+        if self.fft_buffer.len() >= FFT_WINDOW {
+            let window: Vec<f32> = self.fft_buffer.drain(..FFT_WINDOW).collect();
+            let (b, m, h) = fft_bands(&window, sample_rate);
+            // Smooth toward new values
+            self.bass = self.bass * 0.6 + b * 0.4;
+            self.mids = self.mids * 0.6 + m * 0.4;
+            self.highs = self.highs * 0.6 + h * 0.4;
+            // Keep buffer from growing unbounded
+            if self.fft_buffer.len() > FFT_WINDOW * 2 {
+                self.fft_buffer.drain(..self.fft_buffer.len() - FFT_WINDOW);
+            }
         }
     }
 

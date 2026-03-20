@@ -26,9 +26,23 @@ pub struct GameWorld {
     pub audio: Arc<Mutex<AudioState>>,
     pub beat_intensity: f32,
     pub amplitude: f32,
+    pub bass: f32,
+    pub mids: f32,
+    pub highs: f32,
     pub particles: ParticleSystem,
     prev_beat: bool,
     line_clear_anim: Vec<LineClearAnim>,
+    bg_rings: Vec<BgRing>,
+    danger_level: f32, // smoothly transitions 0.0 (normal) → 1.0 (danger)
+}
+
+/// Expanding ring in the background
+struct BgRing {
+    radius: f32,
+    max_radius: f32,
+    life: f32,
+    max_life: f32,
+    color: [f32; 4],
 }
 
 /// Active line clear flash animation
@@ -56,9 +70,14 @@ impl GameWorld {
             audio,
             beat_intensity: 0.0,
             amplitude: 0.0,
+            bass: 0.0,
+            mids: 0.0,
+            highs: 0.0,
             particles: ParticleSystem::new(),
             prev_beat: false,
             line_clear_anim: Vec::new(),
+            bg_rings: Vec::new(),
+            danger_level: 0.0,
         }
     }
 
@@ -72,8 +91,36 @@ impl GameWorld {
             audio.tick(dt as f32);
             self.beat_intensity = audio.beat_intensity;
             self.amplitude = audio.amplitude;
+            self.bass = audio.bass;
+            self.mids = audio.mids;
+            self.highs = audio.highs;
             got_beat = audio.beat_intensity > 0.9; // fresh beat
         }
+
+        // Spawn background ring on beat
+        if got_beat && !self.prev_beat {
+            let d = self.danger_level;
+            self.bg_rings.push(BgRing {
+                radius: 0.5,
+                max_radius: 18.0,
+                life: 3.0 - d * 1.0, // faster rings in danger
+                max_life: 3.0 - d * 1.0,
+                color: [
+                    0.1 + d * 0.5,
+                    0.15 - d * 0.05,
+                    0.4 - d * 0.3,
+                    0.3 + d * 0.15 + self.bass * 0.2, // bass amplifies ring brightness
+                ],
+            });
+        }
+
+        // Update rings
+        for ring in &mut self.bg_rings {
+            let progress = 1.0 - ring.life / ring.max_life;
+            ring.radius = 0.5 + progress * ring.max_radius;
+            ring.life -= dt as f32;
+        }
+        self.bg_rings.retain(|r| r.life > 0.0);
 
         // Spawn beat particles (edge-triggered)
         if got_beat && !self.prev_beat {
@@ -94,6 +141,15 @@ impl GameWorld {
             anim.timer -= dt as f32;
         }
         self.line_clear_anim.retain(|a| a.timer > 0.0);
+
+        // Smooth escalation transition
+        let target_danger = if escalation_stage(&self.session.grid) == EscalationStage::Danger { 1.0 } else { 0.0 };
+        let danger_speed = 2.0; // transition speed
+        if self.danger_level < target_danger {
+            self.danger_level = (self.danger_level + dt as f32 * danger_speed).min(1.0);
+        } else {
+            self.danger_level = (self.danger_level - dt as f32 * danger_speed).max(0.0);
+        }
 
         // Always advance preview rotation (even when paused)
         self.preview_angle += dt as f32 * 0.8;
@@ -304,18 +360,129 @@ impl GameWorld {
         let gw = WIDTH as f32;
         let gh = HEIGHT as f32;
 
+        // Ambient rotating geometry (always present, breathes with amplitude)
+        let d = self.danger_level;
+        let geo_cx = gw / 2.0;
+        let geo_cy = -gh / 2.0;
+        let geo_z = -2.0;
+        let geo_n = [0.0f32, 0.0, 1.0];
+        let geo_time = self.preview_angle * (0.3 + d * 0.4); // spins faster in danger
+        let geo_alpha = 0.03 + self.mids * 0.15 + d * 0.05; // mids drive hex brightness
+
+        // Slow-rotating hexagonal grid of dots
+        let hex_rings = 4;
+        let dot_size = 0.12 + self.mids * 0.12;
+        for ring in 1..=hex_rings {
+            let r = ring as f32 * 3.5;
+            let points = ring * 6;
+            for i in 0..points {
+                let angle = (i as f32 / points as f32) * std::f32::consts::TAU + geo_time;
+                let dx = angle.cos() * r;
+                let dy = angle.sin() * r;
+
+                let dist_factor = 1.0 - (ring as f32 / hex_rings as f32) * 0.5;
+                let dot_alpha = geo_alpha * dist_factor;
+                // Blue → orange/red shift with danger
+                let dot_color = [
+                    0.15 + d * 0.45,  // r: 0.15 → 0.6
+                    0.2 - d * 0.08,   // g: 0.2 → 0.12
+                    0.5 - d * 0.35,   // b: 0.5 → 0.15
+                    dot_alpha,
+                ];
+
+                let base = sv.len() as u32;
+                sv.push(Vertex { position: [geo_cx + dx - dot_size, geo_cy + dy - dot_size, geo_z], normal: geo_n, color: dot_color });
+                sv.push(Vertex { position: [geo_cx + dx + dot_size, geo_cy + dy - dot_size, geo_z], normal: geo_n, color: dot_color });
+                sv.push(Vertex { position: [geo_cx + dx + dot_size, geo_cy + dy + dot_size, geo_z], normal: geo_n, color: dot_color });
+                sv.push(Vertex { position: [geo_cx + dx - dot_size, geo_cy + dy + dot_size, geo_z], normal: geo_n, color: dot_color });
+                si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            }
+        }
+
+        // Connecting lines between hex points (subtle geometric web)
+        for ring in 1..=hex_rings {
+            let r = ring as f32 * 3.5;
+            let points = ring * 6;
+            let line_alpha = geo_alpha * 0.4;
+            let line_color = [
+                0.1 + d * 0.35,
+                0.15 - d * 0.05,
+                0.35 - d * 0.25,
+                line_alpha,
+            ];
+            let line_w = 0.03;
+
+            for i in 0..points {
+                let a0 = (i as f32 / points as f32) * std::f32::consts::TAU + geo_time;
+                let a1 = ((i + 1) as f32 / points as f32) * std::f32::consts::TAU + geo_time;
+                let x0 = geo_cx + a0.cos() * r;
+                let y0 = geo_cy + a0.sin() * r;
+                let x1 = geo_cx + a1.cos() * r;
+                let y1 = geo_cy + a1.sin() * r;
+
+                // Line as thin quad
+                let dx = x1 - x0;
+                let dy = y1 - y0;
+                let len = (dx * dx + dy * dy).sqrt();
+                if len < 0.001 { continue; }
+                let nx = -dy / len * line_w;
+                let ny = dx / len * line_w;
+
+                let base = sv.len() as u32;
+                sv.push(Vertex { position: [x0 + nx, y0 + ny, geo_z], normal: geo_n, color: line_color });
+                sv.push(Vertex { position: [x1 + nx, y1 + ny, geo_z], normal: geo_n, color: line_color });
+                sv.push(Vertex { position: [x1 - nx, y1 - ny, geo_z], normal: geo_n, color: line_color });
+                sv.push(Vertex { position: [x0 - nx, y0 - ny, geo_z], normal: geo_n, color: line_color });
+                si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            }
+        }
+
+        // Background rings (behind the board)
+        let ring_cx = gw / 2.0;  // board center x in world
+        let ring_cy = -gh / 2.0; // board center y in world
+        let ring_z = -1.0;       // behind the grid
+        let ring_segments = 32;
+        let ring_n = [0.0f32, 0.0, 1.0];
+
+        for ring in &self.bg_rings {
+            let progress = 1.0 - ring.life / ring.max_life;
+            let alpha = ring.color[3] * (1.0 - progress).powi(2); // fade out
+            if alpha < 0.005 { continue; }
+            let inner_r = ring.radius;
+            let outer_r = ring.radius + 0.3 + (1.0 - progress) * 0.5; // ring thickness thins as it expands
+            let color_inner = [ring.color[0], ring.color[1], ring.color[2], alpha];
+            let color_outer = [ring.color[0] * 0.5, ring.color[1] * 0.5, ring.color[2] * 0.5, 0.0];
+
+            for i in 0..ring_segments {
+                let a0 = (i as f32 / ring_segments as f32) * std::f32::consts::TAU;
+                let a1 = ((i + 1) as f32 / ring_segments as f32) * std::f32::consts::TAU;
+                let (c0, s0) = (a0.cos(), a0.sin());
+                let (c1, s1) = (a1.cos(), a1.sin());
+
+                let base = sv.len() as u32;
+                // Inner edge (brighter)
+                sv.push(Vertex { position: [ring_cx + c0 * inner_r, ring_cy + s0 * inner_r, ring_z], normal: ring_n, color: color_inner });
+                sv.push(Vertex { position: [ring_cx + c1 * inner_r, ring_cy + s1 * inner_r, ring_z], normal: ring_n, color: color_inner });
+                // Outer edge (fades to transparent)
+                sv.push(Vertex { position: [ring_cx + c1 * outer_r, ring_cy + s1 * outer_r, ring_z], normal: ring_n, color: color_outer });
+                sv.push(Vertex { position: [ring_cx + c0 * outer_r, ring_cy + s0 * outer_r, ring_z], normal: ring_n, color: color_outer });
+                si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            }
+        }
+
         // Grid floor (very dark, mostly transparent)
         let floor_color = rgba_to_f32([5, 5, 12, 200]);
         push_grid_floor(&mut sv, &mut si, gw, gh, floor_color);
 
 
-        // Grid lines (brighter for visibility)
+        // Grid lines — beat + highs drive shimmer
         let line_boost = (beat * 40.0) as u8;
-        let lc: [u8; 4] = [40, 45, 70, 255]; // brighter base
+        let highs_boost = (self.highs * 60.0) as u8;
+        let lc: [u8; 4] = [40, 45, 70, 255];
         let line_color = rgba_to_f32([
-            lc[0].saturating_add(line_boost),
-            lc[1].saturating_add(line_boost),
-            lc[2].saturating_add(line_boost * 2),
+            lc[0].saturating_add(line_boost).saturating_add(highs_boost / 3),
+            lc[1].saturating_add(line_boost).saturating_add(highs_boost / 2),
+            lc[2].saturating_add(line_boost * 2).saturating_add(highs_boost),
             lc[3],
         ]);
         for col in 0..=WIDTH {
