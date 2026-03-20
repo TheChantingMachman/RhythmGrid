@@ -8,7 +8,7 @@ use rhythm_grid::render::*;
 
 use super::drawing::*;
 use super::theme::*;
-use super::world::{GameWorld, LineClearAnim, LINE_CLEAR_DURATION};
+use super::world::GameWorld;
 
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)
 pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
@@ -84,8 +84,45 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Line clear flash animations
-    build_line_clear_flashes(&mut sv, &mut si, &world.line_clear_anim, gw, cube_depth);
+    // Per-cell clearing animations (shrinking bright cubes)
+    for cell in &world.clearing_cells {
+        if cell.scale > 0.01 {
+            // Stay white throughout, fade alpha
+            let progress = 1.0 - (cell.timer / super::world::LINE_CLEAR_DURATION).max(0.0);
+            let alpha = (1.0 - progress).max(0.0);
+            let bright_color = [1.0, 1.0, 1.0, alpha];
+
+            // Render as a scaled cube centered on the cell
+            let cx = cell.col as f32 + 0.5;
+            let cy = cell.row as f32 + 0.5;
+            let half = cell.scale * 0.5;
+            let gap = 0.08 * cell.scale;
+            let x0 = cx - half + gap;
+            let x1 = cx + half - gap;
+            let y0 = -(cy - half + gap);
+            let y1 = -(cy + half - gap);
+            let z0 = 0.0;
+            let z1 = cube_depth * cell.scale;
+            let n_front = [0.0f32, 0.0, 1.0];
+
+            // Just front face + top face for dissolving cells (simpler, faster)
+            let base = sv.len() as u32;
+            sv.push(Vertex { position: [x0, y0, z1], normal: n_front, color: bright_color });
+            sv.push(Vertex { position: [x1, y0, z1], normal: n_front, color: bright_color });
+            sv.push(Vertex { position: [x1, y1, z1], normal: n_front, color: bright_color });
+            sv.push(Vertex { position: [x0, y1, z1], normal: n_front, color: bright_color });
+            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+
+            let n_top = [0.0f32, 1.0, 0.0];
+            let top_color = [1.0, 1.0, 1.0, alpha * 0.8];
+            let base = sv.len() as u32;
+            sv.push(Vertex { position: [x0, y0, z1], normal: n_top, color: top_color });
+            sv.push(Vertex { position: [x0, y0, z0], normal: n_top, color: top_color });
+            sv.push(Vertex { position: [x1, y0, z0], normal: n_top, color: top_color });
+            sv.push(Vertex { position: [x1, y0, z1], normal: n_top, color: top_color });
+            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+        }
+    }
 
     // HUD
     let (hv, hi) = build_hud(world);
@@ -188,26 +225,6 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
     }
 }
 
-/// Line clear flash overlays
-fn build_line_clear_flashes(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, anims: &[LineClearAnim], gw: f32, cube_depth: f32) {
-    for anim in anims {
-        let progress = anim.timer / LINE_CLEAR_DURATION;
-        let white_mix = (progress * 2.0).min(1.0);
-        let r = anim.color[0] + (1.0 - anim.color[0]) * white_mix;
-        let g = anim.color[1] + (1.0 - anim.color[1]) * white_mix;
-        let b = anim.color[2] + (1.0 - anim.color[2]) * white_mix;
-        let alpha = progress * 0.7;
-        let flash_color = [r, g, b, alpha];
-        let n = [0.0f32, 0.0, 1.0];
-        let row = anim.row as f32;
-        let base = sv.len() as u32;
-        sv.push(Vertex { position: [0.0, -row, cube_depth + 0.05], normal: n, color: flash_color });
-        sv.push(Vertex { position: [gw, -row, cube_depth + 0.05], normal: n, color: flash_color });
-        sv.push(Vertex { position: [gw, -row - 1.0, cube_depth + 0.05], normal: n, color: flash_color });
-        sv.push(Vertex { position: [0.0, -row - 1.0, cube_depth + 0.05], normal: n, color: flash_color });
-        si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-    }
-}
 
 /// HUD overlay in screen space
 fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {

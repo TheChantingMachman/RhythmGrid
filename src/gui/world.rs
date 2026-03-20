@@ -8,8 +8,9 @@ use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
+use rhythm_grid::render::piece_color;
 use super::audio_output::{self, AudioState};
-use super::drawing::Vertex;
+use super::drawing::{Vertex, rgba_to_f32};
 use super::particles::ParticleSystem;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
 use super::theme::*;
@@ -29,7 +30,7 @@ pub struct GameWorld {
     pub highs: f32,
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
-    pub(super) line_clear_anim: Vec<LineClearAnim>,
+    pub(super) clearing_cells: Vec<ClearingCell>,
     pub(super) bg_rings: Vec<BgRing>,
     pub(super) danger_level: f32,
 }
@@ -43,14 +44,16 @@ pub(super) struct BgRing {
     pub color: [f32; 4],
 }
 
-/// Active line clear flash animation
-pub(super) struct LineClearAnim {
+/// Per-cell clearing animation
+pub(super) struct ClearingCell {
+    pub col: i32,
     pub row: i32,
     pub timer: f32,
-    pub color: [f32; 4],
+    pub color: [f32; 4],   // original piece color
+    pub scale: f32,         // 1.0 → 0.0 as it dissolves
 }
 
-pub(super) const LINE_CLEAR_DURATION: f32 = 0.25;
+pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
 impl GameWorld {
     pub fn new() -> Self {
@@ -73,7 +76,7 @@ impl GameWorld {
             highs: 0.0,
             particles: ParticleSystem::new(),
             prev_beat: false,
-            line_clear_anim: Vec::new(),
+            clearing_cells: Vec::new(),
             bg_rings: Vec::new(),
             danger_level: 0.0,
         }
@@ -135,10 +138,12 @@ impl GameWorld {
 
         // Update particles and line clear animations
         self.particles.update(dt as f32);
-        for anim in &mut self.line_clear_anim {
-            anim.timer -= dt as f32;
+        for cell in &mut self.clearing_cells {
+            cell.timer -= dt as f32;
+            let progress = 1.0 - (cell.timer / LINE_CLEAR_DURATION).max(0.0);
+            cell.scale = 1.0 - progress; // shrink to 0
         }
-        self.line_clear_anim.retain(|a| a.timer > 0.0);
+        self.clearing_cells.retain(|c| c.timer > 0.0);
 
         // Smooth escalation transition
         let target_danger = if escalation_stage(&self.session.grid) == EscalationStage::Danger { 1.0 } else { 0.0 };
@@ -199,7 +204,7 @@ impl GameWorld {
                     self.session.gravity_accumulator_ms = 0;
                 }
                 GameAction::HardDrop => {
-                    // Find landing row (lowest cell) before hard_drop
+                    // Find landing position before hard_drop
                     let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
                     let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
                     let mut land_row = self.session.active_piece.row;
@@ -207,23 +212,43 @@ impl GameWorld {
                         land_row += 1;
                     }
                     let land_bottom = land_row + max_dr;
+
+                    // Simulate placement to capture clearing cells
+                    let piece_type = self.session.active_piece.piece_type;
+                    let piece_col = self.session.active_piece.col;
+                    for &(dr, dc) in &cells {
+                        let r = land_row + dr;
+                        let c = piece_col + dc;
+                        if r >= 0 && r < HEIGHT as i32 && c >= 0 && c < WIDTH as i32 {
+                            self.session.grid.cells[r as usize][c as usize] = CellState::Occupied(piece_type as u32);
+                        }
+                    }
+                    for row in 0..HEIGHT {
+                        if self.session.grid.cells[row].iter().all(|c| *c != CellState::Empty) {
+                            for col in 0..WIDTH {
+                                if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
+                                    self.clearing_cells.push(ClearingCell {
+                                        col: col as i32, row: row as i32,
+                                        timer: LINE_CLEAR_DURATION,
+                                        color: rgba_to_f32(piece_color(ti)),
+                                        scale: 1.0,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    // Undo simulation
+                    for &(dr, dc) in &cells {
+                        let r = land_row + dr;
+                        let c = piece_col + dc;
+                        if r >= 0 && r < HEIGHT as i32 && c >= 0 && c < WIDTH as i32 {
+                            self.session.grid.cells[r as usize][c as usize] = CellState::Empty;
+                        }
+                    }
+
                     let lines = hard_drop(&mut self.session.grid, &self.session.active_piece);
                     if lines > 0 {
                         self.spawn_line_clear_particles(lines, land_bottom);
-                        let color = match lines {
-                            1 => [0.5, 0.8, 1.0, 1.0],
-                            2 => [0.4, 1.0, 0.6, 1.0],
-                            3 => [1.0, 0.8, 0.2, 1.0],
-                            _ => [1.0, 0.3, 0.8, 1.0],
-                        };
-                        // Approximate cleared row positions from the landing row upward
-                        for i in 0..lines {
-                            self.line_clear_anim.push(LineClearAnim {
-                                row: land_bottom - i as i32,
-                                timer: LINE_CLEAR_DURATION,
-                                color,
-                            });
-                        }
                     }
                     self.session.total_lines += lines;
                     let level = level_for_lines(self.session.total_lines);
@@ -259,23 +284,48 @@ impl GameWorld {
         let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
         let piece_row = self.session.active_piece.row + max_dr;
 
+        // Write piece cells to grid temporarily to detect which rows will clear
+        let piece_type = self.session.active_piece.piece_type;
+        for &(dr, dc) in &cells {
+            let r = self.session.active_piece.row + dr;
+            let c = self.session.active_piece.col + dc;
+            if r >= 0 && r < HEIGHT as i32 && c >= 0 && c < WIDTH as i32 {
+                self.session.grid.cells[r as usize][c as usize] = CellState::Occupied(piece_type as u32);
+            }
+        }
+
+        // Capture clearing cells before lock_piece removes them
+        let mut rows_to_clear = Vec::new();
+        for row in 0..HEIGHT {
+            if self.session.grid.cells[row].iter().all(|c| *c != CellState::Empty) {
+                rows_to_clear.push(row);
+                for col in 0..WIDTH {
+                    if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
+                        let color = rgba_to_f32(piece_color(ti));
+                        self.clearing_cells.push(ClearingCell {
+                            col: col as i32,
+                            row: row as i32,
+                            timer: LINE_CLEAR_DURATION,
+                            color,
+                            scale: 1.0,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Undo the manual cell writes — let lock_piece handle it properly
+        for &(dr, dc) in &cells {
+            let r = self.session.active_piece.row + dr;
+            let c = self.session.active_piece.col + dc;
+            if r >= 0 && r < HEIGHT as i32 && c >= 0 && c < WIDTH as i32 {
+                self.session.grid.cells[r as usize][c as usize] = CellState::Empty;
+            }
+        }
+
         let lines = lock_piece(&mut self.session.grid, &self.session.active_piece);
         if lines > 0 {
             self.spawn_line_clear_particles(lines, piece_row);
-            let color = match lines {
-                1 => [0.5, 0.8, 1.0, 1.0],
-                2 => [0.4, 1.0, 0.6, 1.0],
-                3 => [1.0, 0.8, 0.2, 1.0],
-                _ => [1.0, 0.3, 0.8, 1.0],
-            };
-            // Approximate cleared row positions from the piece bottom upward
-            for i in 0..lines {
-                self.line_clear_anim.push(LineClearAnim {
-                    row: piece_row - i as i32,
-                    timer: LINE_CLEAR_DURATION,
-                    color,
-                });
-            }
         }
         self.session.total_lines += lines;
         let level = level_for_lines(self.session.total_lines);
