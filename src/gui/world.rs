@@ -33,6 +33,7 @@ pub struct GameWorld {
     pub(super) clearing_cells: Vec<ClearingCell>,
     pub(super) bg_rings: Vec<BgRing>,
     pub(super) danger_level: f32,
+    pub(super) window_aspect: f32, // actual window aspect ratio for HUD scaling
 }
 
 /// Expanding ring in the background
@@ -79,6 +80,7 @@ impl GameWorld {
             clearing_cells: Vec::new(),
             bg_rings: Vec::new(),
             danger_level: 0.0,
+            window_aspect: THEME.win_w as f32 / THEME.win_h as f32,
         }
     }
 
