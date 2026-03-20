@@ -1,3 +1,4 @@
+use rustfft::{FftPlanner, num_complex::Complex};
 use std::path::Path;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
@@ -244,6 +245,64 @@ impl BeatDetector {
             None
         }
     }
+}
+
+// --- FFT Frequency Band Decomposition ---
+
+const BASS_LOW: u32 = 20;
+const BASS_HIGH: u32 = 250;
+const MIDS_LOW: u32 = 250;
+const MIDS_HIGH: u32 = 4000;
+const HIGHS_LOW: u32 = 4000;
+const HIGHS_HIGH: u32 = 20000;
+
+pub fn fft_bands(samples: &[f32], sample_rate: u32) -> (f32, f32, f32) {
+    if samples.is_empty() || sample_rate == 0 {
+        return (0.0, 0.0, 0.0);
+    }
+
+    let n = samples.len();
+
+    // Apply Hann window and convert to complex
+    let mut buffer: Vec<Complex<f32>> = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let window = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n - 1).max(1) as f32).cos());
+            Complex { re: s * window, im: 0.0 }
+        })
+        .collect();
+
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(n);
+    fft.process(&mut buffer);
+
+    // Only use first half (positive frequencies)
+    let num_bins = n / 2 + 1;
+    let bin_hz = sample_rate as f32 / n as f32;
+
+    let bin_energy = |bin: usize| -> f32 {
+        let c = buffer[bin];
+        c.re * c.re + c.im * c.im
+    };
+
+    let band_power = |low_hz: u32, high_hz: u32| -> f32 {
+        let low_bin = ((low_hz as f32 / bin_hz).floor() as usize).min(num_bins - 1);
+        let high_bin = ((high_hz as f32 / bin_hz).ceil() as usize).min(num_bins - 1);
+        (low_bin..=high_bin).map(bin_energy).sum()
+    };
+
+    let total_power: f32 = (0..num_bins).map(bin_energy).sum();
+
+    if total_power == 0.0 {
+        return (0.0, 0.0, 0.0);
+    }
+
+    let bass = band_power(BASS_LOW, BASS_HIGH) / total_power;
+    let mids = band_power(MIDS_LOW, MIDS_HIGH) / total_power;
+    let highs = band_power(HIGHS_LOW, HIGHS_HIGH) / total_power;
+
+    (bass, mids, highs)
 }
 
 pub fn generate_procedural(bpm: u32, duration_secs: f32, sample_rate: u32) -> DecodedAudio {
