@@ -421,6 +421,10 @@ impl GpuState {
         self.depth_texture = Self::create_depth_texture(&self.device, &self.config);
     }
 
+    pub fn aspect_ratio(&self) -> f32 {
+        self.config.width as f32 / self.config.height.max(1) as f32
+    }
+
     pub fn update_uniforms(&self, uniforms: &Uniforms) {
         self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[*uniforms]));
     }
@@ -449,18 +453,6 @@ impl GpuState {
             label: None, contents: bytemuck::cast_slice(hud_indices), usage: wgpu::BufferUsages::INDEX,
         });
 
-        // Letterboxed viewport
-        let target_aspect = THEME.win_w as f32 / THEME.win_h as f32;
-        let sw = self.config.width as f32;
-        let sh = self.config.height as f32;
-        let sa = sw / sh;
-        let (vp_w, vp_h, vp_x, vp_y) = if sa > target_aspect {
-            let h = sh; let w = h * target_aspect;
-            (w, h, (sw - w) / 2.0, 0.0)
-        } else {
-            let w = sw; let h = w / target_aspect;
-            (w, h, 0.0, (sh - h) / 2.0)
-        };
 
         // Pass 1: 3D scene → scene_texture (with camera uniform)
         {
@@ -479,7 +471,7 @@ impl GpuState {
                     depth_stencil_attachment: None,
                     ..Default::default()
                 });
-                pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
+                // Full surface — no viewport restriction, background fills to edges
                 pass.set_pipeline(&self.scene_pipeline);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
                 pass.set_vertex_buffer(0, scene_vb.slice(..));
@@ -507,7 +499,7 @@ impl GpuState {
                     depth_stencil_attachment: None,
                     ..Default::default()
                 });
-                pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
+                // Full surface — no viewport restriction, background fills to edges
                 pass.set_pipeline(&self.scene_pipeline_no_depth);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
                 pass.set_vertex_buffer(0, hud_vb.slice(..));

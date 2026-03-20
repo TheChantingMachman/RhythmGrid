@@ -316,13 +316,10 @@ impl GameWorld {
         }
     }
 
-    pub fn compute_uniforms(&self) -> Uniforms {
-        // Board center in world space: x=5, y=-10, z=0
+    pub fn compute_uniforms(&self, aspect: f32) -> Uniforms {
         let board_cx = WIDTH as f32 / 2.0;
         let board_cy = -(HEIGHT as f32) / 2.0;
 
-        // Camera orbits when paused
-        // Camera centered on board, straight-on with slight elevation
         let orbit = if self.session.state == GameState::Paused {
             (self.camera_angle - DEFAULT_CAM_ANGLE).sin() * 4.0
         } else {
@@ -335,8 +332,6 @@ impl GameWorld {
         let eye = [cam_x, cam_y, cam_z];
         let target = [board_cx, board_cy, 0.0];
         let up = [0.0, 1.0, 0.0];
-
-        let aspect = THEME.win_w as f32 / THEME.win_h as f32;
 
         let view = look_at(eye, target, up);
         let proj = perspective(1.2, aspect, 0.1, 200.0);

@@ -56,7 +56,7 @@ impl ApplicationHandler for App {
                 self.world.tick();
                 let ((sv, si), (hv, hi)) = self.world.build_scene_and_hud();
                 if let Some(gpu) = &self.gpu {
-                    gpu.update_uniforms(&self.world.compute_uniforms());
+                    gpu.update_uniforms(&self.world.compute_uniforms(gpu.aspect_ratio()));
                     gpu.render(&sv, &si, &hv, &hi);
                 }
                 if let Some(w) = &self.window {
