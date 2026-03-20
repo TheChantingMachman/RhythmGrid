@@ -155,7 +155,7 @@ fn fs_bloom_composite(in: VsOut) -> @location(0) vec4<f32> {
     }
     bloom /= count;
 
-    let bloom_strength = 0.6;
+    let bloom_strength = 0.8;
     return vec4<f32>(scene.rgb + bloom * bloom_strength, scene.a);
 }
 "#;
@@ -172,9 +172,9 @@ pub struct GpuState {
     msaa_texture: wgpu::TextureView,
     scene_texture: wgpu::TextureView,
     depth_texture: wgpu::TextureView,
-    _bloom_pipeline: wgpu::RenderPipeline,
-    _sampler: wgpu::Sampler,
-    _bloom_bind_group_layout: wgpu::BindGroupLayout,
+    bloom_pipeline: wgpu::RenderPipeline,
+    sampler: wgpu::Sampler,
+    bloom_bind_group_layout: wgpu::BindGroupLayout,
     uniform_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
 }
@@ -351,7 +351,7 @@ impl GpuState {
             surface, device, queue, config,
             scene_pipeline, scene_pipeline_no_depth,
             msaa_texture, scene_texture, depth_texture,
-            _bloom_pipeline: bloom_pipeline, _sampler: sampler, _bloom_bind_group_layout: bind_group_layout,
+            bloom_pipeline, sampler, bloom_bind_group_layout: bind_group_layout,
             uniform_buffer, scene_bind_group,
         }
     }
@@ -437,62 +437,92 @@ impl GpuState {
             (w, h, 0.0, (sh - h) / 2.0)
         };
 
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-
-        // Pass 1: 3D scene with depth → directly to surface (skip bloom for now)
+        // Pass 1: 3D scene → scene_texture (with camera uniform)
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("scene_3d"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &surface_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
-            pass.set_pipeline(&self.scene_pipeline);
-            pass.set_bind_group(0, &self.scene_bind_group, &[]);
-            pass.set_vertex_buffer(0, scene_vb.slice(..));
-            pass.set_index_buffer(scene_ib.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..scene_indices.len() as u32, 0, 0..1);
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("scene_3d"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.scene_texture,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
+                pass.set_pipeline(&self.scene_pipeline);
+                pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                pass.set_vertex_buffer(0, scene_vb.slice(..));
+                pass.set_index_buffer(scene_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..scene_indices.len() as u32, 0, 0..1);
+            }
+            self.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        // Submit scene pass first, then update uniform for HUD
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        // Now write identity for HUD pass
+        // Pass 2: HUD → scene_texture (with identity uniform)
         self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[Uniforms::identity()]));
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-
-        // Pass 1b: HUD overlay (no depth, identity matrix) → surface
         if !hud_indices.is_empty() {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("hud"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &surface_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
-            pass.set_pipeline(&self.scene_pipeline_no_depth);
-            pass.set_bind_group(0, &self.scene_bind_group, &[]);
-            pass.set_vertex_buffer(0, hud_vb.slice(..));
-            pass.set_index_buffer(hud_ib.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..hud_indices.len() as u32, 0, 0..1);
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("hud"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.scene_texture,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
+                pass.set_pipeline(&self.scene_pipeline_no_depth);
+                pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                pass.set_vertex_buffer(0, hud_vb.slice(..));
+                pass.set_index_buffer(hud_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..hud_indices.len() as u32, 0, 0..1);
+            }
+            self.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        // Pass 3: Bloom composite — sample scene_texture → surface
+        {
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None, layout: &self.bloom_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.scene_texture) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                ],
+            });
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("bloom_composite"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &surface_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.bloom_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            self.queue.submit(std::iter::once(encoder.finish()));
+        }
+
         output.present();
     }
 }
