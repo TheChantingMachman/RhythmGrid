@@ -14,7 +14,7 @@ use super::world::{GameWorld, LineClearAnim, LINE_CLEAR_DURATION};
 pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
     let amp = world.amplitude;
     let beat = world.beat_intensity;
-    let cube_depth = 0.5;
+    let cube_depth = 0.75; // chunkier cubes for more substantial 3D feel
 
     let mut sv = Vec::new();
     let mut si = Vec::new();

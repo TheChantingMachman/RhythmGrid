@@ -113,9 +113,9 @@
   depends_on: [game.move_down, game.level]
 - id: game.next_piece
   section: Game
-  description: The next piece to spawn is visible to the player. Uses a 7-bag randomizer so all 7 types appear before any repeats.
+  description: The next piece to spawn is visible to the player. Uses a 7-bag randomizer so all 7 types appear before any repeats. Bag is shuffled with a time-based seed (system time at creation) for unique sequences each game.
   tags: [core, game]
-  status: implemented
+  status: stale
 - id: game.escalation
   section: Game
   description: '2-stage escalation based on stack height. Normal: baseline effects. Danger: music speeds up, effects intensify.'
@@ -263,3 +263,10 @@
   status: implemented
   constants: {bass_high: 250, bass_low: 20, highs_high: 20000, highs_low: 4000, mids_high: 4000, mids_low: 250}
   depends_on: [audio.amplitude]
+- id: game.lock_delay
+  section: Game
+  description: After a piece can no longer move down, a brief lock delay of 500ms begins before the piece locks. Any successful move or rotation resets the timer. Maximum of 15 resets per piece. If the timer expires or resets are exhausted, the piece locks immediately.
+  tags: [core, game, timing]
+  status: draft
+  constants: {delay_ms: 500, max_resets: 15}
+  depends_on: [game.lock, game.move_down]
