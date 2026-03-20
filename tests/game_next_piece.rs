@@ -1,4 +1,4 @@
-// @spec-tags: game.next_piece
+// @spec-tags: core,game
 // @invariants: PieceBag is a 7-bag randomizer; seed derived from system time at creation for unique sequences; new_seeded(seed) for deterministic testing; next() returns values in 0..=6; all 7 types appear before any repeat; peek() returns the same value next() will return without advancing the bag
 // @build: 58
 

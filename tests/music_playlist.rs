@@ -1,4 +1,4 @@
-// @spec-tags: music.shuffle,music.auto_advance,music.skip
+// @spec-tags: core,music,playback
 // @invariants: Playlist::new initializes with current_index=0 and shuffle disabled; advance increments index and wraps to 0 at end; current returns None for empty list; toggle_shuffle flips shuffle state and resets index to 0, restoring original order on disable
 // @build: 43
 

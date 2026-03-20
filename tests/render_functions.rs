@@ -1,4 +1,4 @@
-// @spec-tags: render.piece_colors,render.board_layout
+// @spec-tags: render,color,layout
 // @invariants: piece_color maps type_index 0-6 to correct RGBA values and panics for >=7; cell_rect returns correct pixel rectangle; constants CELL_SIZE/BOARD_WIDTH_PX/BOARD_HEIGHT_PX have correct values
 // @build: 49
 

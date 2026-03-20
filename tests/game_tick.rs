@@ -1,4 +1,4 @@
-// @spec-tags: game.tick
+// @spec-tags: core,game,timing
 // @invariants: TickResult enum variants are correct; GameSession::new initializes correctly; tick() accumulates dt, fires gravity, returns PieceMoved/PieceLocked/GameOver/Nothing; TETROMINO_TYPES constant maps indices to TetrominoType
 // @build: 52
 

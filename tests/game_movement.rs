@@ -1,4 +1,4 @@
-// @spec-tags: game.move_horizontal,game.move_down,game.hard_drop,game.rotate,game.lock,game.line_clear
+// @spec-tags: core,game,movement,rotation,scoring
 // @invariants: move_horizontal/move_down return true and mutate piece on success, false and leave piece unchanged on rejection; hard_drop locks piece at lowest valid row and returns lines cleared; rotate tries unshifted then SRS kicks updating rotation+col+row on first valid position, returns false only when all attempts fail; lock_piece writes CellState::Occupied(type_index) for each cell and triggers line clearing; clear_lines removes fully-occupied rows, shifts rows above down by one, inserts empty row at index 0, returns count
 // @build: 38
 

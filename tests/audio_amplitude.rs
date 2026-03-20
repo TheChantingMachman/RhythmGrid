@@ -1,4 +1,4 @@
-// @spec-tags: audio.amplitude
+// @spec-tags: core,audio,analysis
 // @invariants: RMS amplitude computation over stored audio samples, normalized 0.0-1.0
 // @build: 36
 

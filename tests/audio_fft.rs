@@ -1,4 +1,4 @@
-// @spec-tags: audio.fft
+// @spec-tags: core,audio,analysis
 // @invariants: fft_bands returns normalized (bass, mids, highs) energy per band; edge cases return (0,0,0); pure tones route to correct band; values in [0.0,1.0]
 // @build: 56
 

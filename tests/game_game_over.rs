@@ -1,4 +1,4 @@
-// @spec-tags: game.game_over
+// @spec-tags: core,game,state
 // @invariants: is_game_over(grid, piece) returns true when is_valid_position returns false for the piece's current cells at (row,col); false when position is valid; used to detect immediate collision of a newly spawned piece
 // @build: 43
 

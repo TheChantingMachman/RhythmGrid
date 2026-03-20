@@ -1,4 +1,4 @@
-// @spec-tags: pieces.tetromino_count,pieces.tetromino_cells,pieces.rotation,pieces.srs_kicks,pieces.spawn
+// @spec-tags: core,pieces,rotation
 // @invariants: TetrominoType enum has 7 variants (I=0..L=6); PIECE_CELLS is [7][4][4] of (row_delta,col_delta); piece_cells() matches PIECE_CELLS; O-piece all rotations identical; JLSTZ_KICKS and I_KICKS are [8][4]; srs_kicks O-piece returns [(0,0);4]; srs_kicks CW uses indices 0-3, CCW uses 4-7; try_spawn on empty grid returns Some((0,4))
 // @build: 37
 

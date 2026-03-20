@@ -1,4 +1,4 @@
-// @spec-tags: config.load_save,config.music_folder
+// @spec-tags: core,config,music
 // @invariants: Settings struct defaults (volume, speed, music_folder), TOML serialization round-trip, load/save behavior, missing file fallback, music_folder optional field handling
 // @build: 45
 

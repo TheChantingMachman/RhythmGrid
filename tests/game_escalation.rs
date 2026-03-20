@@ -1,4 +1,4 @@
-// @spec-tags: game.escalation
+// @spec-tags: core,game,escalation
 // @invariants: escalation_stage returns Danger if any occupied cell exists at row < DANGER_THRESHOLD_ROW (4), otherwise Normal
 // @build: 33
 

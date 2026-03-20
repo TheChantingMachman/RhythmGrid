@@ -1,4 +1,4 @@
-// @spec-tags: audio.playback
+// @spec-tags: core,audio,playback
 // @invariants: PlaybackState enum has Playing/Paused/Stopped variants, derives Debug/Clone/PartialEq; AudioPlayer::new(DecodedAudio) starts Stopped at position 0; play() -> Playing (no-op if already Playing); pause() -> Paused only when Playing (no-op when Stopped/Paused); stop() -> Stopped, resets position (no-op if already Stopped)
 // @build: 35
 

@@ -1,4 +1,4 @@
-// @spec-tags: game.state
+// @spec-tags: core,game,state
 // @invariants: GameState enum has Menu/Playing/Paused/GameOver variants; Default=Menu; transition(&self, target) -> bool with valid transitions: Menu->Playing, Playing->Paused, Paused->Playing, Playing->GameOver, GameOver->Menu; derives Debug, Clone, Copy, PartialEq
 // @build: 35
 

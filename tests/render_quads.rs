@@ -1,4 +1,4 @@
-// @spec-tags: render.cell_quads,render.next_piece_preview
+// @spec-tags: render,draw,ui
 // @invariants: board_quads emits quads for occupied cells, active piece (alpha=255), and ghost piece (alpha=80); ghost coinciding with active is skipped; next_piece_quads returns 4 quads from rotation-0 cells at correct pixel offsets with piece_color
 // @build: 52
 

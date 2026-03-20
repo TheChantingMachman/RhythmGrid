@@ -1,4 +1,4 @@
-// @spec-tags: game.collision
+// @spec-tags: core,game,collision
 // @invariants: is_valid_position returns true iff all piece cells land within rows 0..20, cols 0..10, and none overlap CellState::Occupied(_); cell coordinates are (row,col) i32 with anchor + offset; one out-of-bounds or occupied cell invalidates the whole piece
 // @build: 30
 

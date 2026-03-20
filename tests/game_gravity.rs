@@ -1,4 +1,4 @@
-// @spec-tags: game.gravity
+// @spec-tags: core,game,timing
 // @invariants: gravity_interval_ms(level) returns max(100, 1000-(level-1)*100) clamped to 100ms at level 10+; gravity_tick returns (true,0) when move_down succeeds after interval elapses, or (false,accumulated_ms) unchanged when interval has not yet elapsed
 // @build: 43
 

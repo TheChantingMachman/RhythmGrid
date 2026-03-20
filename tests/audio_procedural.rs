@@ -1,4 +1,4 @@
-// @spec-tags: audio.procedural
+// @spec-tags: core,audio,procedural
 // @invariants: generate_procedural returns mono (channels=1) DecodedAudio; DEFAULT_BPM=120; output is deterministic for same inputs; sample count = round(duration_secs * sample_rate)
 // @build: 33
 

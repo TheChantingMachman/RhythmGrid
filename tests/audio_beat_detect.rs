@@ -1,4 +1,4 @@
-// @spec-tags: audio.beat_detect
+// @spec-tags: core,audio,analysis
 // @invariants: BeatDetector emits BeatEvent when amplitude > rolling_mean*1.5 and >= 0.3s since last beat; 43-sample rolling window; minimum inter-beat gap enforced; BeatEvent carries correct timestamp
 // @build: 52
 

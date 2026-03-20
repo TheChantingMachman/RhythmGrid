@@ -1,4 +1,4 @@
-// @spec-tags: audio.decode
+// @spec-tags: core,audio,decode
 // @invariants: decode_audio decodes MP3/WAV/FLAC/OGG to PCM; returns FileNotFound for missing files, UnsupportedFormat for unknown extensions; SUPPORTED_FORMATS = ["mp3","wav","flac","ogg"]; DecodedAudio has sample_rate:u32, channels:u16, samples:Vec<f32>
 // @build: 33
 

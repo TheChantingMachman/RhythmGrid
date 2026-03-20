@@ -1,4 +1,4 @@
-// @spec-tags: audio.speed
+// @spec-tags: core,audio,playback,escalation
 // @invariants: Speed control constants, default value, set/get, and clamping behavior
 // @build: 36
 

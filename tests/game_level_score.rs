@@ -1,4 +1,4 @@
-// @spec-tags: game.level,game.score
+// @spec-tags: core,game,progression,scoring
 // @invariants: level_for_lines and score_for_lines are pure free functions in game; six constants exported; level=1+lines/10 (no cap); score maps 1->100,2->300,3->500,4->800 times level, 0 otherwise
 // @build: 42
 

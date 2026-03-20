@@ -1,4 +1,4 @@
-// @spec-tags: music.scan_folder
+// @spec-tags: core,music,filesystem
 // @invariants: scan_folder(path:&Path)->Vec<PathBuf> scans non-recursively for mp3/wav/flac/ogg (case-insensitive); returns empty Vec for missing/empty dirs; returns full absolute paths; excludes unsupported and extensionless files
 // @build: 35
 

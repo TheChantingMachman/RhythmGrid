@@ -1,4 +1,4 @@
-// @spec-tags: grid.dimensions,grid.cell_state
+// @spec-tags: core,grid
 // @invariants: Grid is 10 columns wide, 20 rows tall; cells initialise to Empty; CellState is Empty or Occupied(u32)
 // @build: 26
 

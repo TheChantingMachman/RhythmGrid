@@ -1,4 +1,4 @@
-// @spec-tags: config.xdg_paths
+// @spec-tags: core,config,filesystem
 // @invariants: config_dir() returns XDG_CONFIG_HOME/rhythmgrid or ~/.config/rhythmgrid; data_dir() returns XDG_DATA_HOME/rhythmgrid or ~/.local/share/rhythmgrid; no directory is created on disk; both paths always end with "rhythmgrid"
 // @build: 30
 

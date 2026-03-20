@@ -1,4 +1,4 @@
-// @spec-tags: audio.volume
+// @spec-tags: core,audio,playback
 // @invariants: Volume control constants, default value, set/get, and clamping behavior
 // @build: 36
 

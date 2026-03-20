@@ -1,4 +1,4 @@
-// @spec-tags: music.now_playing
+// @spec-tags: core,music,ui
 // @invariants: NowPlaying struct has pub fields filename:String, duration:f32, elapsed:f32; derives Debug, Clone, PartialEq; constructed via struct literal
 // @build: 35
 
