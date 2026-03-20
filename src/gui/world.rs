@@ -216,6 +216,18 @@ impl GameWorld {
         }
     }
 
+    pub fn skip_track(&mut self) {
+        if let Ok(mut audio) = self.audio.try_lock() {
+            audio.skip_requested = true;
+        }
+    }
+
+    pub fn adjust_volume(&mut self, delta: f32) {
+        if let Ok(mut audio) = self.audio.try_lock() {
+            audio.volume = (audio.volume + delta).clamp(0.0, 1.0);
+        }
+    }
+
     /// Call when mouse moves to reveal HUD
     pub fn on_mouse_activity(&mut self) {
         self.hud_opacity = 1.0;

@@ -375,7 +375,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     if world.session.state == GameState::Paused {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, 60]), 0.08);
-        let pa_w = 220.0; let pa_h = 120.0;
+        let pa_w = 220.0; let pa_h = 150.0;
         let pa_x = (w - pa_w) / 2.0;
         let pa_y = (h - pa_h) / 2.0;
         push_panel(&mut verts, &mut indices, pa_x, pa_y, pa_w, pa_h, 0.09);
@@ -386,6 +386,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 74.0, "SPC HARD", dim_col, 1.0);
         push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 86.0, "UP CW  Z CCW", dim_col, 1.0);
         push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 98.0, "P RESUME", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 116.0, "N SKIP  +- VOL", dim_col, 1.0);
     }
 
     // Particles (always visible, not affected by HUD fade)

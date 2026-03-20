@@ -17,9 +17,11 @@ pub struct AudioState {
     pub mids: f32,
     pub highs: f32,
     pub track_name: String,
+    pub volume: f32,           // 0.0-1.0, applied in audio callback
+    pub skip_requested: bool,  // set by game loop, consumed by decode thread
     beat_detector: BeatDetector,
     elapsed_secs: f64,
-    fft_buffer: Vec<f32>, // accumulate samples for FFT window
+    fft_buffer: Vec<f32>,
     fft_sample_rate: u32,
 }
 
@@ -33,6 +35,8 @@ impl AudioState {
             mids: 0.0,
             highs: 0.0,
             track_name: String::new(),
+            volume: 0.5,
+            skip_requested: false,
             beat_detector: BeatDetector::new(),
             elapsed_secs: 0.0,
             fft_buffer: Vec::with_capacity(2048),
@@ -124,11 +128,12 @@ fn track_name_from_path(path: &PathBuf) -> String {
 }
 
 /// Decode a track and push samples into the shared buffer in chunks.
-/// Returns false if decode failed.
+/// Returns false if decode failed or skip was requested.
 fn stream_decode_track(
     path: &PathBuf,
     target_sample_rate: u32,
     buffer: &Arc<Mutex<SampleBuffer>>,
+    state: &Arc<Mutex<AudioState>>,
 ) -> bool {
     let audio = match decode_audio(path) {
         Ok(a) => a,
@@ -149,10 +154,17 @@ fn stream_decode_track(
     // Push in chunks to avoid holding the lock too long
     let chunk_size = 44100 * channels; // ~1 second chunks
     for chunk in samples.chunks(chunk_size) {
+        // Check for skip before pushing each chunk
+        if let Ok(mut s) = state.try_lock() {
+            if s.skip_requested {
+                s.skip_requested = false;
+                return false;
+            }
+        }
         // Wait if buffer is too full (back-pressure)
         loop {
             if let Ok(buf) = buffer.try_lock() {
-                if buf.samples.len() < 44100 * channels * 20 { // ~20s max buffer
+                if buf.samples.len() < 44100 * channels * 20 {
                     break;
                 }
             }
@@ -251,15 +263,27 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                     buf.finished = false;
                 }
 
-                let ok = stream_decode_track(&track_path, sample_rate, &buffer_decode);
+                let ok = stream_decode_track(&track_path, sample_rate, &buffer_decode, &state_decode);
 
                 if !ok {
                     // Skip broken track
                 }
 
-                // Wait for playback to finish (buffer drained and finished flag set)
+                // Wait for playback to finish or skip signal
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(100));
+                    // Check for skip request
+                    if let Ok(mut s) = state_decode.try_lock() {
+                        if s.skip_requested {
+                            s.skip_requested = false;
+                            // Clear the buffer to stop current track
+                            if let Ok(mut buf) = buffer_decode.try_lock() {
+                                buf.samples.clear();
+                                buf.finished = true;
+                            }
+                            break;
+                        }
+                    }
                     if let Ok(buf) = buffer_decode.try_lock() {
                         if buf.finished && buf.samples.is_empty() {
                             break;
@@ -294,12 +318,14 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut chunk_mono = Vec::with_capacity(data.len() / out_channels);
 
+                // Read volume from shared state
+                let vol = state_play.try_lock().map(|s| s.volume).unwrap_or(0.5);
+
                 if let Ok(mut buf) = buffer_play.try_lock() {
                     let src_ch = buf.channels.max(1);
 
                     for frame in data.chunks_mut(out_channels) {
                         if buf.samples.len() >= src_ch {
-                            // Read one frame from buffer
                             let mut mono = 0.0f32;
                             for out_s in frame.iter_mut() {
                                 *out_s = 0.0;
@@ -307,9 +333,8 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                             for ch in 0..src_ch {
                                 if let Some(sample) = buf.samples.pop_front() {
                                     mono += sample;
-                                    // Map source channel to output channels
                                     let out_ch_idx = ch % out_channels;
-                                    frame[out_ch_idx] += sample * 0.5;
+                                    frame[out_ch_idx] += sample * vol;
                                 }
                             }
                             chunk_mono.push(mono / src_ch as f32);

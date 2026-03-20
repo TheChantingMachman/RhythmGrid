@@ -42,9 +42,17 @@ impl ApplicationHandler for App {
                 self.pending_resize = Some((new_size.width, new_size.height));
             }
             WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Pressed, .. }, .. } => {
-                let rg_key = winit_to_rg(code);
-                if let Some(action) = input::map_key(rg_key) {
-                    self.world.handle_action(action);
+                use winit::keyboard::KeyCode as K;
+                match code {
+                    K::KeyN => self.world.skip_track(),
+                    K::Equal | K::NumpadAdd => self.world.adjust_volume(0.05),
+                    K::Minus | K::NumpadSubtract => self.world.adjust_volume(-0.05),
+                    _ => {
+                        let rg_key = winit_to_rg(code);
+                        if let Some(action) = input::map_key(rg_key) {
+                            self.world.handle_action(action);
+                        }
+                    }
                 }
             }
             WindowEvent::CursorMoved { .. } => {
