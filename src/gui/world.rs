@@ -27,8 +27,18 @@ pub struct GameWorld {
     pub beat_intensity: f32,
     pub amplitude: f32,
     pub particles: ParticleSystem,
-    prev_beat: bool, // edge detect for beat spawning
+    prev_beat: bool,
+    line_clear_anim: Vec<LineClearAnim>,
 }
+
+/// Active line clear flash animation
+struct LineClearAnim {
+    row: i32,        // grid row that was cleared
+    timer: f32,      // countdown (starts at DURATION)
+    color: [f32; 4], // flash color
+}
+
+const LINE_CLEAR_DURATION: f32 = 0.25;
 
 impl GameWorld {
     pub fn new() -> Self {
@@ -48,6 +58,7 @@ impl GameWorld {
             amplitude: 0.0,
             particles: ParticleSystem::new(),
             prev_beat: false,
+            line_clear_anim: Vec::new(),
         }
     }
 
@@ -77,8 +88,12 @@ impl GameWorld {
         }
         self.prev_beat = got_beat;
 
-        // Update particles
+        // Update particles and line clear animations
         self.particles.update(dt as f32);
+        for anim in &mut self.line_clear_anim {
+            anim.timer -= dt as f32;
+        }
+        self.line_clear_anim.retain(|a| a.timer > 0.0);
 
         // Always advance preview rotation (even when paused)
         self.preview_angle += dt as f32 * 0.8;
@@ -141,6 +156,20 @@ impl GameWorld {
                     let lines = hard_drop(&mut self.session.grid, &self.session.active_piece);
                     if lines > 0 {
                         self.spawn_line_clear_particles(lines, land_bottom);
+                        let color = match lines {
+                            1 => [0.5, 0.8, 1.0, 1.0],
+                            2 => [0.4, 1.0, 0.6, 1.0],
+                            3 => [1.0, 0.8, 0.2, 1.0],
+                            _ => [1.0, 0.3, 0.8, 1.0],
+                        };
+                        // Approximate cleared row positions from the landing row upward
+                        for i in 0..lines {
+                            self.line_clear_anim.push(LineClearAnim {
+                                row: land_bottom - i as i32,
+                                timer: LINE_CLEAR_DURATION,
+                                color,
+                            });
+                        }
                     }
                     self.session.total_lines += lines;
                     let level = level_for_lines(self.session.total_lines);
@@ -172,13 +201,27 @@ impl GameWorld {
     }
 
     fn lock_and_spawn(&mut self) {
-        // Find the lowest cell of the piece (where clears happen)
         let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
         let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
         let piece_row = self.session.active_piece.row + max_dr;
+
         let lines = lock_piece(&mut self.session.grid, &self.session.active_piece);
         if lines > 0 {
             self.spawn_line_clear_particles(lines, piece_row);
+            let color = match lines {
+                1 => [0.5, 0.8, 1.0, 1.0],
+                2 => [0.4, 1.0, 0.6, 1.0],
+                3 => [1.0, 0.8, 0.2, 1.0],
+                _ => [1.0, 0.3, 0.8, 1.0],
+            };
+            // Approximate cleared row positions from the piece bottom upward
+            for i in 0..lines {
+                self.line_clear_anim.push(LineClearAnim {
+                    row: piece_row - i as i32,
+                    timer: LINE_CLEAR_DURATION,
+                    color,
+                });
+            }
         }
         self.session.total_lines += lines;
         let level = level_for_lines(self.session.total_lines);
@@ -321,6 +364,26 @@ impl GameWorld {
         }
 
         // === 2D HUD (NDC, same as before) ===
+        // Line clear flash animations (3D world space)
+        for anim in &self.line_clear_anim {
+            let progress = anim.timer / LINE_CLEAR_DURATION; // 1.0 → 0.0
+            // Bright white flash that fades to colored, then transparent
+            let white_mix = (progress * 2.0).min(1.0); // white for first half
+            let r = anim.color[0] + (1.0 - anim.color[0]) * white_mix;
+            let g = anim.color[1] + (1.0 - anim.color[1]) * white_mix;
+            let b = anim.color[2] + (1.0 - anim.color[2]) * white_mix;
+            let alpha = progress * 0.7;
+            let flash_color = [r, g, b, alpha];
+            let n = [0.0f32, 0.0, 1.0];
+            let row = anim.row as f32;
+            let base = sv.len() as u32;
+            sv.push(Vertex { position: [0.0, -row, cube_depth + 0.05], normal: n, color: flash_color });
+            sv.push(Vertex { position: [gw, -row, cube_depth + 0.05], normal: n, color: flash_color });
+            sv.push(Vertex { position: [gw, -row - 1.0, cube_depth + 0.05], normal: n, color: flash_color });
+            sv.push(Vertex { position: [0.0, -row - 1.0, cube_depth + 0.05], normal: n, color: flash_color });
+            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+        }
+
         let (hv, hi) = self.build_hud();
 
         ((sv, si), (hv, hi))
