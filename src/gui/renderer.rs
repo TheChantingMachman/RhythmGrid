@@ -208,7 +208,7 @@ impl GpuState {
     pub fn new(window: Arc<Window>) -> Self {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends: wgpu::Backends::VULKAN,
             ..Default::default()
         });
         let surface = instance.create_surface(window).expect("create surface");
