@@ -55,6 +55,15 @@ impl ApplicationHandler for App {
                 }
                 self.world.tick();
                 let ((sv, si), (hv, hi)) = self.world.build_scene_and_hud();
+                if sv.len() > 0 && si.len() > 0 {
+                    // Print once
+                    static ONCE: std::sync::Once = std::sync::Once::new();
+                    ONCE.call_once(|| {
+                        eprintln!("Scene: {} verts, {} indices | HUD: {} verts, {} indices",
+                            sv.len(), si.len(), hv.len(), hi.len());
+                        eprintln!("First scene vert: {:?}", sv[0]);
+                    });
+                }
                 if let Some(gpu) = &self.gpu {
                     gpu.update_uniforms(&self.world.compute_uniforms());
                     gpu.render(&sv, &si, &hv, &hi);

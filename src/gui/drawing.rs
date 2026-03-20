@@ -4,7 +4,7 @@ use super::font::FONT;
 use super::theme::THEME;
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     pub position: [f32; 3],
     pub color: [f32; 4],
@@ -206,6 +206,98 @@ pub fn push_panel(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     push_quad(verts, indices, x, y, w, h, bg, z);
     let highlight = rgba_to_f32([60, 60, 90, 100]);
     push_quad(verts, indices, x, y, w, 1.0, highlight, z + 0.001);
+}
+
+/// 3D cube in world space. Position is grid (col, row), y-up convention.
+/// Each face has uniform color with lighting baked in via face direction.
+pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+                    col: f32, row: f32, depth: f32, color: [f32; 4],
+                    glow_boost: f32) {
+    let gap = 0.04;
+    let x0 = col + gap;
+    let x1 = col + 1.0 - gap;
+    let y0 = -row - gap;        // top of cell (y-up)
+    let y1 = -row - 1.0 + gap;  // bottom of cell
+    let z0 = 0.0;               // back face
+    let z1 = depth;              // front face (toward camera)
+
+    // Face colors: front bright, top brighter, sides darker, bottom darkest
+    let front = brighten(color, 1.1);
+    let back = darken(color, 0.3);
+    let top = brighten(color, 1.25);
+    let bottom = darken(color, 0.5);
+    let right = darken(color, 0.65);
+    let left = darken(color, 0.75);
+
+    let faces: &[([f32; 4], [[f32; 3]; 4])] = &[
+        // Front (z1) — CCW from front
+        (front, [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]),
+        // Back (z0)
+        (back, [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]]),
+        // Top (y0)
+        (top, [[x0, y0, z1], [x0, y0, z0], [x1, y0, z0], [x1, y0, z1]]),
+        // Bottom (y1)
+        (bottom, [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]]),
+        // Right (x1)
+        (right, [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]]),
+        // Left (x0)
+        (left, [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]]),
+    ];
+
+    for (face_color, corners) in faces {
+        let base = verts.len() as u32;
+        for &pos in corners {
+            verts.push(Vertex { position: pos, color: *face_color });
+        }
+        indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+    }
+
+    // Glow quad behind the front face (for neon effect)
+    if glow_boost > 0.01 || color[3] > 0.5 {
+        let ga = (0.08 + glow_boost * 0.15).min(0.4);
+        let gc = [color[0], color[1], color[2], color[3] * ga];
+        let spread = 0.15 + glow_boost * 0.1;
+        let base = verts.len() as u32;
+        verts.push(Vertex { position: [x0 - spread, y0 + spread, z1 + 0.01], color: gc });
+        verts.push(Vertex { position: [x1 + spread, y0 + spread, z1 + 0.01], color: gc });
+        verts.push(Vertex { position: [x1 + spread, y1 - spread, z1 + 0.01], color: gc });
+        verts.push(Vertex { position: [x0 - spread, y1 - spread, z1 + 0.01], color: gc });
+        indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+    }
+}
+
+/// 3D grid floor quad in world space
+pub fn push_grid_floor(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+                       width: f32, height: f32, color: [f32; 4]) {
+    let base = verts.len() as u32;
+    verts.push(Vertex { position: [0.0, 0.0, -0.01], color });
+    verts.push(Vertex { position: [width, 0.0, -0.01], color });
+    verts.push(Vertex { position: [width, -height, -0.01], color });
+    verts.push(Vertex { position: [0.0, -height, -0.01], color });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+}
+
+/// 3D grid line in world space
+pub fn push_grid_line_v(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+                        x: f32, height: f32, color: [f32; 4]) {
+    let w = 0.02;
+    let base = verts.len() as u32;
+    verts.push(Vertex { position: [x - w, 0.0, 0.0], color });
+    verts.push(Vertex { position: [x + w, 0.0, 0.0], color });
+    verts.push(Vertex { position: [x + w, -height, 0.0], color });
+    verts.push(Vertex { position: [x - w, -height, 0.0], color });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+}
+
+pub fn push_grid_line_h(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+                        y: f32, width: f32, color: [f32; 4]) {
+    let w = 0.02;
+    let base = verts.len() as u32;
+    verts.push(Vertex { position: [0.0, y - w, 0.0], color });
+    verts.push(Vertex { position: [width, y - w, 0.0], color });
+    verts.push(Vertex { position: [width, y + w, 0.0], color });
+    verts.push(Vertex { position: [0.0, y + w, 0.0], color });
+    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
 pub fn push_text(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,

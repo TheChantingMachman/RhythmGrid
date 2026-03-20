@@ -13,7 +13,7 @@ use rhythm_grid::render::*;
 use super::audio_output::{self, AudioState};
 use super::drawing::*;
 use super::particles::ParticleSystem;
-use super::renderer::Uniforms;
+use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
 use super::theme::*;
 
 pub struct GameWorld {
@@ -247,16 +247,221 @@ impl GameWorld {
     }
 
     pub fn compute_uniforms(&self) -> Uniforms {
-        // For now, keep identity — vertices are still in NDC
-        // Will switch to real camera once 3D cube vertices are built in world space
-        Uniforms::identity()
+        // Board center in world space: x=5, y=-10, z=0
+        let board_cx = WIDTH as f32 / 2.0;
+        let board_cy = -(HEIGHT as f32) / 2.0;
+
+        // Camera orbits when paused
+        // Camera centered on board, straight-on with slight elevation
+        let orbit = if self.session.state == GameState::Paused {
+            (self.camera_angle - DEFAULT_CAM_ANGLE).sin() * 4.0
+        } else {
+            0.0
+        };
+        let cam_x = board_cx + orbit;
+        let cam_y = board_cy;
+        let cam_z = 16.0;
+
+        let eye = [cam_x, cam_y, cam_z];
+        let target = [board_cx, board_cy, 0.0];
+        let up = [0.0, 1.0, 0.0];
+
+        let aspect = THEME.win_w as f32 / THEME.win_h as f32;
+
+        let view = look_at(eye, target, up);
+        let proj = perspective(1.2, aspect, 0.1, 200.0);
+        let vp = mat4_mul(&proj, &view);
+
+        // Debug: transform board center and print
+        let test = [board_cx, board_cy, 0.0, 1.0];
+        let mut out = [0.0f32; 4];
+        for i in 0..4 {
+            for j in 0..4 {
+                out[i] += vp[j][i] * test[j];
+            }
+        }
+        let ndc_x = out[0] / out[3];
+        let ndc_y = out[1] / out[3];
+        let ndc_z = out[2] / out[3];
+        eprintln!("Board center NDC: ({:.3}, {:.3}, {:.3}) w={:.3}", ndc_x, ndc_y, ndc_z, out[3]);
+
+        // Also debug scene vertex count in build_scene_and_hud
+
+        Uniforms::from_mat(vp)
     }
 
-    /// Build scene vertices (3D blocks in NDC for now) and HUD vertices separately
+    /// Build 3D scene (world-space cubes) and 2D HUD (NDC overlay) separately
     pub fn build_scene_and_hud(&self) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
-        // For now, everything goes into scene. We'll split later when blocks move to world space.
-        let (verts, indices) = self.build_vertices();
-        ((verts, indices), (Vec::new(), Vec::new()))
+        let t = &THEME;
+        let amp = self.amplitude;
+        let beat = self.beat_intensity;
+        let cube_depth = 0.5; // depth of cubes in grid units
+
+        // === 3D SCENE (world space: x=col, y=-row, z=depth) ===
+        let mut sv = Vec::new();
+        let mut si = Vec::new();
+
+        let gw = WIDTH as f32;
+        let gh = HEIGHT as f32;
+
+        // Grid floor (very dark, mostly transparent)
+        let floor_color = rgba_to_f32([5, 5, 12, 200]);
+        push_grid_floor(&mut sv, &mut si, gw, gh, floor_color);
+
+
+        // Grid lines (brighter for visibility)
+        let line_boost = (beat * 40.0) as u8;
+        let lc: [u8; 4] = [40, 45, 70, 255]; // brighter base
+        let line_color = rgba_to_f32([
+            lc[0].saturating_add(line_boost),
+            lc[1].saturating_add(line_boost),
+            lc[2].saturating_add(line_boost * 2),
+            lc[3],
+        ]);
+        for col in 0..=WIDTH {
+            push_grid_line_v(&mut sv, &mut si, col as f32, gh, line_color);
+        }
+        for row in 0..=HEIGHT {
+            push_grid_line_h(&mut sv, &mut si, -(row as f32), gw, line_color);
+        }
+
+        // Occupied cells as 3D cubes
+        for row in 0..HEIGHT {
+            for col in 0..WIDTH {
+                if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
+                    let color = rgba_to_f32(piece_color(ti));
+                    push_cube_3d(&mut sv, &mut si, col as f32, row as f32, cube_depth, color, amp * 2.0);
+                }
+            }
+        }
+
+        // Ghost piece (thin translucent cubes)
+        if self.session.state == GameState::Playing {
+            let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
+            let mut ghost_row = self.session.active_piece.row;
+            while is_valid_position(&self.session.grid, &cells, ghost_row + 1, self.session.active_piece.col) {
+                ghost_row += 1;
+            }
+            let base_color = piece_color(self.session.active_piece.piece_type as u32);
+            let ghost_color = rgba_to_f32([base_color[0], base_color[1], base_color[2], 40]);
+            for &(dr, dc) in &cells {
+                let r = ghost_row + dr;
+                let c = self.session.active_piece.col + dc;
+                if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
+                    push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth * 0.2, ghost_color, 0.0);
+                }
+            }
+
+            // Active piece as 3D cubes
+            let color = rgba_to_f32(piece_color(self.session.active_piece.piece_type as u32));
+            for &(dr, dc) in &cells {
+                let r = self.session.active_piece.row + dr;
+                let c = self.session.active_piece.col + dc;
+                if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
+                    push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth, color, amp * 2.0);
+                }
+            }
+        }
+
+        // === 2D HUD (NDC, same as before) ===
+        let (hv, hi) = self.build_hud();
+
+        ((sv, si), (hv, hi))
+    }
+
+    /// Build HUD as minimal overlay — board is the star, HUD floats around edges
+    fn build_hud(&self) -> (Vec<Vertex>, Vec<u32>) {
+        let mut verts = Vec::new();
+        let mut indices = Vec::new();
+        let t = &THEME;
+        let w = t.win_w as f32;
+        let h = t.win_h as f32;
+        let text_col = rgba_to_f32(t.text_color);
+        let dim_col = rgba_to_f32(t.dim_color);
+        let cs = CELL_SIZE as f32 * t.board_scale;
+        let depth = t.block_depth;
+
+        // Next piece — top right corner
+        let np_x = w - 120.0;
+        let np_y = 12.0;
+        push_panel(&mut verts, &mut indices, np_x, np_y, 108.0, 85.0, 0.03);
+        push_text(&mut verts, &mut indices, np_x + 6.0, np_y + 6.0, "NEXT", dim_col, 1.0);
+        let next_type_idx = self.session.bag.peek();
+        let next_type = TETROMINO_TYPES[next_type_idx];
+        let next_cells = piece_cells(next_type, self.preview_rotation);
+        let next_color = rgba_to_f32(piece_color(next_type_idx as u32));
+        let pc = (cs * 0.5) as f32;
+        let preview_cx = np_x + 54.0;
+        let preview_cy = np_y + 50.0;
+        let preview_iso_dx = self.preview_angle.cos() * 1.2;
+        let preview_iso_dy = -self.preview_angle.sin().abs() * 0.8;
+        for &(dr, dc) in &next_cells {
+            let px_x = preview_cx + (dc as f32 - 0.5) * pc;
+            let px_y = preview_cy + (dr as f32) * pc;
+            push_block_cam(&mut verts, &mut indices, px_x, px_y, pc, next_color,
+                depth * 0.5, 0.06, preview_iso_dx, preview_iso_dy);
+        }
+
+        // Score — top left
+        push_text(&mut verts, &mut indices, 12.0, 12.0, "SCORE", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, 12.0, 24.0,
+            &format!("{}", self.session.score), text_col, 2.0);
+
+        // Level — below score
+        push_text(&mut verts, &mut indices, 12.0, 50.0, "LEVEL", dim_col, 1.0);
+        let level = level_for_lines(self.session.total_lines);
+        push_text(&mut verts, &mut indices, 12.0, 62.0, &format!("{}", level), text_col, 2.0);
+
+        // Lines — below level
+        push_text(&mut verts, &mut indices, 12.0, 88.0, "LINES", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, 12.0, 100.0,
+            &format!("{}", self.session.total_lines), text_col, 2.0);
+
+        // Now playing — bottom center
+        let track_name = if let Ok(audio) = self.audio.try_lock() {
+            audio.track_name.clone()
+        } else {
+            String::new()
+        };
+        if !track_name.is_empty() {
+            let display_name: String = track_name.chars().take(20).collect();
+            let tw = display_name.len() as f32 * 4.0; // approx width at scale 1
+            push_text(&mut verts, &mut indices, (w - tw) / 2.0, h - 20.0,
+                &display_name.to_uppercase(), dim_col, 1.0);
+        }
+
+        // State overlays — full screen
+        if self.session.state == GameState::GameOver {
+            push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([180, 0, 0, 60]), 0.08);
+            let go_w = 200.0; let go_h = 50.0;
+            let go_x = (w - go_w) / 2.0;
+            let go_y = (h - go_h) / 2.0;
+            push_panel(&mut verts, &mut indices, go_x, go_y, go_w, go_h, 0.09);
+            push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 8.0, "GAME OVER",
+                rgba_to_f32([255, 80, 80, 255]), 2.0);
+            push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 30.0, "ENTER TO RESTART", dim_col, 1.0);
+        }
+
+        if self.session.state == GameState::Paused {
+            push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, 60]), 0.08);
+            let pa_w = 220.0; let pa_h = 120.0;
+            let pa_x = (w - pa_w) / 2.0;
+            let pa_y = (h - pa_h) / 2.0;
+            push_panel(&mut verts, &mut indices, pa_x, pa_y, pa_w, pa_h, 0.09);
+            push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 8.0, "PAUSED",
+                rgba_to_f32([255, 255, 100, 255]), 2.0);
+            push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 30.0, "L-R  ORBIT", dim_col, 2.0);
+            push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 50.0, "L-R MOVE", dim_col, 1.0);
+            push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 62.0, "DN  DROP", dim_col, 1.0);
+            push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 74.0, "SPC HARD", dim_col, 1.0);
+            push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 86.0, "UP CW  Z CCW", dim_col, 1.0);
+            push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 98.0, "P RESUME", dim_col, 1.0);
+        }
+
+        // Particles
+        self.particles.render(&mut verts, &mut indices);
+
+        (verts, indices)
     }
 
     pub fn build_vertices(&self) -> (Vec<Vertex>, Vec<u32>) {

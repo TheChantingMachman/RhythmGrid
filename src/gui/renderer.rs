@@ -291,18 +291,12 @@ impl GpuState {
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::GreaterEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, mask: !0, alpha_to_coverage_enabled: false },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
             multiview: None, cache: None,
         });
 
-        // HUD pipeline (no depth, for overlay elements)
+        // HUD pipeline (same as scene but separate for future depth config)
         let scene_pipeline_no_depth = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("hud"),
             layout: Some(&scene_layout),
@@ -319,7 +313,7 @@ impl GpuState {
             }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, mask: !0, alpha_to_coverage_enabled: false },
+            multisample: wgpu::MultisampleState::default(),
             multiview: None, cache: None,
         });
 
@@ -445,26 +439,19 @@ impl GpuState {
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
 
-        // Pass 1: 3D scene with depth → offscreen texture (MSAA resolve)
+        // Pass 1: 3D scene with depth → directly to surface (skip bloom for now)
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene_3d"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.msaa_texture,
-                    resolve_target: Some(&self.scene_texture),
+                    view: &surface_view,
+                    resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
+                depth_stencil_attachment: None,
                 ..Default::default()
             });
             pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
@@ -475,16 +462,20 @@ impl GpuState {
             pass.draw_indexed(0..scene_indices.len() as u32, 0, 0..1);
         }
 
-        // Update uniform to identity for HUD pass
-        self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[Uniforms::identity()]));
+        // Submit scene pass first, then update uniform for HUD
+        self.queue.submit(std::iter::once(encoder.finish()));
 
-        // Pass 1b: HUD overlay (no depth, identity matrix) → same offscreen texture
+        // Now write identity for HUD pass
+        self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[Uniforms::identity()]));
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+
+        // Pass 1b: HUD overlay (no depth, identity matrix) → surface
         if !hud_indices.is_empty() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("hud"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.msaa_texture,
-                    resolve_target: Some(&self.scene_texture),
+                    view: &surface_view,
+                    resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
@@ -499,33 +490,6 @@ impl GpuState {
             pass.set_vertex_buffer(0, hud_vb.slice(..));
             pass.set_index_buffer(hud_ib.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..hud_indices.len() as u32, 0, 0..1);
-        }
-
-        // Pass 2: Bloom composite → surface
-        {
-            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None, layout: &self.bloom_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.scene_texture) },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
-                ],
-            });
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("bloom_composite"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &surface_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.bloom_pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.draw(0..3, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
