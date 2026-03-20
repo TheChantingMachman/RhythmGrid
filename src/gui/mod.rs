@@ -11,3 +11,4 @@ pub mod particles;
 mod font;
 mod drawing;
 mod input_bridge;
+mod scene;
