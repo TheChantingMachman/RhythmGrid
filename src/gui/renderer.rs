@@ -172,9 +172,9 @@ pub struct GpuState {
     msaa_texture: wgpu::TextureView,
     scene_texture: wgpu::TextureView,
     depth_texture: wgpu::TextureView,
-    bloom_pipeline: wgpu::RenderPipeline,
-    sampler: wgpu::Sampler,
-    bloom_bind_group_layout: wgpu::BindGroupLayout,
+    _bloom_pipeline: wgpu::RenderPipeline,
+    _sampler: wgpu::Sampler,
+    _bloom_bind_group_layout: wgpu::BindGroupLayout,
     uniform_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
 }
@@ -351,7 +351,7 @@ impl GpuState {
             surface, device, queue, config,
             scene_pipeline, scene_pipeline_no_depth,
             msaa_texture, scene_texture, depth_texture,
-            bloom_pipeline, sampler, bloom_bind_group_layout: bind_group_layout,
+            _bloom_pipeline: bloom_pipeline, _sampler: sampler, _bloom_bind_group_layout: bind_group_layout,
             uniform_buffer, scene_bind_group,
         }
     }
