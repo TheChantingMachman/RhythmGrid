@@ -199,6 +199,13 @@ impl GameWorld {
                         self.session.active_piece = ActivePiece {
                             piece_type: next_type, rotation: 0, row, col
                         };
+                        // If spawned in vanish zone and can't move down, board is full
+                        if row < 0 {
+                            let cells = piece_cells(next_type, 0);
+                            if !is_valid_position(&self.session.grid, &cells, row + 1, col) {
+                                self.session.state = GameState::GameOver;
+                            }
+                        }
                         self.session.total_lines += lines;
                         let new_level = level_for_lines(self.session.total_lines);
                         self.session.score += score_for_lines(lines, new_level);
@@ -296,7 +303,12 @@ impl GameWorld {
             }
             GameState::GameOver | GameState::Menu => {
                 if action == GameAction::StartGame {
-                    *self = GameWorld::new();
+                    // Reset game state without restarting audio
+                    self.session = GameSession::new();
+                    self.last_tick = Instant::now();
+                    self.clearing_cells.clear();
+                    self.bg_rings.clear();
+                    self.danger_level = 0.0;
                 }
             }
         }
@@ -385,6 +397,13 @@ impl GameWorld {
             None => { s.state = GameState::GameOver; }
             Some((r, c)) => {
                 s.active_piece = ActivePiece { piece_type: next_type, rotation: 0, row: r, col: c };
+                // If spawned in vanish zone and can't move down, board is full
+                if r < 0 {
+                    let cells = piece_cells(next_type, 0);
+                    if !is_valid_position(&s.grid, &cells, r + 1, c) {
+                        s.state = GameState::GameOver;
+                    }
+                }
             }
         }
     }
