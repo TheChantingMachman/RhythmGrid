@@ -13,6 +13,7 @@ use rhythm_grid::render::*;
 use super::audio_output::{self, AudioState};
 use super::drawing::*;
 use super::particles::ParticleSystem;
+use super::renderer::Uniforms;
 use super::theme::*;
 
 pub struct GameWorld {
@@ -243,6 +244,19 @@ impl GameWorld {
                 s.active_piece = ActivePiece { piece_type: next_type, rotation: 0, row: r, col: c };
             }
         }
+    }
+
+    pub fn compute_uniforms(&self) -> Uniforms {
+        // For now, keep identity — vertices are still in NDC
+        // Will switch to real camera once 3D cube vertices are built in world space
+        Uniforms::identity()
+    }
+
+    /// Build scene vertices (3D blocks in NDC for now) and HUD vertices separately
+    pub fn build_scene_and_hud(&self) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
+        // For now, everything goes into scene. We'll split later when blocks move to world space.
+        let (verts, indices) = self.build_vertices();
+        ((verts, indices), (Vec::new(), Vec::new()))
     }
 
     pub fn build_vertices(&self) -> (Vec<Vertex>, Vec<u32>) {

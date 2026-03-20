@@ -11,7 +11,7 @@ use winit::window::{Window, WindowId};
 use rhythm_grid::input;
 
 use super::input_bridge::winit_to_rg;
-use super::renderer::GpuState;
+use super::renderer::{GpuState, Uniforms};
 use super::theme::THEME;
 use super::world::GameWorld;
 
@@ -54,9 +54,10 @@ impl ApplicationHandler for App {
                     }
                 }
                 self.world.tick();
-                let (verts, indices) = self.world.build_vertices();
+                let ((sv, si), (hv, hi)) = self.world.build_scene_and_hud();
                 if let Some(gpu) = &self.gpu {
-                    gpu.render(&verts, &indices);
+                    gpu.update_uniforms(&self.world.compute_uniforms());
+                    gpu.render(&sv, &si, &hv, &hi);
                 }
                 if let Some(w) = &self.window {
                     w.request_redraw();

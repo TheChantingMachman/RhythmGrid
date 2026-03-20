@@ -219,7 +219,7 @@ pub fn push_text(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                     if bits & (1 << (2 - col)) != 0 {
                         push_quad(verts, indices,
                             cx + col as f32 * scale, y + row as f32 * scale,
-                            scale, scale, color, 0.0);
+                            scale, scale, color, 0.09);
                     }
                 }
             }

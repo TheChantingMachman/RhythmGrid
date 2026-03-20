@@ -8,6 +8,9 @@ use super::drawing::Vertex;
 use super::theme::THEME;
 
 const SCENE_SHADER: &str = r#"
+struct Uniforms { view_proj: mat4x4<f32> };
+@group(0) @binding(0) var<uniform> u: Uniforms;
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
@@ -16,7 +19,7 @@ struct VertexOutput {
 @vertex
 fn vs_main(@location(0) position: vec3<f32>, @location(1) color: vec4<f32>) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_position = vec4<f32>(position, 1.0);
+    out.clip_position = u.view_proj * vec4<f32>(position, 1.0);
     out.color = color;
     return out;
 }
@@ -26,6 +29,80 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return in.color;
 }
 "#;
+
+// View-projection uniform
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Uniforms {
+    pub view_proj: [[f32; 4]; 4],
+}
+
+impl Uniforms {
+    pub fn identity() -> Self {
+        Uniforms {
+            view_proj: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+
+    pub fn from_mat(m: [[f32; 4]; 4]) -> Self {
+        Uniforms { view_proj: m }
+    }
+}
+
+// --- Matrix math ---
+pub fn mat4_mul(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    let mut r = [[0.0f32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            for k in 0..4 {
+                r[j][i] += a[k][i] * b[j][k]; // column-major multiplication
+            }
+        }
+    }
+    r
+}
+
+/// Perspective projection (column-major for wgpu)
+pub fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4] {
+    let f = 1.0 / (fov_y / 2.0).tan();
+    let nf = 1.0 / (near - far);
+    // wgpu uses column-major, Z range [0,1]
+    [
+        [f / aspect, 0.0, 0.0, 0.0],  // column 0
+        [0.0, f, 0.0, 0.0],            // column 1
+        [0.0, 0.0, far * nf, -1.0],    // column 2
+        [0.0, 0.0, far * near * nf, 0.0], // column 3
+    ]
+}
+
+/// Look-at view matrix (column-major for wgpu)
+pub fn look_at(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4] {
+    let f = normalize3(sub3(target, eye));
+    let s = normalize3(cross(f, up));
+    let u = cross(s, f);
+    [
+        [s[0], u[0], -f[0], 0.0],     // column 0
+        [s[1], u[1], -f[1], 0.0],     // column 1
+        [s[2], u[2], -f[2], 0.0],     // column 2
+        [-dot3(s, eye), -dot3(u, eye), dot3(f, eye), 1.0], // column 3
+    ]
+}
+
+fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0]-b[0], a[1]-b[1], a[2]-b[2]] }
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]
+}
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 { a[0]*b[0]+a[1]*b[1]+a[2]*b[2] }
+fn normalize3(v: [f32; 3]) -> [f32; 3] {
+    let l = (v[0]*v[0]+v[1]*v[1]+v[2]*v[2]).sqrt();
+    if l < 1e-10 { return v; }
+    [v[0]/l, v[1]/l, v[2]/l]
+}
 
 // Single-pass bloom: extract bright + box blur + composite in one fragment shader
 const BLOOM_SHADER: &str = r#"
@@ -91,11 +168,15 @@ pub struct GpuState {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     scene_pipeline: wgpu::RenderPipeline,
+    scene_pipeline_no_depth: wgpu::RenderPipeline, // for HUD overlay
     msaa_texture: wgpu::TextureView,
     scene_texture: wgpu::TextureView,
+    depth_texture: wgpu::TextureView,
     bloom_pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
-    bind_group_layout: wgpu::BindGroupLayout,
+    bloom_bind_group_layout: wgpu::BindGroupLayout,
+    uniform_buffer: wgpu::Buffer,
+    scene_bind_group: wgpu::BindGroup,
 }
 
 impl GpuState {
@@ -158,15 +239,72 @@ impl GpuState {
             ],
         });
 
-        // Scene pipeline (with MSAA)
+        // Uniform buffer for view-projection matrix
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("uniform_buffer"),
+            contents: bytemuck::cast_slice(&[Uniforms::identity()]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let scene_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("scene_bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("scene_bg"),
+            layout: &scene_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        // Scene pipeline (with MSAA + uniform)
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("scene_shader"), source: wgpu::ShaderSource::Wgsl(SCENE_SHADER.into()),
         });
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None, bind_group_layouts: &[], push_constant_ranges: &[],
+            label: None, bind_group_layouts: &[&scene_bind_group_layout], push_constant_ranges: &[],
         });
         let scene_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene"),
+            layout: Some(&scene_layout),
+            vertex: wgpu::VertexState {
+                module: &scene_shader, entry_point: Some("vs_main"),
+                buffers: &[Vertex::desc()], compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &scene_shader, entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::GreaterEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, mask: !0, alpha_to_coverage_enabled: false },
+            multiview: None, cache: None,
+        });
+
+        // HUD pipeline (no depth, for overlay elements)
+        let scene_pipeline_no_depth = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("hud"),
             layout: Some(&scene_layout),
             vertex: wgpu::VertexState {
                 module: &scene_shader, entry_point: Some("vs_main"),
@@ -213,11 +351,14 @@ impl GpuState {
         // Textures
         let msaa_texture = Self::create_msaa_texture(&device, &config);
         let scene_texture = Self::create_render_texture(&device, &config);
+        let depth_texture = Self::create_depth_texture(&device, &config);
 
         GpuState {
             surface, device, queue, config,
-            scene_pipeline, msaa_texture, scene_texture,
-            bloom_pipeline, sampler, bind_group_layout,
+            scene_pipeline, scene_pipeline_no_depth,
+            msaa_texture, scene_texture, depth_texture,
+            bloom_pipeline, sampler, bloom_bind_group_layout: bind_group_layout,
+            uniform_buffer, scene_bind_group,
         }
     }
 
@@ -227,6 +368,17 @@ impl GpuState {
             size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
             mip_level_count: 1, sample_count: SAMPLE_COUNT, dimension: wgpu::TextureDimension::D2,
             format: config.format, usage: wgpu::TextureUsages::RENDER_ATTACHMENT, view_formats: &[],
+        }).create_view(&Default::default())
+    }
+
+    fn create_depth_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::TextureView {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth"),
+            size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: SAMPLE_COUNT, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
         }).create_view(&Default::default())
     }
 
@@ -247,20 +399,35 @@ impl GpuState {
         self.surface.configure(&self.device, &self.config);
         self.msaa_texture = Self::create_msaa_texture(&self.device, &self.config);
         self.scene_texture = Self::create_render_texture(&self.device, &self.config);
+        self.depth_texture = Self::create_depth_texture(&self.device, &self.config);
     }
 
-    pub fn render(&self, verts: &[Vertex], indices: &[u32]) {
+    pub fn update_uniforms(&self, uniforms: &Uniforms) {
+        self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[*uniforms]));
+    }
+
+    /// Render scene (3D with depth) and HUD (2D overlay without depth).
+    /// Call update_uniforms with the 3D camera before this.
+    pub fn render(&self,
+                  scene_verts: &[Vertex], scene_indices: &[u32],
+                  hud_verts: &[Vertex], hud_indices: &[u32]) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
             Err(_) => return,
         };
         let surface_view = output.texture.create_view(&Default::default());
 
-        let vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(verts), usage: wgpu::BufferUsages::VERTEX,
+        let scene_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None, contents: bytemuck::cast_slice(scene_verts), usage: wgpu::BufferUsages::VERTEX,
         });
-        let ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(indices), usage: wgpu::BufferUsages::INDEX,
+        let scene_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None, contents: bytemuck::cast_slice(scene_indices), usage: wgpu::BufferUsages::INDEX,
+        });
+        let hud_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None, contents: bytemuck::cast_slice(hud_verts), usage: wgpu::BufferUsages::VERTEX,
+        });
+        let hud_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None, contents: bytemuck::cast_slice(hud_indices), usage: wgpu::BufferUsages::INDEX,
         });
 
         // Letterboxed viewport
@@ -278,10 +445,10 @@ impl GpuState {
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
 
-        // Pass 1: Scene → offscreen texture (with MSAA resolve)
+        // Pass 1: 3D scene with depth → offscreen texture (MSAA resolve)
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("scene"),
+                label: Some("scene_3d"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &self.msaa_texture,
                     resolve_target: Some(&self.scene_texture),
@@ -290,20 +457,54 @@ impl GpuState {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 ..Default::default()
             });
             pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
             pass.set_pipeline(&self.scene_pipeline);
-            pass.set_vertex_buffer(0, vb.slice(..));
-            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+            pass.set_bind_group(0, &self.scene_bind_group, &[]);
+            pass.set_vertex_buffer(0, scene_vb.slice(..));
+            pass.set_index_buffer(scene_ib.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..scene_indices.len() as u32, 0, 0..1);
+        }
+
+        // Update uniform to identity for HUD pass
+        self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[Uniforms::identity()]));
+
+        // Pass 1b: HUD overlay (no depth, identity matrix) → same offscreen texture
+        if !hud_indices.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("hud"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.msaa_texture,
+                    resolve_target: Some(&self.scene_texture),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
+            pass.set_pipeline(&self.scene_pipeline_no_depth);
+            pass.set_bind_group(0, &self.scene_bind_group, &[]);
+            pass.set_vertex_buffer(0, hud_vb.slice(..));
+            pass.set_index_buffer(hud_ib.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..hud_indices.len() as u32, 0, 0..1);
         }
 
         // Pass 2: Bloom composite → surface
         {
             let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None, layout: &self.bind_group_layout,
+                label: None, layout: &self.bloom_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.scene_texture) },
                     wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
