@@ -14,19 +14,44 @@ struct Uniforms { view_proj: mat4x4<f32> };
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) world_pos: vec3<f32>,
 };
 
 @vertex
-fn vs_main(@location(0) position: vec3<f32>, @location(1) color: vec4<f32>) -> VertexOutput {
+fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec4<f32>) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = u.view_proj * vec4<f32>(position, 1.0);
     out.color = color;
+    out.normal = normal;
+    out.world_pos = position;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return in.color;
+    let n = normalize(in.normal);
+
+    // Skip lighting for HUD elements (normal = 0,0,1 and z near 0)
+    if (n.z > 0.99 && in.world_pos.z < 0.1) {
+        return in.color;
+    }
+
+    // Directional light from upper-front-right
+    let light_dir = normalize(vec3<f32>(0.3, 0.5, 0.8));
+    let ambient = 0.25;
+    let diffuse = max(dot(n, light_dir), 0.0) * 0.55;
+
+    // Specular highlight (Blinn-Phong)
+    let view_dir = normalize(vec3<f32>(0.0, 0.0, 1.0)); // simplified
+    let half_dir = normalize(light_dir + view_dir);
+    let spec = pow(max(dot(n, half_dir), 0.0), 32.0) * 0.4;
+
+    // Rim light (edge glow)
+    let rim = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0) * 0.15;
+
+    let brightness = ambient + diffuse + spec + rim;
+    return vec4<f32>(in.color.rgb * brightness, in.color.a);
 }
 "#;
 

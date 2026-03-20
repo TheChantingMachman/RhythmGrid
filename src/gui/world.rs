@@ -335,8 +335,6 @@ impl GameWorld {
         let h = t.win_h as f32;
         let text_col = rgba_to_f32(t.text_color);
         let dim_col = rgba_to_f32(t.dim_color);
-        let cs = CELL_SIZE as f32 * t.board_scale;
-        let depth = t.block_depth;
 
         // Next piece — top right corner
         let np_x = w - 120.0;
@@ -345,18 +343,110 @@ impl GameWorld {
         push_text(&mut verts, &mut indices, np_x + 6.0, np_y + 6.0, "NEXT", dim_col, 1.0);
         let next_type_idx = self.session.bag.peek();
         let next_type = TETROMINO_TYPES[next_type_idx];
-        let next_cells = piece_cells(next_type, self.preview_rotation);
+        let next_cells = piece_cells(next_type, 0); // always spawn rotation for base shape
         let next_color = rgba_to_f32(piece_color(next_type_idx as u32));
-        let pc = (cs * 0.5) as f32;
         let preview_cx = np_x + 54.0;
-        let preview_cy = np_y + 50.0;
-        let preview_iso_dx = self.preview_angle.cos() * 1.2;
-        let preview_iso_dy = -self.preview_angle.sin().abs() * 0.8;
+        let preview_cy = np_y + 52.0;
+        let preview_scale = 18.0; // pixels per grid unit
+        let cube_half = 0.42; // half-size of each mini cube
+
+        // 3-axis rotation angles
+        let ax = self.preview_angle * 0.3;  // slow pitch
+        let ay = self.preview_angle * 0.7;  // medium yaw (primary rotation)
+        let az = self.preview_angle * 0.15; // very slow roll
+
+        // Rotation matrices (applied as Rz * Ry * Rx)
+        let (sx, cx_r) = (ax.sin(), ax.cos());
+        let (sy, cy) = (ay.sin(), ay.cos());
+        let (sz, cz) = (az.sin(), az.cos());
+
+        // Find piece center for rotation origin
+        let mut center = [0.0f32; 3];
         for &(dr, dc) in &next_cells {
-            let px_x = preview_cx + (dc as f32 - 0.5) * pc;
-            let px_y = preview_cy + (dr as f32) * pc;
-            push_block_cam(&mut verts, &mut indices, px_x, px_y, pc, next_color,
-                depth * 0.5, 0.06, preview_iso_dx, preview_iso_dy);
+            center[0] += dc as f32;
+            center[1] += dr as f32;
+        }
+        center[0] /= next_cells.len() as f32;
+        center[1] /= next_cells.len() as f32;
+
+        // For each cell, build a mini cube with 3 visible faces, rotated
+        for &(dr, dc) in &next_cells {
+            let local_x = dc as f32 - center[0];
+            let local_y = dr as f32 - center[1];
+            let local_z = 0.0;
+
+            // Cube corners relative to cell center
+            let corners_local: [[f32; 3]; 8] = [
+                [local_x - cube_half, local_y - cube_half, local_z - cube_half],
+                [local_x + cube_half, local_y - cube_half, local_z - cube_half],
+                [local_x + cube_half, local_y + cube_half, local_z - cube_half],
+                [local_x - cube_half, local_y + cube_half, local_z - cube_half],
+                [local_x - cube_half, local_y - cube_half, local_z + cube_half],
+                [local_x + cube_half, local_y - cube_half, local_z + cube_half],
+                [local_x + cube_half, local_y + cube_half, local_z + cube_half],
+                [local_x - cube_half, local_y + cube_half, local_z + cube_half],
+            ];
+
+            // Rotate and project each corner
+            let mut projected = [[0.0f32; 2]; 8];
+            let mut z_vals = [0.0f32; 8];
+            for (i, c) in corners_local.iter().enumerate() {
+                // Rx
+                let y1 = c[1] * cx_r - c[2] * sx;
+                let z1 = c[1] * sx + c[2] * cx_r;
+                // Ry
+                let x2 = c[0] * cy + z1 * sy;
+                let z2 = -c[0] * sy + z1 * cy;
+                // Rz
+                let x3 = x2 * cz - y1 * sz;
+                let y3 = x2 * sz + y1 * cz;
+
+                // Simple perspective projection
+                let persp = 4.0 / (4.0 + z2 * 0.3);
+                projected[i] = [
+                    preview_cx + x3 * preview_scale * persp,
+                    preview_cy + y3 * preview_scale * persp,
+                ];
+                z_vals[i] = z2;
+            }
+
+            // Draw 3 faces (front, top, right) with painter's algorithm
+            // Face definitions: [corner indices], normal direction for sorting
+            let faces: &[([usize; 4], [f32; 3])] = &[
+                ([4, 5, 6, 7], [0.0, 0.0, 1.0]),   // front
+                ([5, 1, 2, 6], [1.0, 0.0, 0.0]),    // right
+                ([0, 1, 5, 4], [0.0, -1.0, 0.0]),   // top
+                ([0, 3, 7, 4], [-1.0, 0.0, 0.0]),   // left
+                ([3, 2, 6, 7], [0.0, 1.0, 0.0]),    // bottom
+                ([0, 1, 2, 3], [0.0, 0.0, -1.0]),   // back
+            ];
+
+            // Sort faces back-to-front by rotated normal z
+            let mut face_order: Vec<(usize, f32)> = faces.iter().enumerate().map(|(i, (_, n))| {
+                // Rotate the normal
+                let _ny1 = n[1] * cx_r - n[2] * sx;
+                let nz1 = n[1] * sx + n[2] * cx_r;
+                let nz2 = -n[0] * sy + nz1 * cy;
+                (i, nz2)
+            }).collect();
+            face_order.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+            for &(fi, nz) in &face_order {
+                if nz < 0.0 { continue; } // back-face cull
+                let (ci, _normal) = &faces[fi];
+
+                // Shade based on rotated normal z (facing camera = bright)
+                let shade = 0.4 + nz * 0.6;
+                let fc = [next_color[0] * shade, next_color[1] * shade, next_color[2] * shade, next_color[3]];
+
+                let base = verts.len() as u32;
+                for &idx in ci {
+                    let px = projected[idx];
+                    let (nx, ny) = px_to_ndc(px[0], px[1], w, h);
+                    verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc });
+                }
+                indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            }
         }
 
         // Score — top left

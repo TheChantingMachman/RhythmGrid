@@ -7,11 +7,16 @@ use super::theme::THEME;
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     pub position: [f32; 3],
+    pub normal: [f32; 3],
     pub color: [f32; 4],
 }
 
 impl Vertex {
-    pub const ATTRIBS: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
+    pub const ATTRIBS: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
+        0 => Float32x3,  // position
+        1 => Float32x3,  // normal
+        2 => Float32x4,  // color
+    ];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -21,6 +26,9 @@ impl Vertex {
         }
     }
 }
+
+/// Default normal for 2D HUD elements (facing camera)
+pub const HUD_NORMAL: [f32; 3] = [0.0, 0.0, 1.0];
 
 pub fn rgba_to_f32(c: [u8; 4]) -> [f32; 4] {
     [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, c[3] as f32 / 255.0]
@@ -47,10 +55,10 @@ pub fn push_quad(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let (x0, y0) = px_to_ndc(x, y, ww, wh);
     let (x1, y1) = px_to_ndc(x + w, y + h, ww, wh);
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [x0, y0, z], color });
-    verts.push(Vertex { position: [x1, y0, z], color });
-    verts.push(Vertex { position: [x1, y1, z], color });
-    verts.push(Vertex { position: [x0, y1, z], color });
+    verts.push(Vertex { position: [x0, y0, z], normal: HUD_NORMAL, color });
+    verts.push(Vertex { position: [x1, y0, z], normal: HUD_NORMAL, color });
+    verts.push(Vertex { position: [x1, y1, z], normal: HUD_NORMAL, color });
+    verts.push(Vertex { position: [x0, y1, z], normal: HUD_NORMAL, color });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
@@ -90,11 +98,11 @@ pub fn push_block_ex(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
         let (gx1, gy1) = px_to_ndc(x + s + spread, y + s + spread, ww, wh);
         let (gmx, gmy) = px_to_ndc(cx, cy, ww, wh);
         let base = verts.len() as u32;
-        verts.push(Vertex { position: [gmx, gmy, z_order - 0.004], color: gc });
-        verts.push(Vertex { position: [gx0, gy0, z_order - 0.004], color: ge });
-        verts.push(Vertex { position: [gx1, gy0, z_order - 0.004], color: ge });
-        verts.push(Vertex { position: [gx1, gy1, z_order - 0.004], color: ge });
-        verts.push(Vertex { position: [gx0, gy1, z_order - 0.004], color: ge });
+        verts.push(Vertex { position: [gmx, gmy, z_order - 0.004], normal: HUD_NORMAL, color: gc });
+        verts.push(Vertex { position: [gx0, gy0, z_order - 0.004], normal: HUD_NORMAL, color: ge });
+        verts.push(Vertex { position: [gx1, gy0, z_order - 0.004], normal: HUD_NORMAL, color: ge });
+        verts.push(Vertex { position: [gx1, gy1, z_order - 0.004], normal: HUD_NORMAL, color: ge });
+        verts.push(Vertex { position: [gx0, gy1, z_order - 0.004], normal: HUD_NORMAL, color: ge });
         indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3, base, base+3, base+4, base, base+4, base+1]);
     }
 
@@ -112,34 +120,34 @@ pub fn push_block_ex(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     // Top bevel
     let base = verts.len() as u32;
     let top_edge = brighten(color, 0.9);
-    verts.push(Vertex { position: [x0, y0, z_order], color: edge_dark });
-    verts.push(Vertex { position: [x1, y0, z_order], color: edge_dark });
-    verts.push(Vertex { position: [ix1, iy0, z_order], color: top_edge });
-    verts.push(Vertex { position: [ix0, iy0, z_order], color: top_edge });
+    verts.push(Vertex { position: [x0, y0, z_order], normal: HUD_NORMAL, color: edge_dark });
+    verts.push(Vertex { position: [x1, y0, z_order], normal: HUD_NORMAL, color: edge_dark });
+    verts.push(Vertex { position: [ix1, iy0, z_order], normal: HUD_NORMAL, color: top_edge });
+    verts.push(Vertex { position: [ix0, iy0, z_order], normal: HUD_NORMAL, color: top_edge });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
     // Bottom bevel
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [ix0, iy1, z_order], color: darken(color, 0.7) });
-    verts.push(Vertex { position: [ix1, iy1, z_order], color: darken(color, 0.7) });
-    verts.push(Vertex { position: [x1, y1, z_order], color: edge_dark });
-    verts.push(Vertex { position: [x0, y1, z_order], color: edge_dark });
+    verts.push(Vertex { position: [ix0, iy1, z_order], normal: HUD_NORMAL, color: darken(color, 0.7) });
+    verts.push(Vertex { position: [ix1, iy1, z_order], normal: HUD_NORMAL, color: darken(color, 0.7) });
+    verts.push(Vertex { position: [x1, y1, z_order], normal: HUD_NORMAL, color: edge_dark });
+    verts.push(Vertex { position: [x0, y1, z_order], normal: HUD_NORMAL, color: edge_dark });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
     // Left bevel
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [x0, y0, z_order], color: edge_dark });
-    verts.push(Vertex { position: [ix0, iy0, z_order], color: darken(color, 0.8) });
-    verts.push(Vertex { position: [ix0, iy1, z_order], color: darken(color, 0.7) });
-    verts.push(Vertex { position: [x0, y1, z_order], color: edge_dark });
+    verts.push(Vertex { position: [x0, y0, z_order], normal: HUD_NORMAL, color: edge_dark });
+    verts.push(Vertex { position: [ix0, iy0, z_order], normal: HUD_NORMAL, color: darken(color, 0.8) });
+    verts.push(Vertex { position: [ix0, iy1, z_order], normal: HUD_NORMAL, color: darken(color, 0.7) });
+    verts.push(Vertex { position: [x0, y1, z_order], normal: HUD_NORMAL, color: edge_dark });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
     // Right bevel
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [ix1, iy0, z_order], color: brighten(color, 0.85) });
-    verts.push(Vertex { position: [x1, y0, z_order], color: edge_dark });
-    verts.push(Vertex { position: [x1, y1, z_order], color: edge_dark });
-    verts.push(Vertex { position: [ix1, iy1, z_order], color: darken(color, 0.65) });
+    verts.push(Vertex { position: [ix1, iy0, z_order], normal: HUD_NORMAL, color: brighten(color, 0.85) });
+    verts.push(Vertex { position: [x1, y0, z_order], normal: HUD_NORMAL, color: edge_dark });
+    verts.push(Vertex { position: [x1, y1, z_order], normal: HUD_NORMAL, color: edge_dark });
+    verts.push(Vertex { position: [ix1, iy1, z_order], normal: HUD_NORMAL, color: darken(color, 0.65) });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
     // Inner face (gradient: bright top-left to darker bottom-right)
@@ -148,10 +156,10 @@ pub fn push_block_ex(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let tr = face_bright;
     let br = darken(color, 0.8);           // bottom-right: darkest
     let bl = darken(color, 0.9);
-    verts.push(Vertex { position: [ix0, iy0, z_order + 0.001], color: tl });
-    verts.push(Vertex { position: [ix1, iy0, z_order + 0.001], color: tr });
-    verts.push(Vertex { position: [ix1, iy1, z_order + 0.001], color: br });
-    verts.push(Vertex { position: [ix0, iy1, z_order + 0.001], color: bl });
+    verts.push(Vertex { position: [ix0, iy0, z_order + 0.001], normal: HUD_NORMAL, color: tl });
+    verts.push(Vertex { position: [ix1, iy0, z_order + 0.001], normal: HUD_NORMAL, color: tr });
+    verts.push(Vertex { position: [ix1, iy1, z_order + 0.001], normal: HUD_NORMAL, color: br });
+    verts.push(Vertex { position: [ix0, iy1, z_order + 0.001], normal: HUD_NORMAL, color: bl });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
     // Specular highlight dot (upper-left of inner face)
@@ -162,11 +170,11 @@ pub fn push_block_ex(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let (sx1, sy1) = px_to_ndc(x + bevel + spec_size * 2.5, y + bevel + spec_size * 2.5, ww, wh);
     let (smx, smy) = px_to_ndc(x + bevel + spec_size, y + bevel + spec_size, ww, wh);
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [smx, smy, z_order + 0.002], color: spec_color });
-    verts.push(Vertex { position: [sx0, sy0, z_order + 0.002], color: spec_edge });
-    verts.push(Vertex { position: [sx1, sy0, z_order + 0.002], color: spec_edge });
-    verts.push(Vertex { position: [sx1, sy1, z_order + 0.002], color: spec_edge });
-    verts.push(Vertex { position: [sx0, sy1, z_order + 0.002], color: spec_edge });
+    verts.push(Vertex { position: [smx, smy, z_order + 0.002], normal: HUD_NORMAL, color: spec_color });
+    verts.push(Vertex { position: [sx0, sy0, z_order + 0.002], normal: HUD_NORMAL, color: spec_edge });
+    verts.push(Vertex { position: [sx1, sy0, z_order + 0.002], normal: HUD_NORMAL, color: spec_edge });
+    verts.push(Vertex { position: [sx1, sy1, z_order + 0.002], normal: HUD_NORMAL, color: spec_edge });
+    verts.push(Vertex { position: [sx0, sy1, z_order + 0.002], normal: HUD_NORMAL, color: spec_edge });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3, base, base+3, base+4, base, base+4, base+1]);
 
     // --- Top face (iso extrusion, gradient light→dark) ---
@@ -175,10 +183,10 @@ pub fn push_block_ex(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let (tx0, ty0) = px_to_ndc(x + dx, y + dy, ww, wh);
     let (tx1, ty1) = px_to_ndc(x + s + dx, y + dy, ww, wh);
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [tx0, ty0, z_order - 0.001], color: top_lit });
-    verts.push(Vertex { position: [tx1, ty1, z_order - 0.001], color: top_lit });
-    verts.push(Vertex { position: [x1, y0, z_order - 0.001], color: top_dark });
-    verts.push(Vertex { position: [x0, y0, z_order - 0.001], color: top_dark });
+    verts.push(Vertex { position: [tx0, ty0, z_order - 0.001], normal: HUD_NORMAL, color: top_lit });
+    verts.push(Vertex { position: [tx1, ty1, z_order - 0.001], normal: HUD_NORMAL, color: top_lit });
+    verts.push(Vertex { position: [x1, y0, z_order - 0.001], normal: HUD_NORMAL, color: top_dark });
+    verts.push(Vertex { position: [x0, y0, z_order - 0.001], normal: HUD_NORMAL, color: top_dark });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
     // --- Side face (darker, gradient) ---
@@ -190,10 +198,10 @@ pub fn push_block_ex(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let (rx2, ry2) = px_to_ndc(side_x + dx, side_y + s + dy, ww, wh);
     let (rx3, ry3) = px_to_ndc(side_x, side_y + s, ww, wh);
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [rx0, ry0, z_order - 0.001], color: side_lit });
-    verts.push(Vertex { position: [rx1, ry1, z_order - 0.001], color: side_dark });
-    verts.push(Vertex { position: [rx2, ry2, z_order - 0.001], color: side_dark });
-    verts.push(Vertex { position: [rx3, ry3, z_order - 0.001], color: side_lit });
+    verts.push(Vertex { position: [rx0, ry0, z_order - 0.001], normal: HUD_NORMAL, color: side_lit });
+    verts.push(Vertex { position: [rx1, ry1, z_order - 0.001], normal: HUD_NORMAL, color: side_dark });
+    verts.push(Vertex { position: [rx2, ry2, z_order - 0.001], normal: HUD_NORMAL, color: side_dark });
+    verts.push(Vertex { position: [rx3, ry3, z_order - 0.001], normal: HUD_NORMAL, color: side_lit });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
@@ -221,82 +229,61 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let z0 = 0.0;               // back face
     let z1 = depth;              // front face (toward camera)
 
-    // Face colors: front bright, top brighter, sides darker, bottom darkest
-    let front = brighten(color, 1.1);
-    let back = darken(color, 0.3);
-    let top = brighten(color, 1.25);
-    let bottom = darken(color, 0.5);
-    let right = darken(color, 0.65);
-    let left = darken(color, 0.75);
-
-    let faces: &[([f32; 4], [[f32; 3]; 4])] = &[
-        // Front (z1) — CCW from front
-        (front, [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]),
-        // Back (z0)
-        (back, [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]]),
-        // Top (y0)
-        (top, [[x0, y0, z1], [x0, y0, z0], [x1, y0, z0], [x1, y0, z1]]),
-        // Bottom (y1)
-        (bottom, [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]]),
-        // Right (x1)
-        (right, [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]]),
-        // Left (x0)
-        (left, [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]]),
+    // Faces with normals — shader computes lighting per-pixel
+    let faces: &[([f32; 3], [[f32; 3]; 4])] = &[
+        // (normal, [corners])
+        ([0.0, 0.0, 1.0],  [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]),  // Front
+        ([0.0, 0.0, -1.0], [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]]),  // Back
+        ([0.0, 1.0, 0.0],  [[x0, y0, z1], [x0, y0, z0], [x1, y0, z0], [x1, y0, z1]]),  // Top
+        ([0.0, -1.0, 0.0], [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]]),  // Bottom
+        ([1.0, 0.0, 0.0],  [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]]),  // Right
+        ([-1.0, 0.0, 0.0], [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]]),  // Left
     ];
 
-    for (face_color, corners) in faces {
+    for (normal, corners) in faces {
         let base = verts.len() as u32;
         for &pos in corners {
-            verts.push(Vertex { position: pos, color: *face_color });
+            verts.push(Vertex { position: pos, normal: *normal, color });
         }
         indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
     }
 
-    // Glow quad behind the front face (for neon effect)
-    if glow_boost > 0.01 || color[3] > 0.5 {
-        let ga = (0.08 + glow_boost * 0.15).min(0.4);
-        let gc = [color[0], color[1], color[2], color[3] * ga];
-        let spread = 0.15 + glow_boost * 0.1;
-        let base = verts.len() as u32;
-        verts.push(Vertex { position: [x0 - spread, y0 + spread, z1 + 0.01], color: gc });
-        verts.push(Vertex { position: [x1 + spread, y0 + spread, z1 + 0.01], color: gc });
-        verts.push(Vertex { position: [x1 + spread, y1 - spread, z1 + 0.01], color: gc });
-        verts.push(Vertex { position: [x0 - spread, y1 - spread, z1 + 0.01], color: gc });
-        indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-    }
+    // Glow removed — bloom post-processing handles the soft glow now
 }
 
 /// 3D grid floor quad in world space
 pub fn push_grid_floor(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                        width: f32, height: f32, color: [f32; 4]) {
+    let n = [0.0f32, 0.0, 1.0];
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [0.0, 0.0, -0.01], color });
-    verts.push(Vertex { position: [width, 0.0, -0.01], color });
-    verts.push(Vertex { position: [width, -height, -0.01], color });
-    verts.push(Vertex { position: [0.0, -height, -0.01], color });
+    verts.push(Vertex { position: [0.0, 0.0, -0.01], normal: n, color });
+    verts.push(Vertex { position: [width, 0.0, -0.01], normal: n, color });
+    verts.push(Vertex { position: [width, -height, -0.01], normal: n, color });
+    verts.push(Vertex { position: [0.0, -height, -0.01], normal: n, color });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
-/// 3D grid line in world space
 pub fn push_grid_line_v(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                         x: f32, height: f32, color: [f32; 4]) {
     let w = 0.02;
+    let n = [0.0f32, 0.0, 1.0];
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [x - w, 0.0, 0.0], color });
-    verts.push(Vertex { position: [x + w, 0.0, 0.0], color });
-    verts.push(Vertex { position: [x + w, -height, 0.0], color });
-    verts.push(Vertex { position: [x - w, -height, 0.0], color });
+    verts.push(Vertex { position: [x - w, 0.0, 0.0], normal: n, color });
+    verts.push(Vertex { position: [x + w, 0.0, 0.0], normal: n, color });
+    verts.push(Vertex { position: [x + w, -height, 0.0], normal: n, color });
+    verts.push(Vertex { position: [x - w, -height, 0.0], normal: n, color });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
 pub fn push_grid_line_h(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                         y: f32, width: f32, color: [f32; 4]) {
     let w = 0.02;
+    let n = [0.0f32, 0.0, 1.0];
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [0.0, y - w, 0.0], color });
-    verts.push(Vertex { position: [width, y - w, 0.0], color });
-    verts.push(Vertex { position: [width, y + w, 0.0], color });
-    verts.push(Vertex { position: [0.0, y + w, 0.0], color });
+    verts.push(Vertex { position: [0.0, y - w, 0.0], normal: n, color });
+    verts.push(Vertex { position: [width, y - w, 0.0], normal: n, color });
+    verts.push(Vertex { position: [width, y + w, 0.0], normal: n, color });
+    verts.push(Vertex { position: [0.0, y + w, 0.0], normal: n, color });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
