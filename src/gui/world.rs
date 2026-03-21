@@ -29,8 +29,9 @@ pub struct GameWorld {
     pub mids: f32,
     pub highs: f32,
     pub(super) bands: [f32; 7],
-    pub(super) peak_bands: [f32; 7],
-    pub(super) bands_norm: [f32; 7], // each band normalized to its own peak (0-1)
+    pub(super) peak_bands: [f32; 7],   // slow decay — for visual peak hold indicator
+    pub(super) norm_ceil: [f32; 7],    // fast decay — normalization ceiling
+    pub(super) bands_norm: [f32; 7],   // each band normalized to its own ceiling (0-1)
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
@@ -116,6 +117,7 @@ impl GameWorld {
             highs: 0.0,
             bands: [0.0; 7],
             peak_bands: [0.0; 7],
+            norm_ceil: [0.01; 7],
             bands_norm: [0.0; 7],
             particles: ParticleSystem::new(),
             prev_beat: false,
@@ -166,20 +168,25 @@ impl GameWorld {
             got_beat = audio.beat_intensity > 0.9; // fresh beat
         }
 
-        // Peak hold — snap to current if higher, decay slowly otherwise
+        // Peak hold (slow decay — for visual indicator on FFT bars)
         let peak_decay = dt as f32 * 0.4;
+        // Normalization ceiling (fast decay — adapts to current song section)
+        let ceil_decay = dt as f32 * 0.05;
         for i in 0..7 {
+            // Visual peak
             self.peak_bands[i] = if self.bands[i] > self.peak_bands[i] {
                 self.bands[i]
             } else {
                 (self.peak_bands[i] - peak_decay).max(self.bands[i])
             };
-            // Normalize each band to its own peak — gives equal visual weight
-            self.bands_norm[i] = if self.peak_bands[i] > 0.001 {
-                (self.bands[i] / self.peak_bands[i]).min(1.0)
+            // Normalization ceiling — snaps up instantly, decays slowly toward current level
+            if self.bands[i] > self.norm_ceil[i] {
+                self.norm_ceil[i] = self.bands[i];
             } else {
-                0.0
-            };
+                self.norm_ceil[i] = (self.norm_ceil[i] - ceil_decay).max(0.01);
+            }
+            // Normalize
+            self.bands_norm[i] = (self.bands[i] / self.norm_ceil[i]).min(1.0);
         }
 
         // Spawn background ring on beat
