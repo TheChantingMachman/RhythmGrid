@@ -28,9 +28,8 @@ pub struct GameWorld {
     pub bass: f32,
     pub mids: f32,
     pub highs: f32,
-    pub(super) peak_bass: f32,
-    pub(super) peak_mids: f32,
-    pub(super) peak_highs: f32,
+    pub(super) bands: [f32; 7],
+    pub(super) peak_bands: [f32; 7],
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
@@ -114,9 +113,8 @@ impl GameWorld {
             bass: 0.0,
             mids: 0.0,
             highs: 0.0,
-            peak_bass: 0.0,
-            peak_mids: 0.0,
-            peak_highs: 0.0,
+            bands: [0.0; 7],
+            peak_bands: [0.0; 7],
             particles: ParticleSystem::new(),
             prev_beat: false,
             clearing_cells: Vec::new(),
@@ -162,14 +160,19 @@ impl GameWorld {
             self.bass = audio.bass;
             self.mids = audio.mids;
             self.highs = audio.highs;
+            self.bands = audio.bands;
             got_beat = audio.beat_intensity > 0.9; // fresh beat
         }
 
         // Peak hold — snap to current if higher, decay slowly otherwise
         let peak_decay = dt as f32 * 0.4;
-        self.peak_bass = if self.bass > self.peak_bass { self.bass } else { (self.peak_bass - peak_decay).max(self.bass) };
-        self.peak_mids = if self.mids > self.peak_mids { self.mids } else { (self.peak_mids - peak_decay).max(self.mids) };
-        self.peak_highs = if self.highs > self.peak_highs { self.highs } else { (self.peak_highs - peak_decay).max(self.highs) };
+        for i in 0..7 {
+            self.peak_bands[i] = if self.bands[i] > self.peak_bands[i] {
+                self.bands[i]
+            } else {
+                (self.peak_bands[i] - peak_decay).max(self.bands[i])
+            };
+        }
 
         // Spawn background ring on beat
         if got_beat && !self.prev_beat {

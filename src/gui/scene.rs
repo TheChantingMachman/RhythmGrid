@@ -153,12 +153,17 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let col_w = 0.2;
     let col_gap = 0.25;
     let fft_depth = 0.35;
-    let bands: [(f32, [u8; 4]); 3] = [
-        (world.bass,  [40, 60, 180, (220.0 * fft_a) as u8]),
-        (world.mids,  [60, 160, 100, (220.0 * fft_a) as u8]),
-        (world.highs, [180, 80, 60, (220.0 * fft_a) as u8]),
+    // Display 3 representative bands: bass(1), mids(3), brilliance(6)
+    let display_indices: [usize; 3] = [1, 3, 6];
+    let display_colors: [[u8; 3]; 3] = [
+        [40, 60, 180],   // bass — blue
+        [60, 160, 100],  // mids — green
+        [180, 80, 60],   // brilliance — warm
     ];
-    let peaks = [world.peak_bass, world.peak_mids, world.peak_highs];
+    let bands: Vec<(f32, [u8; 4])> = display_indices.iter().zip(&display_colors).map(|(&idx, col)| {
+        (world.bands[idx], [col[0], col[1], col[2], (220.0 * fft_a) as u8])
+    }).collect();
+    let peaks: Vec<f32> = display_indices.iter().map(|&idx| world.peak_bands[idx]).collect();
     for (i, (val, color)) in bands.iter().enumerate() {
         let bx = fft_x + i as f32 * (col_w + col_gap);
         let filled_h = (fft_max_h * val).max(0.05);

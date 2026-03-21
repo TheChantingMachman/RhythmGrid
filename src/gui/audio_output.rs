@@ -16,6 +16,7 @@ pub struct AudioState {
     pub bass: f32,
     pub mids: f32,
     pub highs: f32,
+    pub bands: [f32; 7], // all 7 FFT bands: sub-bass, bass, low-mids, mids, upper-mids, presence, brilliance
     pub track_name: String,
     pub volume: f32,           // 0.0-1.0, applied in audio callback
     pub skip_requested: bool,  // set by game loop, consumed by decode thread
@@ -38,6 +39,7 @@ impl AudioState {
             bass: 0.0,
             mids: 0.0,
             highs: 0.0,
+            bands: [0.0; 7],
             track_name: String::new(),
             volume: 0.5,
             skip_requested: false,
@@ -72,14 +74,15 @@ impl AudioState {
         const FFT_WINDOW: usize = 2048;
         if self.fft_buffer.len() >= FFT_WINDOW {
             let window: Vec<f32> = self.fft_buffer.drain(..FFT_WINDOW).collect();
-            let bands = fft_bands(&window, sample_rate);
-            let b = bands[0] + bands[1]; // sub-bass + bass
-            let m = bands[2] + bands[3] + bands[4]; // low-mids + mids + upper-mids
-            let h = bands[5] + bands[6]; // presence + brilliance
-            // Smooth toward new values
-            self.bass = self.bass * 0.6 + b * 0.4;
-            self.mids = self.mids * 0.6 + m * 0.4;
-            self.highs = self.highs * 0.6 + h * 0.4;
+            let raw = fft_bands(&window, sample_rate);
+            // Smooth all 7 bands
+            for i in 0..7 {
+                self.bands[i] = self.bands[i] * 0.6 + raw[i] * 0.4;
+            }
+            // Keep legacy 3-band summary for compatibility
+            self.bass = self.bands[0] + self.bands[1];
+            self.mids = self.bands[2] + self.bands[3] + self.bands[4];
+            self.highs = self.bands[5] + self.bands[6];
             // Keep buffer from growing unbounded
             if self.fft_buffer.len() > FFT_WINDOW * 2 {
                 self.fft_buffer.drain(..self.fft_buffer.len() - FFT_WINDOW);
