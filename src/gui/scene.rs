@@ -26,11 +26,13 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     build_background(&mut sv, &mut si, world, gw, gh);
 
     // Occupied cells as 3D cubes (bottom-to-top, right-to-left for correct face overlap)
+    // Each piece type pulses with a different frequency band
     for row in (0..HEIGHT).rev() {
         for col in (0..WIDTH).rev() {
             if let CellState::Occupied(ti) = world.session.grid.cells[row][col] {
                 let color = rgba_to_f32(piece_color(ti));
-                push_cube_3d(&mut sv, &mut si, col as f32, row as f32, cube_depth, color, amp * 2.0);
+                let band_glow = world.bands[(ti as usize) % 7] * 2.0;
+                push_cube_3d(&mut sv, &mut si, col as f32, row as f32, cube_depth, color, band_glow);
             }
         }
     }
@@ -52,13 +54,14 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             }
         }
 
-        // Active piece
+        // Active piece — pulses with its frequency band
         let color = rgba_to_f32(piece_color(world.session.active_piece.piece_type as u32));
+        let active_glow = world.bands[(world.session.active_piece.piece_type as usize) % 7] * 2.0;
         for &(dr, dc) in &cells {
             let r = world.session.active_piece.row + dr;
             let c = world.session.active_piece.col + dc;
             if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth, color, amp * 2.0);
+                push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth, color, active_glow);
             }
         }
     }
