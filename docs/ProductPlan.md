@@ -118,37 +118,46 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 ### Dynamic Audio-Visual Mapping (phased)
 Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
 
-**Phase A — Peak hold indicators (GUI-side, current 3 bands):**
-- Track decaying peak per FFT band, render as thin slab at peak height on each column
-- Gives visual persistence and shows where energy lives in a song
+**Done:**
+- Peak hold indicators on all 7 FFT bands
+- Per-piece-type band glow (each tetromino pulses with a different band)
+- Background elements routed to individual bands (grid=presence, dots=low-mids/sub-bass)
+- 7-band FFT visualizer with spectral color gradient
 
-**Phase B — Expand to 5 bands + rolling energy ranking:**
-- Update `audio.fft` spec: sub-bass, bass, mids, upper-mids, highs
-- Rolling window (5-10s) cumulative energy per band → dominant band detection
-- Detects verse/chorus/breakdown transitions in real time
+**Known issues:**
+- Most songs concentrate energy in the lower 5 bands (sub-bass through upper-mids). Presence and brilliance often flat. May need per-band normalization or logarithmic scaling.
+- Beat detection is RMS-only — misses rhythmic content in specific bands
 
-**Phase B+ — Multi-band beat detection:**
-- Current beat detector uses overall RMS amplitude only — misses beats where energy is in specific bands (hi-hats, snares) without a big amplitude spike
-- Run spike detection per-band (especially sub-bass for kicks, upper-mids for snares)
-- Beat event if *any* band spikes above its own rolling average
+**Beat detection overhaul:**
+- Current: single RMS amplitude spike detection. Cheap but misses a lot.
+- Goal: budget multi-band beat detection that's still computationally cheap
+- Run spike detection per-band (sub-bass for kicks, upper-mids for snares, presence for hi-hats)
+- Beat event typed by source band — enables band-specific visual responses (kick → ring, snare → flash, hat → shimmer)
 - Requires `audio.beat_detect` spec update + pipeline rebuild
-- Open: should different band beats trigger different visual responses? (kick → ring, snare → flash)
+- Open: threshold tuning per band — bass needs different sensitivity than highs
+- Open: should beat events carry intensity, or just binary on/off?
+- This has huge impact on look and feel — priority design decision
 
-**Phase B+ — Rolling averages + dominant band ranking:**
+**Visual effects interface:**
+- Inventory all GUI elements currently hooked to audio data (TODO)
+- Define a trait/interface for "visual effect module" — takes audio state, outputs render commands
+- Effects can be swapped, layered, or assigned to bands dynamically
+- 7-band FFT visualizer doubles as a debug view for the interface — shows exactly what data each effect is receiving
+- Themes (from Architecture Note) become bundles of effect modules with preset band assignments
+
+**Rolling averages + dominant band ranking:**
 - Exponential moving average per band (7 floats, ~5-10s settling period)
-- Sort to find top 3 or 5 most active bands per song section
-- Infrastructure only — visual assignments come in Phase C
-- Open: how to handle ranking transitions mid-song (verse→chorus)? Hard cutover vs smooth crossfade blend weights?
+- Sort to find top 3-5 most active bands per song section
+- Open: how to handle ranking transitions mid-song (verse→chorus)? Hard cutover vs smooth crossfade?
 - Open: should settling period reset on track change?
 
-**Phase C — Effect routing by dominant band:**
-- Map top-N active bands to specific visual elements dynamically
-- Bass-dominant → beat rings intensify, mids-dominant → grid shimmer, highs-dominant → particle sparkle
+**Effect routing by dominant band:**
+- Map top-N active bands to effect modules dynamically
 - Board color tinting shifts based on current energy profile
 - Escalation effects modulated by which bands are hot, not just stack height
-- Open: how many elements to assign (3 or 5)? More = richer but harder to notice individual assignments
+- Open: how many elements to assign? More = richer but harder to notice
 
-**Phase D — Per-song adaptation:**
+**Per-song adaptation:**
 - Track cumulative fingerprint across full song playback
 - Auto-tune effect sensitivity to each song's dynamic range
 - Normalize quiet vs loud tracks for consistent visual intensity
