@@ -506,25 +506,25 @@
   - core
   - audio
   - analysis
-  status: stale
+  status: implemented
   constants:
-    band_count: "7"
-    freq_min: "20"
-    freq_max: "20000"
-    band0_low: "20"
     band0_high: "60"
-    band1_low: "61"
+    band0_low: "20"
     band1_high: "250"
-    band2_low: "251"
+    band1_low: "61"
     band2_high: "500"
-    band3_low: "501"
+    band2_low: "251"
     band3_high: "2000"
-    band4_low: "2001"
+    band3_low: "501"
     band4_high: "4000"
-    band5_low: "4001"
+    band4_low: "2001"
     band5_high: "8000"
-    band6_low: "8001"
+    band5_low: "4001"
     band6_high: "20000"
+    band6_low: "8001"
+    band_count: "7"
+    freq_max: "20000"
+    freq_min: "20"
   depends_on:
   - audio.amplitude
   fixture_patterns: |
