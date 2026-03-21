@@ -153,6 +153,7 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Idle/visualizer/demo mode
 - Visual themes and palette system
 - Settings (audio sensitivity, visual intensity, controls)
+- Align key bindings to Tetris Guideline (X=RotateCW, C/Shift=Hold) — requires `game.hold_piece` first, then update `input.key_map` spec
 - XDG-compliant config and data paths
 - Linux packaging (Flatpak, Snap, AUR)
 
