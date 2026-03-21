@@ -63,14 +63,15 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Grid lines — drawn after cubes so they overlay the top faces
+    // Grid lines — shimmer driven by presence (band 5) + beat
     let line_boost = (beat * 40.0) as u8;
-    let highs_boost = (world.highs * 60.0) as u8;
+    let presence = world.bands[5];
+    let presence_boost = (presence * 80.0) as u8;
     let lc: [u8; 4] = [40, 45, 70, 255];
     let line_color = rgba_to_f32([
-        lc[0].saturating_add(line_boost).saturating_add(highs_boost / 3),
-        lc[1].saturating_add(line_boost).saturating_add(highs_boost / 2),
-        lc[2].saturating_add(line_boost * 2).saturating_add(highs_boost),
+        lc[0].saturating_add(line_boost).saturating_add(presence_boost / 3),
+        lc[1].saturating_add(line_boost).saturating_add(presence_boost / 2),
+        lc[2].saturating_add(line_boost * 2).saturating_add(presence_boost),
         lc[3],
     ]);
     for col in 0..=WIDTH {
@@ -241,11 +242,13 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
     let geo_z = -2.0;
     let geo_n = [0.0f32, 0.0, 1.0];
     let geo_time = world.preview_angle * (0.3 + d * 0.4);
-    let geo_alpha = 0.03 + world.mids * 0.15 + d * 0.05;
+    let low_mids = world.bands[2];
+    let sub_bass = world.bands[0];
+    let geo_alpha = 0.03 + low_mids * 0.15 + d * 0.05;
 
-    // Hex dot grid
+    // Hex dot grid — size driven by low-mids, color warmth by sub-bass
     let hex_rings = 4;
-    let dot_size = 0.06 + world.mids * 0.24;
+    let dot_size = 0.06 + low_mids * 0.24;
     for ring in 1..=hex_rings {
         let r = ring as f32 * 3.5;
         let points = ring * 6;
@@ -255,7 +258,7 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
             let dy = angle.sin() * r;
             let dist_factor = 1.0 - (ring as f32 / hex_rings as f32) * 0.5;
             let dot_alpha = geo_alpha * dist_factor;
-            let dot_color = [0.15 + d * 0.45, 0.2 - d * 0.08, 0.5 - d * 0.35, dot_alpha];
+            let dot_color = [0.15 + d * 0.45 + sub_bass * 0.2, 0.2 - d * 0.08, 0.5 - d * 0.35 - sub_bass * 0.15, dot_alpha];
 
             let base = sv.len() as u32;
             sv.push(Vertex { position: [geo_cx + dx - dot_size, geo_cy + dy - dot_size, geo_z], normal: geo_n, color: dot_color });
