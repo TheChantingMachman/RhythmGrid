@@ -311,14 +311,24 @@
 -
   id: audio.beat_detect
   section: Audio
-  description: Detect beats in real-time by tracking amplitude spikes above a rolling average. Emits beat events with timestamp.
+  description: 'Detect beats per frequency band. MultiBeatDetector holds 7 independent detectors, one per FFT band. detect_bands(bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent> runs spike detection on each band independently. A spike occurs when a band''s energy exceeds its 43-sample rolling mean by 1.5x and at least 0.3s have passed since that band''s last beat. BandBeatEvent { band: usize, timestamp_secs: f64 }. The existing single-band BeatDetector and BeatEvent remain unchanged for backward compatibility.'
   tags:
   - core
   - audio
   - analysis
-  status: implemented
+  status: stale
   depends_on:
   - audio.amplitude
+  - audio.fft
+  fixture_patterns: |
+    - MultiBeatDetector::new() -> Self (7 internal detectors, all zeroed)
+    - detect_bands(&mut self, bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent>
+    - BandBeatEvent { band: usize, timestamp_secs: f64 }
+    - Each band has independent 43-sample rolling mean and last_beat_secs
+    - Spike threshold: band energy > rolling_mean * 1.5
+    - Min inter-beat gap per band: 0.3s
+    - Existing BeatDetector and BeatEvent unchanged (backward compatible)
+    - Test: feed spiky data to one band, flat to others — only spiked band emits events
 -
   id: audio.procedural
   section: Audio
