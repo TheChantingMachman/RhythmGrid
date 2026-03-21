@@ -96,7 +96,13 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 ### Music Integration
 - **No music configured:** Procedurally generated audio for out-of-box experience and first-time players. Zero licensing issues at any release tier, deterministic output for pipeline testing.
 - **Basic (V1):** Point at a folder via path field or filesystem browser. Play files sequentially or shuffled. Seamless auto-advance between tracks.
-- **Future:** Playlist support, queue management, metadata-driven theming
+
+**Known issues:**
+- Track transitions are slow — full decode before playback starts. Need chunked streaming so playback begins within ~100ms of track change.
+- Silence gap during transition feels like the app is broken. Need visual feedback (loading indicator or immediate track name update).
+- Transport button clicks sometimes miss on first press — hover detection may lag one frame behind click event.
+
+**Future:** Playlist support, queue management, metadata-driven theming
 
 ### Visual Layer
 - **3D rendering** — volumetric blocks, basic lighting/shading, camera in 3D space
