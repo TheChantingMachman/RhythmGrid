@@ -318,7 +318,6 @@ impl GameWorld {
     pub fn hold_piece(&mut self) {
         if self.session.state == GameState::Playing {
             self.session.hold_piece();
-            self.on_mouse_activity();
         }
     }
 
