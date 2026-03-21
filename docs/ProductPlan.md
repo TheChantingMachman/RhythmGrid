@@ -69,7 +69,7 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 - Track name (2D overlay text)
 - Volume bar (3D slab, responds to +/- keys)
 - FFT visualizer (3D columns — bass/mids/highs, audio-reactive)
-- 3D button cubes: play/pause, back, skip, folder picker
+- 3D button cubes: play/pause, back, skip, shuffle, folder picker
 - All elements fade with HUD auto-hide, audio controls reveal HUD
 
 **Future:**
