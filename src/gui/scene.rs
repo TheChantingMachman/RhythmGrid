@@ -50,8 +50,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         push_grid_line_h(&mut sv, &mut si, -(row as f32), gw, line_color);
     }
 
-    // Occupied cells as 3D cubes
-    for row in 0..HEIGHT {
+    // Occupied cells as 3D cubes (bottom-to-top so front faces aren't overwritten)
+    for row in (0..HEIGHT).rev() {
         for col in 0..WIDTH {
             if let CellState::Occupied(ti) = world.session.grid.cells[row][col] {
                 let color = rgba_to_f32(piece_color(ti));
