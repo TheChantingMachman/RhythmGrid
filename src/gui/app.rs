@@ -20,6 +20,7 @@ pub struct App {
     pub gpu: Option<GpuState>,
     pub world: GameWorld,
     pub pending_resize: Option<(u32, u32)>,
+    pub resize_debounce: std::time::Instant,
 }
 
 impl ApplicationHandler for App {
@@ -40,6 +41,7 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(new_size) => {
                 self.pending_resize = Some((new_size.width, new_size.height));
+                self.resize_debounce = std::time::Instant::now();
             }
             WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Pressed, .. }, .. } => {
                 use winit::keyboard::KeyCode as K;
@@ -63,9 +65,14 @@ impl ApplicationHandler for App {
                 self.world.handle_click();
             }
             WindowEvent::RedrawRequested => {
-                if let Some((w, h)) = self.pending_resize.take() {
-                    if let Some(gpu) = &mut self.gpu {
-                        gpu.resize(w, h);
+                // Debounce resize — only apply after 50ms of no resize events
+                if self.pending_resize.is_some()
+                    && self.resize_debounce.elapsed() >= std::time::Duration::from_millis(50)
+                {
+                    if let Some((w, h)) = self.pending_resize.take() {
+                        if let Some(gpu) = &mut self.gpu {
+                            gpu.resize(w, h);
+                        }
                     }
                 }
                 self.world.tick();

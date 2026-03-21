@@ -11,6 +11,7 @@ fn main() {
         gpu: None,
         world: GameWorld::new(),
         pending_resize: None,
+        resize_debounce: std::time::Instant::now(),
     };
     event_loop.run_app(&mut app).expect("event loop");
 }

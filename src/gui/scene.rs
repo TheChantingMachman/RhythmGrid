@@ -88,47 +88,81 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // --- 3D Music Dashboard (right of board) ---
+    // --- 3D Music Dashboard ---
     let hud_a = world.hud_opacity;
-    let dash_x = 12.0;
 
-    // Volume bar
+    // Volume: [-] ====== [+]  (right side, tight to board)
     let vol = if let Ok(audio) = world.audio.try_lock() { audio.volume } else { 0.5 };
+    let vol_minus_x = 11.0;
+    let vol_btn_w = 0.5;
+    let vol_bar_x = vol_minus_x + vol_btn_w + 0.15;
+    let vol_plus_x = 13.3;
+    let vol_bar_w = vol_plus_x - vol_bar_x - 0.15;
     let vol_y = 6.0;
-    let vol_w = 2.0;
     let vol_h = 0.2;
     let vol_bg = rgba_to_f32([15, 15, 30, (160.0 * hud_a) as u8]);
-    push_slab_3d(&mut sv, &mut si, dash_x, vol_y, vol_w, vol_h, 0.15, vol_bg);
+    push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
     let vol_fill = rgba_to_f32([60, 100, 180, (220.0 * hud_a) as u8]);
-    push_slab_3d(&mut sv, &mut si, dash_x, vol_y, vol_w * vol, vol_h, 0.3, vol_fill);
+    push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w * vol, vol_h, 0.3, vol_fill);
+    // Vol down button [-]
+    let vd_color = if world.btn_hovered(super::world::ButtonId::VolDown) {
+        rgba_to_f32([80, 60, 60, (240.0 * hud_a) as u8])
+    } else {
+        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
+    };
+    push_slab_3d(&mut sv, &mut si, vol_minus_x, vol_y, vol_btn_w, 0.5, 0.4, vd_color);
+    // Vol up button [+]
+    let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
+        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
+    } else {
+        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
+    };
+    push_slab_3d(&mut sv, &mut si, vol_plus_x, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
 
-    // FFT bars (bass / mids / highs)
-    let fft_y = 7.0;
-    let fft_max_h = 5.0;
-    let col_w = 0.3;
-    let col_gap = 0.15;
-    let fft_depth = 0.35;
-    let bands: [(f32, [u8; 4]); 3] = [
-        (world.bass,  [40, 60, 180, (220.0 * hud_a) as u8]),
-        (world.mids,  [60, 160, 100, (220.0 * hud_a) as u8]),
-        (world.highs, [180, 80, 60, (220.0 * hud_a) as u8]),
-    ];
-    for (i, (val, color)) in bands.iter().enumerate() {
-        let bx = dash_x + i as f32 * (col_w + col_gap);
-        let filled_h = (fft_max_h * val).max(0.05);
-        let bg_color = rgba_to_f32([12, 12, 25, (120.0 * hud_a) as u8]);
-        push_slab_3d(&mut sv, &mut si, bx, fft_y, col_w, fft_max_h, fft_depth * 0.3, bg_color);
-        let fill_y = fft_y + (fft_max_h - filled_h);
-        push_slab_3d(&mut sv, &mut si, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(*color));
-    }
-
-    // Folder button (3D clickable cube)
-    let btn_color = if world.folder_btn_hovered {
+    // Folder button (right side, below volume)
+    let fld_color = if world.btn_hovered(super::world::ButtonId::Folder) {
         rgba_to_f32([60, 80, 140, (240.0 * hud_a) as u8])
     } else {
         rgba_to_f32([30, 40, 70, (180.0 * hud_a) as u8])
     };
-    push_slab_3d(&mut sv, &mut si, 12.0, 15.0, 2.0, 1.0, 0.5, btn_color);
+    push_slab_3d(&mut sv, &mut si, 12.0, 15.0, 2.0, 1.0, 0.5, fld_color);
+
+    // FFT bars (lower-left of board)
+    let fft_a = if world.fft_locked { 1.0 } else { hud_a };
+    let fft_x = -3.0;
+    let fft_y = 14.0;
+    let fft_max_h = 5.0;
+    let col_w = 0.2;
+    let col_gap = 0.25;
+    let fft_depth = 0.35;
+    let bands: [(f32, [u8; 4]); 3] = [
+        (world.bass,  [40, 60, 180, (220.0 * fft_a) as u8]),
+        (world.mids,  [60, 160, 100, (220.0 * fft_a) as u8]),
+        (world.highs, [180, 80, 60, (220.0 * fft_a) as u8]),
+    ];
+    let peaks = [world.peak_bass, world.peak_mids, world.peak_highs];
+    for (i, (val, color)) in bands.iter().enumerate() {
+        let bx = fft_x + i as f32 * (col_w + col_gap);
+        let filled_h = (fft_max_h * val).max(0.05);
+        let bg_color = rgba_to_f32([12, 12, 25, (120.0 * fft_a) as u8]);
+        push_slab_3d(&mut sv, &mut si, bx, fft_y, col_w, fft_max_h, fft_depth * 0.3, bg_color);
+        let fill_y = fft_y + (fft_max_h - filled_h);
+        push_slab_3d(&mut sv, &mut si, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(*color));
+        let peak_h = (fft_max_h * peaks[i]).max(0.05);
+        let peak_y = fft_y + (fft_max_h - peak_h);
+        let peak_color = rgba_to_f32([255, 255, 255, (160.0 * fft_a) as u8]);
+        push_slab_3d(&mut sv, &mut si, bx, peak_y, col_w, 0.1, fft_depth + 0.1, peak_color);
+    }
+    // FFT lock toggle button (below FFT bars, fades with HUD not with bars)
+    let fft_total_w = 3.0 * col_w + 2.0 * col_gap;
+    let lock_color = if world.fft_locked {
+        rgba_to_f32([80, 120, 80, (240.0 * hud_a) as u8])
+    } else if world.btn_hovered(super::world::ButtonId::FftLock) {
+        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
+    } else {
+        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
+    };
+    push_slab_3d(&mut sv, &mut si, fft_x, fft_y + fft_max_h + 0.2, fft_total_w, 0.3, 0.3, lock_color);
 
     // Per-cell clearing animations (shrinking bright cubes)
     for cell in &world.clearing_cells {
@@ -188,7 +222,7 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
 
     // Hex dot grid
     let hex_rings = 4;
-    let dot_size = 0.12 + world.mids * 0.12;
+    let dot_size = 0.06 + world.mids * 0.24;
     for ring in 1..=hex_rings {
         let r = ring as f32 * 3.5;
         let points = ring * 6;
@@ -284,10 +318,8 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     // --- Fadeable HUD elements (affected by hud_opacity) ---
 
-    // Next piece panel background (fades with HUD)
     let np_x = w - 120.0;
     let np_y = 12.0;
-    push_panel(&mut verts, &mut indices, np_x, np_y, 108.0, 85.0, 0.03);
 
     // Mark where preview piece starts (won't be faded)
     let preview_start_vert = verts.len();
@@ -407,17 +439,35 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         let display: String = track_name.chars().take(16).collect();
         push_text(&mut verts, &mut indices, dash_hud_x, 12.0, &display.to_uppercase(), dim_col, 1.0);
     }
-    push_text(&mut verts, &mut indices, dash_hud_x, 28.0, "N SKIP  +- VOL", dim_col, 1.0);
+    push_text(&mut verts, &mut indices, dash_hud_x, 28.0, "N SKIP", dim_col, 1.0);
 
-    // Folder button label (projected from 3D button screen position)
-    let folder_label_col = if world.folder_btn_hovered { text_col } else { dim_col };
-    let [btn_sx, btn_sy, btn_sw, btn_sh] = world.folder_btn_rect;
-    // Convert from physical pixels to THEME logical coords
+    // Projected button labels
     let scale_x = w / world.window_size[0];
     let scale_y = h / world.window_size[1];
-    let label_x = btn_sx * scale_x + btn_sw * scale_x * 0.5 - 12.0;
-    let label_y = (btn_sy + btn_sh) * scale_y + 4.0;
-    push_text(&mut verts, &mut indices, label_x, label_y, "FOLDER", folder_label_col, 1.0);
+
+    // Helper to project a button label below its 3D cube
+    let project_label = |id: super::world::ButtonId, world: &super::world::GameWorld| -> (f32, f32) {
+        let [bx, by, bw, bh] = world.btn_rect(id);
+        let lx = bx * scale_x + bw * scale_x * 0.5 - 4.0;
+        let ly = (by + bh) * scale_y + 4.0;
+        (lx, ly)
+    };
+
+    // Vol -/+ labels
+    let (vd_x, vd_y) = project_label(super::world::ButtonId::VolDown, world);
+    push_text(&mut verts, &mut indices, vd_x, vd_y, "-", dim_col, 1.0);
+    let (vu_x, vu_y) = project_label(super::world::ButtonId::VolUp, world);
+    push_text(&mut verts, &mut indices, vu_x, vu_y, "+", dim_col, 1.0);
+
+    // Folder label
+    let folder_col = if world.btn_hovered(super::world::ButtonId::Folder) { text_col } else { dim_col };
+    let (fl_x, fl_y) = project_label(super::world::ButtonId::Folder, world);
+    push_text(&mut verts, &mut indices, fl_x - 8.0, fl_y, "FOLDER", folder_col, 1.0);
+
+    // FFT lock label
+    let lock_col = if world.fft_locked { text_col } else { dim_col };
+    let (ll_x, ll_y) = project_label(super::world::ButtonId::FftLock, world);
+    push_text(&mut verts, &mut indices, ll_x - 4.0, ll_y, "LOCK", lock_col, 1.0);
 
     // State overlays
     if world.session.state == GameState::GameOver {
@@ -432,7 +482,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     if world.session.state == GameState::Paused {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, 60]), 0.08);
-        let pa_w = 220.0; let pa_h = 150.0;
+        let pa_w = 110.0; let pa_h = 150.0;
         let pa_x = (w - pa_w) / 2.0;
         let pa_y = (h - pa_h) / 2.0;
         push_panel(&mut verts, &mut indices, pa_x, pa_y, pa_w, pa_h, 0.09);

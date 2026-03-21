@@ -28,6 +28,9 @@ pub struct GameWorld {
     pub bass: f32,
     pub mids: f32,
     pub highs: f32,
+    pub(super) peak_bass: f32,
+    pub(super) peak_mids: f32,
+    pub(super) peak_highs: f32,
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
@@ -41,9 +44,27 @@ pub struct GameWorld {
     pub(super) shake_intensity: f32, // 1.0 on trigger, decays to 0.0
     shake_time: f32,                 // accumulator for shake oscillation
     pub cursor_pos: [f32; 2],
-    pub window_size: [f32; 2],           // actual pixel dimensions
-    pub(super) folder_btn_rect: [f32; 4], // screen-space [x, y, w, h]
-    pub(super) folder_btn_hovered: bool,
+    pub window_size: [f32; 2],
+    pub(super) buttons: Vec<Button>,
+    pub(super) fft_locked: bool, // when true, FFT bars don't fade
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum ButtonId {
+    Folder,
+    VolUp,
+    VolDown,
+    FftLock,
+}
+
+pub(super) struct Button {
+    pub id: ButtonId,
+    pub world_x: f32,
+    pub world_y: f32,
+    pub world_w: f32,
+    pub world_h: f32,
+    pub screen_rect: [f32; 4],
+    pub hovered: bool,
 }
 
 /// Expanding ring in the background
@@ -85,6 +106,9 @@ impl GameWorld {
             bass: 0.0,
             mids: 0.0,
             highs: 0.0,
+            peak_bass: 0.0,
+            peak_mids: 0.0,
+            peak_highs: 0.0,
             particles: ParticleSystem::new(),
             prev_beat: false,
             clearing_cells: Vec::new(),
@@ -99,8 +123,13 @@ impl GameWorld {
             shake_time: 0.0,
             cursor_pos: [0.0; 2],
             window_size: [THEME.win_w as f32, THEME.win_h as f32],
-            folder_btn_rect: [0.0; 4],
-            folder_btn_hovered: false,
+            buttons: vec![
+                Button { id: ButtonId::VolDown, world_x: 11.0, world_y: 6.0, world_w: 0.5, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::VolUp, world_x: 13.3, world_y: 6.0, world_w: 0.5, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::FftLock, world_x: -3.0, world_y: 19.2, world_w: 1.1, world_h: 0.3, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::Folder, world_x: 12.0, world_y: 15.0, world_w: 2.0, world_h: 1.0, screen_rect: [0.0; 4], hovered: false },
+            ],
+            fft_locked: false,
         }
     }
 
@@ -119,6 +148,12 @@ impl GameWorld {
             self.highs = audio.highs;
             got_beat = audio.beat_intensity > 0.9; // fresh beat
         }
+
+        // Peak hold — snap to current if higher, decay slowly otherwise
+        let peak_decay = dt as f32 * 0.4;
+        self.peak_bass = if self.bass > self.peak_bass { self.bass } else { (self.peak_bass - peak_decay).max(self.bass) };
+        self.peak_mids = if self.mids > self.peak_mids { self.mids } else { (self.peak_mids - peak_decay).max(self.mids) };
+        self.peak_highs = if self.highs > self.peak_highs { self.highs } else { (self.peak_highs - peak_decay).max(self.highs) };
 
         // Spawn background ring on beat
         if got_beat && !self.prev_beat {
@@ -199,7 +234,7 @@ impl GameWorld {
             let h = THEME.win_h as f32;
             let cx = w / 2.0;
             let cy = h / 2.0;
-            for _ in 0..40 {
+            for _ in 0..120 {
                 let angle = self.preview_angle + (self.particles.particles.len() as f32 * 0.7);
                 let speed = 50.0 + (angle.sin().abs() * 80.0);
                 let vx = angle.cos() * speed;
@@ -208,10 +243,10 @@ impl GameWorld {
                     x: cx + (angle * 3.0).cos() * 20.0,
                     y: cy + (angle * 3.0).sin() * 20.0,
                     vx, vy,
-                    life: 1.5,
-                    max_life: 1.5,
+                    life: 3.0,
+                    max_life: 3.0,
                     color: [0.4, 0.9, 1.0, 0.9],
-                    size: 3.0,
+                    size: 0.75,
                 });
             }
             self.last_level = current_level;
@@ -249,14 +284,26 @@ impl GameWorld {
         // Capture pre-tick piece for visual effects (tick replaces active_piece on lock)
         let pre_piece = self.session.active_piece;
 
-        if let TickResult::PieceLocked { lines_cleared } = tick(&mut self.session, dt) {
-            if lines_cleared > 0 {
-                let cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
-                let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
-                let piece_row = pre_piece.row + max_dr;
-                self.spawn_line_clear_particles(lines_cleared, piece_row);
-                self.shake_intensity = (lines_cleared as f32 * 0.3).min(1.0);
+        match tick(&mut self.session, dt) {
+            TickResult::PieceLocked { lines_cleared } => {
+                if lines_cleared > 0 {
+                    let cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
+                    let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
+                    let piece_row = pre_piece.row + max_dr;
+                    self.spawn_line_clear_particles(lines_cleared, piece_row);
+                    self.shake_intensity = (lines_cleared as f32 * 0.3).min(1.0);
+                }
+                // Secondary game over check: if new piece spawned in vanish zone
+                // and can't move down, the board is full
+                if self.session.active_piece.row < 0 {
+                    let cells = piece_cells(self.session.active_piece.piece_type, 0);
+                    if !is_valid_position(&self.session.grid, &cells,
+                        self.session.active_piece.row + 1, self.session.active_piece.col) {
+                        self.session.state = GameState::GameOver;
+                    }
+                }
             }
+            _ => {}
         }
     }
 
@@ -342,6 +389,14 @@ impl GameWorld {
                         self.spawn_line_clear_particles(lines, land_bottom);
                     }
                     self.shake_intensity = (0.2 + lines as f32 * 0.25).min(1.0);
+                    // Secondary game over check for vanish zone spawn
+                    if self.session.active_piece.row < 0 && self.session.state == GameState::Playing {
+                        let hd_cells = piece_cells(self.session.active_piece.piece_type, 0);
+                        if !is_valid_position(&self.session.grid, &hd_cells,
+                            self.session.active_piece.row + 1, self.session.active_piece.col) {
+                            self.session.state = GameState::GameOver;
+                        }
+                    }
                 }
                 GameAction::RotateCW => { self.session.rotate(true); }
                 GameAction::RotateCCW => { self.session.rotate(false); }
@@ -417,23 +472,36 @@ impl GameWorld {
     pub fn update_button_rects(&mut self, uniforms: &Uniforms, _aspect: f32) {
         let vp = &uniforms.view_proj;
         let [win_w, win_h] = self.window_size;
-        // Folder button: world-space slab at (12, 15) size (2, 1) in push_slab_3d coords
-        // push_slab_3d negates y: world y0=-15, y1=-16, x0=12, x1=14
-        let corner_tl = Self::project_to_screen(vp, [12.0, -15.0, 0.5], win_w, win_h);
-        let corner_br = Self::project_to_screen(vp, [14.0, -16.0, 0.5], win_w, win_h);
-        let x = corner_tl[0].min(corner_br[0]);
-        let y = corner_tl[1].min(corner_br[1]);
-        let w = (corner_tl[0] - corner_br[0]).abs();
-        let h = (corner_tl[1] - corner_br[1]).abs();
-        self.folder_btn_rect = [x, y, w, h];
-        // Check hover
         let [mx, my] = self.cursor_pos;
-        self.folder_btn_hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        for btn in &mut self.buttons {
+            // push_slab_3d uses y-down: world y0 = -world_y, y1 = -(world_y + world_h)
+            let tl = Self::project_to_screen(vp, [btn.world_x, -btn.world_y, 0.5], win_w, win_h);
+            let br = Self::project_to_screen(vp, [btn.world_x + btn.world_w, -(btn.world_y + btn.world_h), 0.5], win_w, win_h);
+            let x = tl[0].min(br[0]);
+            let y = tl[1].min(br[1]);
+            let w = (tl[0] - br[0]).abs();
+            let h = (tl[1] - br[1]).abs();
+            btn.screen_rect = [x, y, w, h];
+            btn.hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        }
+    }
+
+    pub(super) fn btn_hovered(&self, id: ButtonId) -> bool {
+        self.buttons.iter().any(|b| b.id == id && b.hovered)
+    }
+
+    pub(super) fn btn_rect(&self, id: ButtonId) -> [f32; 4] {
+        self.buttons.iter().find(|b| b.id == id).map(|b| b.screen_rect).unwrap_or([0.0; 4])
     }
 
     pub fn handle_click(&mut self) {
-        if self.folder_btn_hovered {
-            self.pick_music_folder();
+        let clicked = self.buttons.iter().find(|b| b.hovered).map(|b| b.id);
+        match clicked {
+            Some(ButtonId::Folder) => self.pick_music_folder(),
+            Some(ButtonId::VolUp) => self.adjust_volume(0.05),
+            Some(ButtonId::VolDown) => self.adjust_volume(-0.05),
+            Some(ButtonId::FftLock) => { self.fft_locked = !self.fft_locked; self.on_mouse_activity(); }
+            None => {}
         }
     }
 
