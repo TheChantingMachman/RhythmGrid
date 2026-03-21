@@ -195,9 +195,14 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - XDG-compliant config and data paths
 - Linux packaging (Flatpak, Snap, AUR)
 - Expand FFT from 3 bands to 7 (sub-bass, bass, low-mids, mids, upper-mids, presence, brilliance) — `audio.fft` spec updated, pipeline rebuild + GUI visualizer update pending
-- Shaped transport buttons (play triangle, pause bars, skip arrows) replacing square placeholders — remove text labels once shapes are self-explanatory
-- Button press animation: halve depth on click to simulate depression
+- 3D elements replacing 2D HUD overlays:
+  - Shaped transport buttons (play triangle, pause bars, skip arrows) — remove text labels once shapes are self-explanatory
+  - Button press animation: halve depth on click to simulate depression
+  - Game over screen: 3D score display, restart prompt as 3D element
+  - Pause screen: 3D control hints panel
+  - Score/level/lines as 3D floating text or counters
 - Responsive layout: side assemblies track window edges rather than fixed world-space positions
+- Proper depth testing in scene pipeline (replaces draw-order hacks)
 - Future: user-remappable key bindings (settings UI + persisted config)
 
 ---
