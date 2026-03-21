@@ -52,25 +52,30 @@ Package for Flathub, Snap, AUR, and other Linux stores. Requires:
 
 ## Layout
 
-Two-panel side-by-side presentation:
+Board-centered, clean minimalistic 3D (Tetris Effect style):
 
-### Left Panel — Game Board
+### Center — Game Board
 - **3D game board in 3D space** — pieces are volumetric blocks, not flat sprites
-- Board sits in a 3D scene with lighting and depth
+- Board sits front and center in a 3D scene with lighting and depth
 - Particle effects exist in 3D space (fly around/behind the board)
 - Audio-reactive particle effects and beat pulse
 - In idle/visualizer mode: game plays itself (demo mode)
 
-### Right Panel — Music Dashboard
-**V1 (minimal):**
-- Folder path field + filesystem browser to locate music directory
-- Now playing: track name, progress bar
-- Controls: play/pause, skip, volume, shuffle toggle
+### Left Side — Game HUD
+- Score, Level, Lines (2D overlay text, top-left)
+- Next piece preview (3D rotating cube)
+
+### Right Side — Music Dashboard
+- Track name (2D overlay text)
+- Volume bar (3D slab, responds to +/- keys)
+- FFT visualizer (3D columns — bass/mids/highs, audio-reactive)
+- Control hints (2D overlay text)
+- All elements fade with HUD auto-hide, audio controls reveal HUD
 
 **Future:**
+- Folder path field + filesystem browser to locate music directory
 - Playlist management, queue editing, reordering
 - Track metadata display (artist, album, artwork)
-- Deeper library integration
 
 ## Key Features
 
@@ -118,7 +123,7 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - [x] Language/platform — **Rust**
 - [x] Does music affect difficulty? — **No, audio is purely visual/atmospheric**
 - [x] Song transition behavior — **Seamless auto-advance**
-- [x] Layout — **Two-panel: game board + music dashboard**
+- [x] Layout — **Board-centered: game HUD left, music dashboard right (3D elements)**
 - [x] Panic escalation — **2-stage (normal / danger), NES style**
 - [x] Scope of audio analysis — **Start lightweight (amplitude/BPM). Add FFT/spectral when visuals demand it.**
 - [x] Bundled fallback — **Procedural generation. Zero licensing, deterministic, pipeline-testable.**
@@ -131,9 +136,9 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Cargo project setup and module structure
 - Audio file loading, decoding, and playback
 - Real-time amplitude and beat detection
-- Basic wgpu rendering (two-panel layout, grid, tetrominoes)
-- Playable Tetris with no audio reactivity
-- Music dashboard: folder field, now playing, basic controls
+- wgpu 3D rendering (board-centered layout, Blinn-Phong lighting, bloom)
+- Playable Tetris with audio reactivity (beat pulse, FFT visuals, particles)
+- 3D music dashboard: volume bar, FFT visualizer, track name, control hints
 
 ### Phase 2 — The Effect
 - Wire audio analysis into visual layer

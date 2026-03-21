@@ -114,6 +114,34 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     // Glow removed — bloom post-processing handles the soft glow now
 }
 
+/// 3D slab in world space — simplified box for dashboard elements.
+/// Position is (x, y) in grid coords, y-down convention same as push_cube_3d.
+pub fn push_slab_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+                    x: f32, y: f32, w: f32, h: f32, depth: f32, color: [f32; 4]) {
+    let x0 = x;
+    let x1 = x + w;
+    let y0 = -y;
+    let y1 = -(y + h);
+    let z0 = 0.0;
+    let z1 = depth;
+
+    let faces: &[([f32; 3], [[f32; 3]; 4])] = &[
+        ([0.0, 0.0, 1.0],  [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]),
+        ([0.0, 0.0, -1.0], [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]]),
+        ([0.0, 1.0, 0.0],  [[x0, y0, z1], [x0, y0, z0], [x1, y0, z0], [x1, y0, z1]]),
+        ([0.0, -1.0, 0.0], [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]]),
+        ([1.0, 0.0, 0.0],  [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]]),
+        ([-1.0, 0.0, 0.0], [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]]),
+    ];
+    for (normal, corners) in faces {
+        let base = verts.len() as u32;
+        for &pos in corners {
+            verts.push(Vertex { position: pos, normal: *normal, color });
+        }
+        indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+    }
+}
+
 /// 3D grid floor quad in world space
 pub fn push_grid_floor(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                        width: f32, height: f32, color: [f32; 4]) {

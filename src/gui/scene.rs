@@ -88,6 +88,40 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
+    // --- 3D Music Dashboard (right of board) ---
+    let hud_a = world.hud_opacity;
+    let dash_x = 12.0;
+
+    // Volume bar
+    let vol = if let Ok(audio) = world.audio.try_lock() { audio.volume } else { 0.5 };
+    let vol_y = 6.0;
+    let vol_w = 2.0;
+    let vol_h = 0.2;
+    let vol_bg = rgba_to_f32([15, 15, 30, (160.0 * hud_a) as u8]);
+    push_slab_3d(&mut sv, &mut si, dash_x, vol_y, vol_w, vol_h, 0.15, vol_bg);
+    let vol_fill = rgba_to_f32([60, 100, 180, (220.0 * hud_a) as u8]);
+    push_slab_3d(&mut sv, &mut si, dash_x, vol_y, vol_w * vol, vol_h, 0.3, vol_fill);
+
+    // FFT bars (bass / mids / highs)
+    let fft_y = 7.0;
+    let fft_max_h = 5.0;
+    let col_w = 0.3;
+    let col_gap = 0.15;
+    let fft_depth = 0.35;
+    let bands: [(f32, [u8; 4]); 3] = [
+        (world.bass,  [40, 60, 180, (220.0 * hud_a) as u8]),
+        (world.mids,  [60, 160, 100, (220.0 * hud_a) as u8]),
+        (world.highs, [180, 80, 60, (220.0 * hud_a) as u8]),
+    ];
+    for (i, (val, color)) in bands.iter().enumerate() {
+        let bx = dash_x + i as f32 * (col_w + col_gap);
+        let filled_h = (fft_max_h * val).max(0.05);
+        let bg_color = rgba_to_f32([12, 12, 25, (120.0 * hud_a) as u8]);
+        push_slab_3d(&mut sv, &mut si, bx, fft_y, col_w, fft_max_h, fft_depth * 0.3, bg_color);
+        let fill_y = fft_y + (fft_max_h - filled_h);
+        push_slab_3d(&mut sv, &mut si, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(*color));
+    }
+
     // Per-cell clearing animations (shrinking bright cubes)
     for cell in &world.clearing_cells {
         if cell.scale > 0.01 {
@@ -354,17 +388,18 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, 12.0, 88.0, "LINES", dim_col, 1.0);
     push_text(&mut verts, &mut indices, 12.0, 100.0, &format!("{}", world.session.total_lines), text_col, 2.0);
 
-    // Now playing
+    // Music dashboard labels (right side, aligned with 3D elements)
+    let dash_hud_x = w - 140.0;
     let track_name = if let Ok(audio) = world.audio.try_lock() {
         audio.track_name.clone()
     } else {
         String::new()
     };
     if !track_name.is_empty() {
-        let display_name: String = track_name.chars().take(20).collect();
-        let tw = display_name.len() as f32 * 4.0;
-        push_text(&mut verts, &mut indices, (w - tw) / 2.0, h - 20.0, &display_name.to_uppercase(), dim_col, 1.0);
+        let display: String = track_name.chars().take(16).collect();
+        push_text(&mut verts, &mut indices, dash_hud_x, 12.0, &display.to_uppercase(), dim_col, 1.0);
     }
+    push_text(&mut verts, &mut indices, dash_hud_x, 28.0, "N SKIP  +- VOL", dim_col, 1.0);
 
     // State overlays
     if world.session.state == GameState::GameOver {

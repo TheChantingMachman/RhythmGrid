@@ -247,12 +247,14 @@ impl GameWorld {
         if let Ok(mut audio) = self.audio.try_lock() {
             audio.skip_requested = true;
         }
+        self.on_mouse_activity();
     }
 
     pub fn adjust_volume(&mut self, delta: f32) {
         if let Ok(mut audio) = self.audio.try_lock() {
             audio.volume = (audio.volume + delta).clamp(0.0, 1.0);
         }
+        self.on_mouse_activity();
     }
 
     /// Call when mouse moves to reveal HUD
