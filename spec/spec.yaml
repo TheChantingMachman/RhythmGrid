@@ -1,3 +1,272 @@
 # RhythmGrid — Spec
-# Populate this file with SpecDB v2 entries.
-# See https://github.com/TheChantingMachman/SpecDB for format reference.
+# SpecDB v2 format
+
+- id: grid.dimensions
+  section: Grid
+  description: Grid is 10 columns wide and 20 rows tall. Cells indexed as cells[row][col] with row 0 at top, row 19 at bottom, col 0 at left, col 9 at right. A new Grid initializes all cells to CellState::Empty.
+  tags: [core, grid]
+  status: implemented
+  constants: {width: "10", height: "20"}
+- id: grid.cell_state
+  section: Grid
+  description: Each cell is either Empty or Occupied(u32). The u32 value identifies what occupies the cell — interpretation is up to the game layer.
+  tags: [core, grid]
+  status: implemented
+- id: pieces.tetromino_count
+  section: Pieces
+  description: "There are exactly 7 tetromino types: I, O, T, S, Z, J, L"
+  tags: [core, pieces]
+  status: implemented
+  constants: {count: "7"}
+- id: pieces.tetromino_cells
+  section: Pieces
+  description: "Each tetromino is defined by exactly 4 cells"
+  tags: [core, pieces]
+  status: implemented
+  depends_on: [pieces.tetromino_count]
+  constants: {cells_per_piece: "4"}
+- id: pieces.rotation
+  section: Pieces
+  description: 'Each tetromino has 4 rotation states (0=spawn, 1=90°CW, 2=180°, 3=270°CW). CW transform: (col,row)->(row,-col). All rotation cell data stored in a static [7][4][4] table. Coordinate convention: positive col=right, positive row=down.'
+  tags: [core, pieces, rotation]
+  status: implemented
+  depends_on: [pieces.tetromino_cells]
+- id: pieces.srs_kicks
+  section: Pieces
+  description: SRS wall kick data per Tetris Guideline, converted to y-down coordinates. JLSTZ share one kick table, I-piece has a separate table, O-piece has no kicks (rotation is no-op on collision). 8 transitions (4 CW + 4 CCW), 4 kick offsets each. Offsets are (col_delta, row_delta).
+  tags: [core, pieces, rotation]
+  status: implemented
+  constants: {max_kick_tests: 4}
+  depends_on: [pieces.rotation]
+- id: pieces.spawn
+  section: Pieces
+  description: New pieces spawn at top-center of the grid in rotation state 0. Spawn origin is (col=4, row=0). If spawn position collides, try up to 4 rows above (vanish zone) before declaring game over.
+  tags: [core, pieces]
+  status: implemented
+  depends_on: [pieces.tetromino_cells]
+- id: game.state
+  section: Game
+  description: 'Game has states: Menu, Playing, Paused, GameOver. Transitions: Menu->Playing, Playing->Paused->Playing, Playing->GameOver, GameOver->Menu.'
+  tags: [core, game, state]
+  status: implemented
+- id: game.collision
+  section: Game
+  description: 'A piece position is valid if all its cells satisfy: column is within grid bounds (0..WIDTH), row is not below grid (row < HEIGHT), and the cell is not occupied. Cells with row < 0 (vanish zone / above grid) are always considered valid — they are above the visible area and cannot collide. Uses cells[row][col] indexing with positive col=right, positive row=down.'
+  tags: [core, game, collision]
+  status: implemented
+- id: game.move_horizontal
+  section: Game
+  description: Pieces move left or right by one column. Move is rejected if the resulting position is invalid.
+  tags: [core, game, movement]
+  status: implemented
+  depends_on: [game.collision]
+- id: game.move_down
+  section: Game
+  description: Soft drop moves the piece down one row. If the move is invalid, the piece locks in place.
+  tags: [core, game, movement]
+  status: implemented
+  depends_on: [game.collision]
+- id: game.hard_drop
+  section: Game
+  description: Hard drop instantly moves the piece to the lowest valid row and locks it.
+  tags: [core, game, movement]
+  status: implemented
+  depends_on: [game.collision]
+- id: game.rotate
+  section: Game
+  description: Rotate piece clockwise or counter-clockwise. Tries unshifted rotation first, then SRS wall kicks if it collides.
+  tags: [core, game, rotation]
+  status: implemented
+  depends_on: [game.collision]
+- id: game.lock
+  section: Game
+  description: A piece locks into the grid when it cannot move down. Each cell stored as CellState::Occupied(type_index) where type_index is the piece's zero-based index (I=0, O=1, T=2, S=3, Z=4, J=5, L=6). Lock triggers line clearing.
+  tags: [core, game]
+  status: implemented
+  depends_on: [game.collision]
+- id: game.line_clear
+  section: Game
+  description: When a row is fully occupied, it is cleared and all rows above shift down. Multiple rows can clear simultaneously. Returns the number of lines cleared so scoring and level can consume it.
+  tags: [core, game, scoring]
+  status: implemented
+  depends_on: [game.lock]
+- id: game.level
+  section: Game
+  description: Level starts at 1 and increases every 10 lines cleared. Level determines gravity speed.
+  tags: [core, game, progression]
+  status: implemented
+  constants: {lines_per_level: 10, starting_level: 1}
+  depends_on: [game.line_clear]
+- id: game.score
+  section: Game
+  description: 'Score awards points for line clears: 1 line=100, 2=300, 3=500, 4=800, multiplied by current level.'
+  tags: [core, game, scoring]
+  status: implemented
+  constants: {double: 300, single: 100, tetris: 800, triple: 500}
+  depends_on: [game.line_clear, game.level]
+- id: game.gravity
+  section: Game
+  description: Pieces fall automatically at a timed interval. Interval decreases as level increases.
+  tags: [core, game, timing]
+  status: implemented
+  depends_on: [game.move_down, game.level]
+- id: game.next_piece
+  section: Game
+  description: The next piece to spawn is visible to the player. Uses a 7-bag randomizer so all 7 types appear before any repeats. Bag is shuffled with a time-based seed (system time at creation) for unique sequences each game.
+  tags: [core, game]
+  status: implemented
+- id: game.escalation
+  section: Game
+  description: '2-stage escalation based on stack height. Normal: baseline effects. Danger: music speeds up, effects intensify.'
+  tags: [core, game, escalation]
+  status: implemented
+  constants: {danger_threshold_row: 4}
+- id: game.game_over
+  section: Game
+  description: Game ends when a newly spawned piece immediately collides with occupied cells.
+  tags: [core, game, state]
+  status: implemented
+  depends_on: [game.collision]
+- id: audio.decode
+  section: Audio
+  description: Decode audio files (MP3, WAV, FLAC, OGG) to raw PCM samples. Returns sample rate, channel count, and sample data.
+  tags: [core, audio, decode]
+  status: implemented
+  constants: {formats: 'mp3:wav:flac:ogg'}
+- id: audio.playback
+  section: Audio
+  description: Play decoded PCM audio through the system audio output device. Supports play, pause, and stop.
+  tags: [core, audio, playback]
+  status: implemented
+  depends_on: [audio.decode]
+- id: audio.volume
+  section: Audio
+  description: Volume control scales PCM sample amplitude. Range 0.0 (mute) to 1.0 (full).
+  tags: [core, audio, playback]
+  status: implemented
+  constants: {default: 0.8, max: 1.0, min: 0.0}
+  depends_on: [audio.playback]
+- id: audio.speed
+  section: Audio
+  description: Playback speed control resamples audio output. Range 0.5x to 2.0x. Used for panic escalation.
+  tags: [core, audio, playback, escalation]
+  status: implemented
+  constants: {default: 1.0, max: 2.0, min: 0.5}
+  depends_on: [audio.playback]
+- id: audio.amplitude
+  section: Audio
+  description: Track real-time RMS amplitude of the audio stream per frame. Returns a normalized 0.0-1.0 value.
+  tags: [core, audio, analysis]
+  status: implemented
+  depends_on: [audio.playback]
+- id: audio.beat_detect
+  section: Audio
+  description: Detect beats in real-time by tracking amplitude spikes above a rolling average. Emits beat events with timestamp.
+  tags: [core, audio, analysis]
+  status: implemented
+  depends_on: [audio.amplitude]
+- id: audio.procedural
+  section: Audio
+  description: Generate simple procedural audio with a known BPM and beat pattern. Used as fallback when no music is configured and as a deterministic test fixture.
+  tags: [core, audio, procedural]
+  status: implemented
+  constants: {default_bpm: 120}
+- id: music.scan_folder
+  section: Music
+  description: Scan a directory for supported audio files. Returns a list of file paths filtered by supported extensions.
+  tags: [core, music, filesystem]
+  status: implemented
+- id: music.shuffle
+  section: Music
+  description: Shuffle mode randomizes the play order of scanned files. Toggle on/off.
+  tags: [core, music, playback]
+  status: implemented
+  depends_on: [music.scan_folder]
+- id: music.auto_advance
+  section: Music
+  description: When a track finishes, the next track in the list starts automatically with no gap.
+  tags: [core, music, playback]
+  status: implemented
+  depends_on: [music.scan_folder]
+- id: music.now_playing
+  section: Music
+  description: 'Track metadata for the currently playing file: filename, duration, elapsed time.'
+  tags: [core, music, ui]
+  status: implemented
+- id: music.skip
+  section: Music
+  description: Skip to the next track in the list. Wraps to the beginning if at the end.
+  tags: [core, music, playback]
+  status: implemented
+  depends_on: [music.scan_folder]
+- id: config.xdg_paths
+  section: Config
+  description: Config stored in XDG_CONFIG_HOME/rhythmgrid, data in XDG_DATA_HOME/rhythmgrid. Falls back to ~/.config and ~/.local/share.
+  tags: [core, config, filesystem]
+  status: implemented
+- id: config.load_save
+  section: Config
+  description: Settings are persisted as a TOML file. Load on startup, save on change. Missing file uses defaults.
+  tags: [core, config]
+  status: implemented
+  depends_on: [config.xdg_paths]
+- id: config.music_folder
+  section: Config
+  description: Music folder path is a persisted setting. If set, it is scanned on startup.
+  tags: [core, config, music]
+  status: implemented
+  depends_on: [config.load_save, music.scan_folder]
+  modifies: [config.load_save]
+- id: render.piece_colors
+  section: Render
+  description: 'Each tetromino type maps to an RGBA color: I=(0,255,255,255) cyan, O=(255,255,0,255) yellow, T=(128,0,128,255) purple, S=(0,255,0,255) green, Z=(255,0,0,255) red, J=(0,0,255,255) blue, L=(255,165,0,255) orange. Function piece_color(type_index: u32) -> [u8; 4] returns the color.'
+  tags: [render, color]
+  status: implemented
+  constants: {I: '0:255:255:255', J: '0:0:255:255', L: '255:165:0:255', O: '255:255:0:255', S: '0:255:0:255', T: '128:0:128:255', Z: '255:0:0:255'}
+  depends_on: [pieces.tetromino_count]
+- id: render.board_layout
+  section: Render
+  description: Board layout defines pixel geometry for rendering. Cell size is 30x30 pixels. Board origin (top-left of cell 0,0) is at pixel (board_x, board_y). Board pixel dimensions are cell_size*WIDTH x cell_size*HEIGHT = 300x600. Function cell_rect(row, col, board_x, board_y, cell_size) -> (px_x, px_y, px_w, px_h) returns the pixel rectangle for a grid cell.
+  tags: [render, layout]
+  status: implemented
+  constants: {board_height_px: 600, board_width_px: 300, cell_size: 30}
+  depends_on: [grid.dimensions]
+- id: render.cell_quads
+  section: Render
+  description: 'Converts game state to a list of drawable quads. Each quad is (px_x, px_y, px_w, px_h, rgba). Function board_quads(grid, active_piece, board_x, board_y, cell_size) returns: one quad per occupied grid cell colored by its type_index, plus one quad per active piece cell colored by its type. Empty cells are not included. Ghost piece (hard drop preview) included as same color with alpha=80.'
+  tags: [render, draw]
+  status: implemented
+  depends_on: [render.board_layout, render.piece_colors, game.collision]
+- id: render.next_piece_preview
+  section: Render
+  description: Renders a preview of the next piece from the bag. Function next_piece_quads(piece_type, preview_x, preview_y, cell_size) returns quads for the 4 cells of the piece in spawn rotation (rotation=0), positioned relative to (preview_x, preview_y). Uses piece_color for coloring.
+  tags: [render, draw, ui]
+  status: implemented
+  depends_on: [render.piece_colors, game.next_piece]
+- id: input.key_map
+  section: Input
+  description: 'Maps keyboard inputs to game actions. Default mapping: Left=MoveLeft, Right=MoveRight, Down=SoftDrop, Up=RotateCW, Z=RotateCCW, Space=HardDrop, P=TogglePause, Escape=BackToMenu, Enter=StartGame. Function map_key(key: KeyCode) -> Option<GameAction> returns the action for a key press. GameAction is an enum: MoveLeft, MoveRight, SoftDrop, HardDrop, RotateCW, RotateCCW, TogglePause, BackToMenu, StartGame.'
+  tags: [input, controls]
+  status: implemented
+  depends_on: [game.state]
+- id: game.tick
+  section: Game
+  description: 'Orchestrates one game frame. tick(state, dt_secs) advances the gravity timer by dt_secs. When accumulated time exceeds gravity interval, applies move_down. If move_down fails (piece locks), clears lines, updates score/level, spawns next piece. If spawn fails, transitions to GameOver. Returns a TickResult indicating what happened: Nothing, PieceMoved, PieceLocked{lines_cleared}, GameOver. Only runs when GameState is Playing.'
+  tags: [core, game, timing]
+  status: implemented
+  depends_on: [game.gravity, game.move_down, game.lock, game.line_clear, game.next_piece, game.game_over, game.score, game.level]
+- id: audio.fft
+  section: Audio
+  description: 'Compute FFT frequency decomposition of audio samples. Takes a window of PCM samples and returns energy in 3 frequency bands: bass (20-250Hz), mids (250-4000Hz), highs (4000-20000Hz). Each band is a normalized 0.0-1.0 value representing relative energy. Function fft_bands(samples: &[f32], sample_rate: u32) -> (f32, f32, f32) returns (bass, mids, highs).'
+  tags: [core, audio, analysis]
+  status: implemented
+  constants: {bass_high: 250, bass_low: 20, highs_high: 20000, highs_low: 4000, mids_high: 4000, mids_low: 250}
+  depends_on: [audio.amplitude]
+- id: game.lock_delay
+  section: Game
+  description: After a piece can no longer move down, a brief lock delay of 500ms begins before the piece locks. Any successful move or rotation resets the timer. Maximum of 15 resets per piece. If the timer expires or resets are exhausted, the piece locks immediately.
+  tags: [core, game, timing]
+  status: implemented
+  constants: {delay_ms: 500, max_resets: 15}
+  depends_on: [game.lock, game.move_down, game.tick]
+  modifies: [game.tick]

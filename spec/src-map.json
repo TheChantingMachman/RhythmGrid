@@ -1,0 +1,57 @@
+{
+  "modules": [
+    {
+      "file": "src/grid.rs",
+      "sections": ["Grid"],
+      "tags": ["grid"],
+      "primary": true
+    },
+    {
+      "file": "src/pieces.rs",
+      "sections": ["Pieces"],
+      "tags": ["pieces"],
+      "primary": true
+    },
+    {
+      "file": "src/game.rs",
+      "sections": ["Game"],
+      "tags": ["game", "state", "collision", "movement", "scoring", "progression", "timing"],
+      "primary": true
+    },
+    {
+      "file": "src/audio.rs",
+      "sections": ["Audio"],
+      "tags": ["audio", "decode", "playback", "analysis", "procedural"],
+      "primary": true
+    },
+    {
+      "file": "src/music.rs",
+      "sections": ["Music"],
+      "tags": ["music", "filesystem"],
+      "primary": true
+    },
+    {
+      "file": "src/config.rs",
+      "sections": ["Config"],
+      "tags": ["config"],
+      "primary": true
+    },
+    {
+      "file": "src/render.rs",
+      "sections": ["Render"],
+      "tags": ["render", "color", "layout", "draw", "ui"],
+      "primary": true
+    },
+    {
+      "file": "src/input.rs",
+      "sections": ["Input"],
+      "tags": ["input", "controls"],
+      "primary": true
+    },
+    {
+      "file": "src/lib.rs",
+      "sections": [],
+      "tags": []
+    }
+  ]
+}
