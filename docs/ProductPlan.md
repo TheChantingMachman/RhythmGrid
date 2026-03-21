@@ -127,6 +127,13 @@ Real-time song fingerprinting to make visuals respond to what's musically intere
 - Rolling window (5-10s) cumulative energy per band → dominant band detection
 - Detects verse/chorus/breakdown transitions in real time
 
+**Phase B+ — Multi-band beat detection:**
+- Current beat detector uses overall RMS amplitude only — misses beats where energy is in specific bands (hi-hats, snares) without a big amplitude spike
+- Run spike detection per-band (especially sub-bass for kicks, upper-mids for snares)
+- Beat event if *any* band spikes above its own rolling average
+- Requires `audio.beat_detect` spec update + pipeline rebuild
+- Open: should different band beats trigger different visual responses? (kick → ring, snare → flash)
+
 **Phase B+ — Rolling averages + dominant band ranking:**
 - Exponential moving average per band (7 floats, ~5-10s settling period)
 - Sort to find top 3 or 5 most active bands per song section
