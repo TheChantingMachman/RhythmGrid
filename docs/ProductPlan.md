@@ -180,6 +180,9 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - XDG-compliant config and data paths
 - Linux packaging (Flatpak, Snap, AUR)
 - Expand FFT from 3 bands to 5 (sub-bass, bass, mids, upper-mids, highs) — update `audio.fft` spec + GUI visualizer
+- Shaped transport buttons (play triangle, pause bars, skip arrows) replacing square placeholders — remove text labels once shapes are self-explanatory
+- Button press animation: halve depth on click to simulate depression
+- Responsive layout: side assemblies track window edges rather than fixed world-space positions
 - Future: user-remappable key bindings (settings UI + persisted config)
 
 ---

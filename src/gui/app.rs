@@ -29,7 +29,7 @@ impl ApplicationHandler for App {
         let attrs = Window::default_attributes()
             .with_title("RhythmGrid")
             .with_inner_size(winit::dpi::LogicalSize::new(THEME.win_w, THEME.win_h))
-            .with_min_inner_size(winit::dpi::LogicalSize::new(THEME.win_w / 2, THEME.win_h / 2));
+            .with_min_inner_size(winit::dpi::LogicalSize::new(800, 600));
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let gpu = GpuState::new(window.clone());
         self.gpu = Some(gpu);
@@ -46,7 +46,7 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Pressed, .. }, .. } => {
                 use winit::keyboard::KeyCode as K;
                 match code {
-                    K::KeyN => self.world.skip_track(),
+                    K::KeyN => self.world.skip_track(), // keep as keyboard shortcut alongside button
                     K::KeyC | K::ShiftLeft | K::ShiftRight => self.world.hold_piece(),
                     K::Equal | K::NumpadAdd => self.world.adjust_volume(0.05),
                     K::Minus | K::NumpadSubtract => self.world.adjust_volume(-0.05),

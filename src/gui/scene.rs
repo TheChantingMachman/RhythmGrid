@@ -91,14 +91,15 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     // --- 3D Music Dashboard ---
     let hud_a = world.hud_opacity;
 
-    // Volume: [-] ====== [+]  (right side, tight to board)
+    // Volume: [-] ====== [+]  (right side, anchored to window edge)
     let vol = if let Ok(audio) = world.audio.try_lock() { audio.volume } else { 0.5 };
-    let vol_minus_x = 11.0;
+    let audio_x = 12.5;
+    let vol_minus_x = audio_x;
     let vol_btn_w = 0.5;
     let vol_bar_x = vol_minus_x + vol_btn_w + 0.15;
-    let vol_plus_x = 13.3;
+    let vol_plus_x = audio_x + 2.5;
     let vol_bar_w = vol_plus_x - vol_bar_x - 0.15;
-    let vol_y = 6.0;
+    let vol_y = 15.5;
     let vol_h = 0.2;
     let vol_bg = rgba_to_f32([15, 15, 30, (160.0 * hud_a) as u8]);
     push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
@@ -117,19 +118,43 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     } else {
         rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
     };
-    push_slab_3d(&mut sv, &mut si, vol_plus_x, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
+    push_slab_3d(&mut sv, &mut si, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
 
-    // Folder button (right side, below volume)
-    let fld_color = if world.btn_hovered(super::world::ButtonId::Folder) {
+    // Transport buttons: [<<] [>||] [>>] [SH]
+    let transport_ids = [
+        super::world::ButtonId::Back,
+        super::world::ButtonId::PlayPause,
+        super::world::ButtonId::Skip,
+        super::world::ButtonId::Shuffle,
+    ];
+    let is_paused = if let Ok(audio) = world.audio.try_lock() { audio.paused } else { false };
+    for &id in &transport_ids {
+        let btn = world.buttons.iter().find(|b| b.id == id).unwrap();
+        let base_color = match id {
+            super::world::ButtonId::PlayPause if is_paused => [50, 80, 50],
+            super::world::ButtonId::Shuffle => [50, 50, 80],
+            _ => [30, 30, 50],
+        };
+        let color = if btn.hovered {
+            rgba_to_f32([base_color[0] + 40, base_color[1] + 40, base_color[2] + 40, (240.0 * hud_a) as u8])
+        } else {
+            rgba_to_f32([base_color[0] as u8, base_color[1] as u8, base_color[2] as u8, (180.0 * hud_a) as u8])
+        };
+        push_slab_3d(&mut sv, &mut si, btn.world_x, btn.world_y, btn.world_w, btn.world_h, 0.4, color);
+    }
+
+    // Folder button (right side, below transport)
+    let fld = world.buttons.iter().find(|b| b.id == super::world::ButtonId::Folder).unwrap();
+    let fld_color = if fld.hovered {
         rgba_to_f32([60, 80, 140, (240.0 * hud_a) as u8])
     } else {
         rgba_to_f32([30, 40, 70, (180.0 * hud_a) as u8])
     };
-    push_slab_3d(&mut sv, &mut si, 12.0, 15.0, 2.0, 1.0, 0.5, fld_color);
+    push_slab_3d(&mut sv, &mut si, fld.world_x, fld.world_y, fld.world_w, fld.world_h, 0.4, fld_color);
 
     // FFT bars (lower-left of board)
     let fft_a = if world.fft_locked { 1.0 } else { hud_a };
-    let fft_x = -3.0;
+    let fft_x = -4.5;
     let fft_y = 14.0;
     let fft_max_h = 5.0;
     let col_w = 0.2;
@@ -518,8 +543,6 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         let display: String = track_name.chars().take(16).collect();
         push_text(&mut verts, &mut indices, dash_hud_x, 12.0, &display.to_uppercase(), dim_col, 1.0);
     }
-    push_text(&mut verts, &mut indices, dash_hud_x, 28.0, "N SKIP", dim_col, 1.0);
-
     // Projected button labels
     let scale_x = w / world.window_size[0];
     let scale_y = h / world.window_size[1];
@@ -537,6 +560,20 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, vd_x, vd_y, "-", dim_col, 1.0);
     let (vu_x, vu_y) = project_label(super::world::ButtonId::VolUp, world);
     push_text(&mut verts, &mut indices, vu_x, vu_y, "+", dim_col, 1.0);
+
+    // Transport labels
+    let is_paused_lbl = if let Ok(audio) = world.audio.try_lock() { audio.paused } else { false };
+    let transport_labels = [
+        (super::world::ButtonId::Back, "<<"),
+        (super::world::ButtonId::PlayPause, if is_paused_lbl { ">" } else { "||" }),
+        (super::world::ButtonId::Skip, ">>"),
+        (super::world::ButtonId::Shuffle, "SH"),
+    ];
+    for (id, label) in transport_labels {
+        let col = if world.btn_hovered(id) { text_col } else { dim_col };
+        let (lx, ly) = project_label(id, world);
+        push_text(&mut verts, &mut indices, lx, ly, label, col, 1.0);
+    }
 
     // Folder label
     let folder_col = if world.btn_hovered(super::world::ButtonId::Folder) { text_col } else { dim_col };

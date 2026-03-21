@@ -55,6 +55,10 @@ pub(super) enum ButtonId {
     VolUp,
     VolDown,
     FftLock,
+    PlayPause,
+    Back,
+    Skip,
+    Shuffle,
 }
 
 pub(super) struct Button {
@@ -124,10 +128,14 @@ impl GameWorld {
             cursor_pos: [0.0; 2],
             window_size: [THEME.win_w as f32, THEME.win_h as f32],
             buttons: vec![
-                Button { id: ButtonId::VolDown, world_x: 11.0, world_y: 6.0, world_w: 0.5, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
-                Button { id: ButtonId::VolUp, world_x: 13.3, world_y: 6.0, world_w: 0.5, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
-                Button { id: ButtonId::FftLock, world_x: -3.0, world_y: 19.2, world_w: 1.1, world_h: 0.3, screen_rect: [0.0; 4], hovered: false },
-                Button { id: ButtonId::Folder, world_x: 12.0, world_y: 15.0, world_w: 2.0, world_h: 1.0, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::VolDown, world_x: 12.5, world_y: 15.5, world_w: 0.5, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::VolUp, world_x: 15.0, world_y: 15.5, world_w: 0.5, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::FftLock, world_x: -4.5, world_y: 19.2, world_w: 1.1, world_h: 0.3, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::Back, world_x: 12.5, world_y: 17.0, world_w: 0.6, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::PlayPause, world_x: 13.3, world_y: 17.0, world_w: 0.6, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::Skip, world_x: 14.1, world_y: 17.0, world_w: 0.6, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::Shuffle, world_x: 14.9, world_y: 17.0, world_w: 0.6, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::Folder, world_x: 12.5, world_y: 18.2, world_w: 3.0, world_h: 0.6, screen_rect: [0.0; 4], hovered: false },
             ],
             fft_locked: false,
         }
@@ -311,6 +319,27 @@ impl GameWorld {
         if self.session.state == GameState::Playing {
             self.session.hold_piece();
         }
+    }
+
+    pub fn toggle_audio_pause(&mut self) {
+        if let Ok(mut audio) = self.audio.try_lock() {
+            audio.paused = !audio.paused;
+        }
+        self.on_mouse_activity();
+    }
+
+    pub fn prev_track(&mut self) {
+        if let Ok(mut audio) = self.audio.try_lock() {
+            audio.back_requested = true;
+        }
+        self.on_mouse_activity();
+    }
+
+    pub fn toggle_shuffle(&mut self) {
+        if let Ok(mut audio) = self.audio.try_lock() {
+            audio.shuffle_requested = true;
+        }
+        self.on_mouse_activity();
     }
 
     pub fn skip_track(&mut self) {
@@ -507,6 +536,10 @@ impl GameWorld {
             Some(ButtonId::VolUp) => self.adjust_volume(0.05),
             Some(ButtonId::VolDown) => self.adjust_volume(-0.05),
             Some(ButtonId::FftLock) => { self.fft_locked = !self.fft_locked; self.on_mouse_activity(); }
+            Some(ButtonId::PlayPause) => self.toggle_audio_pause(),
+            Some(ButtonId::Back) => self.prev_track(),
+            Some(ButtonId::Skip) => self.skip_track(),
+            Some(ButtonId::Shuffle) => self.toggle_shuffle(),
             None => {}
         }
     }

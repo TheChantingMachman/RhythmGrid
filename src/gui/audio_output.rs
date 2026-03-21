@@ -19,6 +19,9 @@ pub struct AudioState {
     pub track_name: String,
     pub volume: f32,           // 0.0-1.0, applied in audio callback
     pub skip_requested: bool,  // set by game loop, consumed by decode thread
+    pub back_requested: bool,
+    pub shuffle_requested: bool,
+    pub paused: bool,
     pub shutdown: bool,        // set to stop audio thread
     beat_detector: BeatDetector,
     elapsed_secs: f64,
@@ -38,6 +41,9 @@ impl AudioState {
             track_name: String::new(),
             volume: 0.5,
             skip_requested: false,
+            back_requested: false,
+            shuffle_requested: false,
+            paused: false,
             shutdown: false,
             beat_detector: BeatDetector::new(),
             elapsed_secs: 0.0,
@@ -271,18 +277,34 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                     // Skip broken track
                 }
 
-                // Wait for playback to finish or skip signal
+                // Wait for playback to finish or control signal
+                let mut go_back = false;
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(100));
-                    // Check for skip request
                     if let Ok(mut s) = state_decode.try_lock() {
-                        if s.skip_requested {
+                        if s.skip_requested || s.back_requested {
+                            go_back = s.back_requested;
                             s.skip_requested = false;
-                            // Clear the buffer to stop current track
+                            s.back_requested = false;
                             if let Ok(mut buf) = buffer_decode.try_lock() {
                                 buf.samples.clear();
                                 buf.finished = true;
                             }
+                            break;
+                        }
+                        if s.shuffle_requested {
+                            s.shuffle_requested = false;
+                            if let Ok(mut pl) = playlist_decode.try_lock() {
+                                if let Some(p) = pl.as_mut() {
+                                    p.toggle_shuffle();
+                                }
+                            }
+                            // Restart current track after shuffle
+                            if let Ok(mut buf) = buffer_decode.try_lock() {
+                                buf.samples.clear();
+                                buf.finished = true;
+                            }
+                            go_back = false;
                             break;
                         }
                     }
@@ -293,11 +315,15 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                     }
                 }
 
-                // Advance to next track
+                // Navigate playlist
                 {
                     let mut pl = playlist_decode.lock().unwrap();
                     if let Some(p) = pl.as_mut() {
-                        p.advance();
+                        if go_back {
+                            p.prev_track();
+                        } else {
+                            p.advance();
+                        }
                     }
                 }
             }
@@ -320,8 +346,15 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut chunk_mono = Vec::with_capacity(data.len() / out_channels);
 
-                // Read volume from shared state
-                let vol = state_play.try_lock().map(|s| s.volume).unwrap_or(0.5);
+                // Read volume and pause state
+                let (vol, is_paused) = state_play.try_lock()
+                    .map(|s| (s.volume, s.paused))
+                    .unwrap_or((0.5, false));
+
+                if is_paused {
+                    for s in data.iter_mut() { *s = 0.0; }
+                    return;
+                }
 
                 if let Ok(mut buf) = buffer_play.try_lock() {
                     let src_ch = buf.channels.max(1);
