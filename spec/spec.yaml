@@ -276,3 +276,10 @@
   tags: [core, music, playback]
   status: draft
   depends_on: [music.skip]
+- id: game.hold_piece
+  section: Game
+  description: Player can hold the current piece, swapping it with the previously held piece. If no piece is held, the current piece is stored and the next piece from the bag spawns. Hold can only be used once per piece placement — after holding, can_hold is set to false and resets to true when the next piece locks. The held piece always resets to rotation 0 and spawns at the standard spawn position when swapped back in.
+  tags: [core, game]
+  status: draft
+  depends_on: [game.next_piece, game.state, game.tick]
+  modifies: [game.tick]
