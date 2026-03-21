@@ -501,13 +501,14 @@
 -
   id: audio.fft
   section: Audio
-  description: 'Compute FFT frequency decomposition of audio samples. Takes a window of PCM samples and returns energy in 7 frequency bands: sub-bass (20-60Hz), bass (60-250Hz), low-mids (250-500Hz), mids (500-2000Hz), upper-mids (2000-4000Hz), presence (4000-8000Hz), brilliance (8000-20000Hz). Each band is a normalized 0.0-1.0 value representing relative energy. Function fft_bands(samples: &[f32], sample_rate: u32) -> [f32; 7] returns an array in frequency order.'
+  description: 'Compute FFT frequency decomposition of audio samples. Takes a window of PCM samples and returns energy in 7 frequency bands. Boundaries are exclusive on the low end, inclusive on the high end (except sub-bass which includes its low bound). Band 0: sub-bass 20-60Hz, Band 1: bass 61-250Hz, Band 2: low-mids 251-500Hz, Band 3: mids 501-2000Hz, Band 4: upper-mids 2001-4000Hz, Band 5: presence 4001-8000Hz, Band 6: brilliance 8001-20000Hz. FFT bins whose center frequency falls below 20Hz or above 20000Hz are excluded. Each band is a normalized 0.0-1.0 value representing relative energy. Function fft_bands(samples: &[f32], sample_rate: u32) -> [f32; 7] returns an array in frequency order. Empty or all-zero input returns [0.0; 7].'
   tags:
   - core
   - audio
   - analysis
   status: stale
   constants:
+    band_count: 7,freq_min=20,freq_max=20000,band0_low=20,band0_high=60,band1_low=61,band1_high=250,band2_low=251,band2_high=500,band3_low=501,band3_high=2000,band4_low=2001,band4_high=4000,band5_low=4001,band5_high=8000,band6_low=8001,band6_high=20000
     bass_high: "250"
     bass_low: "20"
     highs_high: "20000"
@@ -517,6 +518,14 @@
     sub_bass_low: 20,sub_bass_high=60,bass_low=60,bass_high=250,low_mids_low=250,low_mids_high=500,mids_low=500,mids_high=2000,upper_mids_low=2000,upper_mids_high=4000,presence_low=4000,presence_high=8000,brilliance_low=8000,brilliance_high=20000
   depends_on:
   - audio.amplitude
+  fixture_patterns: |
+    - fft_bands(&samples, sample_rate) -> [f32; 7]
+    - Index order: [sub_bass, bass, low_mids, mids, upper_mids, presence, brilliance]
+    - Each value 0.0-1.0 normalized
+    - Empty/zero input: returns [0.0; 7]
+    - Boundaries: sub-bass includes 20Hz, all others exclusive on low end (e.g. bass starts at 61Hz not 60Hz)
+    - FFT bins outside 20-20000Hz are excluded
+    - Test with generate_procedural(120, 1.0, 44100) for deterministic non-zero output
 -
   id: game.lock_delay
   section: Game
