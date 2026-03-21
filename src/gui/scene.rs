@@ -561,18 +561,20 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     if world.session.state == GameState::Paused {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, 60]), 0.08);
-        let pa_w = 110.0; let pa_h = 150.0;
+        let pa_w = 110.0; let pa_h = 160.0;
         let pa_x = (w - pa_w) / 2.0;
         let pa_y = (h - pa_h) / 2.0;
         push_panel(&mut verts, &mut indices, pa_x, pa_y, pa_w, pa_h, 0.09);
-        push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 8.0, "PAUSED", rgba_to_f32([255, 255, 100, 255]), 2.0);
-        push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 30.0, "L-R  ORBIT", dim_col, 2.0);
-        push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 50.0, "L-R MOVE", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 62.0, "DN  DROP", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 74.0, "SPC HARD", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 86.0, "UP CW  Z CCW", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 98.0, "P RESUME", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, pa_x + 16.0, pa_y + 116.0, "N SKIP  +- VOL", dim_col, 1.0);
+        let px = pa_x + 8.0;
+        push_text(&mut verts, &mut indices, px, pa_y + 8.0, "PAUSED", rgba_to_f32([255, 255, 100, 255]), 2.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 30.0, "L-R MOVE", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 42.0, "DN  SOFT DROP", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 54.0, "SPC HARD DROP", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 66.0, "UP  CW  Z CCW", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 78.0, "C   HOLD", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 90.0, "P   RESUME", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 108.0, "N SKIP +- VOL", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 120.0, "L-R ORBIT CAM", dim_col, 1.0);
     }
 
     // Particles (always visible, not affected by HUD fade)
