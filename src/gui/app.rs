@@ -44,6 +44,7 @@ impl ApplicationHandler for App {
                 self.resize_debounce = std::time::Instant::now();
             }
             WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Pressed, .. }, .. } => {
+                self.world.demo_idle_timer = 0.0; // any key resets idle
                 use winit::keyboard::KeyCode as K;
                 match code {
                     K::KeyN => self.world.skip_track(), // keep as keyboard shortcut alongside button

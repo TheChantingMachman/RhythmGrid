@@ -47,6 +47,10 @@ pub struct GameWorld {
     pub window_size: [f32; 2],
     pub(super) buttons: Vec<Button>,
     pub(super) fft_locked: bool, // when true, FFT bars don't fade
+    pub(super) demo_mode: bool,
+    pub demo_idle_timer: f32,  // seconds since last player input
+    demo_action_timer: f32,   // countdown to next AI action
+    demo_rng: u64,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -138,6 +142,10 @@ impl GameWorld {
                 Button { id: ButtonId::Folder, world_x: 12.5, world_y: 18.2, world_w: 3.0, world_h: 0.6, screen_rect: [0.0; 4], hovered: false },
             ],
             fft_locked: false,
+            demo_mode: false,
+            demo_idle_timer: 0.0,
+            demo_action_timer: 0.0,
+            demo_rng: 0xDEADBEEF42,
         }
     }
 
@@ -313,9 +321,58 @@ impl GameWorld {
             }
             _ => {}
         }
+
+        // Demo mode: auto-play when idle
+        const DEMO_IDLE_THRESHOLD: f32 = 15.0; // seconds before demo activates
+        self.demo_idle_timer += dt as f32;
+        if self.demo_idle_timer >= DEMO_IDLE_THRESHOLD && !self.demo_mode {
+            self.demo_mode = true;
+            // If game over, restart
+            if self.session.state == GameState::GameOver {
+                self.session = GameSession::new();
+                self.clearing_cells.clear();
+                self.bg_rings.clear();
+                self.danger_level = 0.0;
+                self.level_up_flash = 0.0;
+                self.last_level = 1;
+                self.shake_intensity = 0.0;
+                self.shake_time = 0.0;
+            }
+        }
+        if self.demo_mode && self.session.state == GameState::Playing {
+            self.demo_action_timer -= dt as f32;
+            if self.demo_action_timer <= 0.0 {
+                // Random action
+                self.demo_rng = self.demo_rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let action = (self.demo_rng >> 33) % 10;
+                match action {
+                    0..=2 => { self.session.move_horizontal(-1); }  // move left
+                    3..=5 => { self.session.move_horizontal(1); }   // move right
+                    6 => { self.session.rotate(true); }             // rotate CW
+                    7 => { self.session.rotate(false); }            // rotate CCW
+                    8 => { move_down(&self.session.grid, &mut self.session.active_piece); } // soft drop
+                    _ => { self.session.hard_drop(); }              // hard drop
+                    }
+                // Faster actions at higher levels
+                let level = level_for_lines(self.session.total_lines);
+                self.demo_action_timer = 0.15 - (level as f32 * 0.005).min(0.1);
+            }
+            // Auto-restart on game over in demo mode
+            if self.session.state == GameState::GameOver {
+                self.session = GameSession::new();
+                self.clearing_cells.clear();
+                self.bg_rings.clear();
+                self.danger_level = 0.0;
+                self.level_up_flash = 0.0;
+                self.last_level = 1;
+                self.shake_intensity = 0.0;
+                self.shake_time = 0.0;
+            }
+        }
     }
 
     pub fn hold_piece(&mut self) {
+        self.exit_demo();
         if self.session.state == GameState::Playing {
             self.session.hold_piece();
         }
@@ -362,7 +419,25 @@ impl GameWorld {
         self.hud_fade_timer = 1.5;
     }
 
+    fn exit_demo(&mut self) {
+        if self.demo_mode {
+            self.demo_mode = false;
+            // Restart fresh game when exiting demo
+            self.session = GameSession::new();
+            self.last_tick = Instant::now();
+            self.clearing_cells.clear();
+            self.bg_rings.clear();
+            self.danger_level = 0.0;
+            self.level_up_flash = 0.0;
+            self.last_level = 1;
+            self.shake_intensity = 0.0;
+            self.shake_time = 0.0;
+        }
+        self.demo_idle_timer = 0.0;
+    }
+
     pub fn handle_action(&mut self, action: GameAction) {
+        self.exit_demo();
         match self.session.state {
             GameState::Playing => match action {
                 GameAction::MoveLeft => { self.session.move_horizontal(-1); }
