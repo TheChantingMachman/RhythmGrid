@@ -253,7 +253,7 @@
   section: Game
   description: 'Orchestrates one game frame. tick(state, dt_secs) advances the gravity timer by dt_secs. When accumulated time exceeds gravity interval, applies move_down. If move_down fails (piece locks), clears lines, updates score/level, spawns next piece. If spawn fails, transitions to GameOver. Returns a TickResult indicating what happened: Nothing, PieceMoved, PieceLocked{lines_cleared}, GameOver. Only runs when GameState is Playing.'
   tags: [core, game, timing]
-  status: implemented
+  status: stale
   depends_on: [game.gravity, game.move_down, game.lock, game.line_clear, game.next_piece, game.game_over, game.score, game.level]
 - id: audio.fft
   section: Audio
@@ -266,7 +266,7 @@
   section: Game
   description: After a piece can no longer move down, a brief lock delay of 500ms begins before the piece locks. Any successful move or rotation resets the timer. Maximum of 15 resets per piece. If the timer expires or resets are exhausted, the piece locks immediately.
   tags: [core, game, timing]
-  status: implemented
+  status: stale
   constants: {delay_ms: 500, max_resets: 15}
   depends_on: [game.lock, game.move_down, game.tick]
   modifies: [game.tick]
