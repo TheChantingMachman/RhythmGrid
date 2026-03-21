@@ -50,9 +50,9 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         push_grid_line_h(&mut sv, &mut si, -(row as f32), gw, line_color);
     }
 
-    // Occupied cells as 3D cubes (bottom-to-top so front faces aren't overwritten)
+    // Occupied cells as 3D cubes (bottom-to-top, right-to-left for correct face overlap)
     for row in (0..HEIGHT).rev() {
-        for col in 0..WIDTH {
+        for col in (0..WIDTH).rev() {
             if let CellState::Occupied(ti) = world.session.grid.cells[row][col] {
                 let color = rgba_to_f32(piece_color(ti));
                 push_cube_3d(&mut sv, &mut si, col as f32, row as f32, cube_depth, color, amp * 2.0);
@@ -105,6 +105,13 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
     let vol_fill = rgba_to_f32([60, 100, 180, (220.0 * hud_a) as u8]);
     push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w * vol, vol_h, 0.3, vol_fill);
+    // Vol up button [+] (draw right-to-left)
+    let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
+        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
+    } else {
+        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
+    };
+    push_slab_3d(&mut sv, &mut si, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
     // Vol down button [-]
     let vd_color = if world.btn_hovered(super::world::ButtonId::VolDown) {
         rgba_to_f32([80, 60, 60, (240.0 * hud_a) as u8])
@@ -112,20 +119,14 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
     };
     push_slab_3d(&mut sv, &mut si, vol_minus_x, vol_y, vol_btn_w, 0.5, 0.4, vd_color);
-    // Vol up button [+]
-    let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
-        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut sv, &mut si, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
 
     // Transport buttons: [<<] [>||] [>>] [SH]
+    // Draw right-to-left so left faces don't overwrite right neighbors
     let transport_ids = [
-        super::world::ButtonId::Back,
-        super::world::ButtonId::PlayPause,
-        super::world::ButtonId::Skip,
         super::world::ButtonId::Shuffle,
+        super::world::ButtonId::Skip,
+        super::world::ButtonId::PlayPause,
+        super::world::ButtonId::Back,
     ];
     let is_paused = if let Ok(audio) = world.audio.try_lock() { audio.paused } else { false };
     for &id in &transport_ids {
