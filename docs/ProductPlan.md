@@ -69,11 +69,11 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 - Track name (2D overlay text)
 - Volume bar (3D slab, responds to +/- keys)
 - FFT visualizer (3D columns — bass/mids/highs, audio-reactive)
-- Control hints (2D overlay text)
+- 3D button cubes: play/pause, back, skip, folder picker
 - All elements fade with HUD auto-hide, audio controls reveal HUD
 
 **Future:**
-- Folder path field + filesystem browser to locate music directory
+- 3D in-game filesystem browser (replaces native OS dialog)
 - Playlist management, queue editing, reordering
 - Track metadata display (artist, album, artwork)
 
