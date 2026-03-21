@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use rhythm_grid::config::{config_dir, load_settings};
+use rhythm_grid::config::{config_dir, load_settings, save_settings};
 use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
@@ -40,6 +40,10 @@ pub struct GameWorld {
     hud_fade_timer: f32,          // seconds until fade starts
     pub(super) shake_intensity: f32, // 1.0 on trigger, decays to 0.0
     shake_time: f32,                 // accumulator for shake oscillation
+    pub cursor_pos: [f32; 2],
+    pub window_size: [f32; 2],           // actual pixel dimensions
+    pub(super) folder_btn_rect: [f32; 4], // screen-space [x, y, w, h]
+    pub(super) folder_btn_hovered: bool,
 }
 
 /// Expanding ring in the background
@@ -93,6 +97,10 @@ impl GameWorld {
             hud_fade_timer: 3.0,
             shake_intensity: 0.0,
             shake_time: 0.0,
+            cursor_pos: [0.0; 2],
+            window_size: [THEME.win_w as f32, THEME.win_h as f32],
+            folder_btn_rect: [0.0; 4],
+            folder_btn_hovered: false,
         }
     }
 
@@ -386,6 +394,78 @@ impl GameWorld {
         };
         for _ in 0..lines {
             self.particles.spawn_line_clear(top_y, clear_height, bx, bw, color);
+        }
+    }
+
+    /// Project a world-space point to screen pixel coords using the VP matrix.
+    fn project_to_screen(vp: &[[f32; 4]; 4], point: [f32; 3], win_w: f32, win_h: f32) -> [f32; 2] {
+        let [x, y, z] = point;
+        // Multiply by VP matrix (column-major)
+        let cx = vp[0][0]*x + vp[1][0]*y + vp[2][0]*z + vp[3][0];
+        let cy = vp[0][1]*x + vp[1][1]*y + vp[2][1]*z + vp[3][1];
+        let cw = vp[0][3]*x + vp[1][3]*y + vp[2][3]*z + vp[3][3];
+        if cw.abs() < 1e-6 { return [0.0, 0.0]; }
+        let nx = cx / cw;
+        let ny = cy / cw;
+        // NDC [-1,1] to pixels
+        let px = (nx + 1.0) * 0.5 * win_w;
+        let py = (1.0 - ny) * 0.5 * win_h;
+        [px, py]
+    }
+
+    /// Update screen-space button rects from current VP matrix.
+    pub fn update_button_rects(&mut self, uniforms: &Uniforms, _aspect: f32) {
+        let vp = &uniforms.view_proj;
+        let [win_w, win_h] = self.window_size;
+        // Folder button: world-space slab at (12, 15) size (2, 1) in push_slab_3d coords
+        // push_slab_3d negates y: world y0=-15, y1=-16, x0=12, x1=14
+        let corner_tl = Self::project_to_screen(vp, [12.0, -15.0, 0.5], win_w, win_h);
+        let corner_br = Self::project_to_screen(vp, [14.0, -16.0, 0.5], win_w, win_h);
+        let x = corner_tl[0].min(corner_br[0]);
+        let y = corner_tl[1].min(corner_br[1]);
+        let w = (corner_tl[0] - corner_br[0]).abs();
+        let h = (corner_tl[1] - corner_br[1]).abs();
+        self.folder_btn_rect = [x, y, w, h];
+        // Check hover
+        let [mx, my] = self.cursor_pos;
+        self.folder_btn_hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+    }
+
+    pub fn handle_click(&mut self) {
+        if self.folder_btn_hovered {
+            self.pick_music_folder();
+        }
+    }
+
+    fn pick_music_folder(&mut self) {
+        let was_playing = self.session.state == GameState::Playing;
+        if was_playing {
+            self.session.state = GameState::Paused;
+        }
+        self.hud_opacity = 1.0;
+        self.hud_fade_timer = 3.0;
+
+        let folder = rfd::FileDialog::new()
+            .set_title("Select Music Folder")
+            .pick_folder();
+
+        if let Some(path) = folder {
+            let folder_str = path.to_string_lossy().to_string();
+            let settings_path = config_dir().join("settings.toml");
+            let mut settings = load_settings(&settings_path);
+            settings.music_folder = Some(folder_str.clone());
+            let _ = save_settings(&settings, &settings_path);
+            // Shut down old audio before starting new
+            if let Ok(mut audio) = self.audio.lock() {
+                audio.shutdown = true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            self.audio = audio_output::start_audio(Some(&folder_str));
+        }
+
+        if was_playing {
+            self.session.state = GameState::Playing;
+            self.last_tick = Instant::now();
         }
     }
 

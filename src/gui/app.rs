@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
@@ -55,8 +55,12 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::CursorMoved { .. } => {
+            WindowEvent::CursorMoved { position, .. } => {
+                self.world.cursor_pos = [position.x as f32, position.y as f32];
                 self.world.on_mouse_activity();
+            }
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
+                self.world.handle_click();
             }
             WindowEvent::RedrawRequested => {
                 if let Some((w, h)) = self.pending_resize.take() {
@@ -67,7 +71,11 @@ impl ApplicationHandler for App {
                 self.world.tick();
                 if let Some(gpu) = &self.gpu {
                     self.world.window_aspect = gpu.aspect_ratio();
-                    gpu.update_uniforms(&self.world.compute_uniforms(gpu.aspect_ratio()));
+                    let (sw, sh) = gpu.size();
+                    self.world.window_size = [sw, sh];
+                    let uniforms = self.world.compute_uniforms(gpu.aspect_ratio());
+                    self.world.update_button_rects(&uniforms, gpu.aspect_ratio());
+                    gpu.update_uniforms(&uniforms);
                 }
                 let ((sv, si), (hv, hi)) = self.world.build_scene_and_hud();
                 if let Some(gpu) = &self.gpu {

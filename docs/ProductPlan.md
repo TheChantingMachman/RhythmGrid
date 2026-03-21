@@ -145,7 +145,9 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Particle effects and beat pulse
 - 2-stage panic escalation (speed up music, intensify effects)
 - Bundled fallback track (debug + first-time experience)
-- Filesystem browser for music folder selection
+- Music folder selection via native OS dialog (3D button + rfd crate)
+- Beat-driven camera sway and impact shake on line clears/hard drops
+- Future: 3D in-game filesystem browser replaces native dialog
 
 ### Phase 3 — Polish & Ship
 - Idle/visualizer/demo mode

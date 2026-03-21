@@ -19,6 +19,7 @@ pub struct AudioState {
     pub track_name: String,
     pub volume: f32,           // 0.0-1.0, applied in audio callback
     pub skip_requested: bool,  // set by game loop, consumed by decode thread
+    pub shutdown: bool,        // set to stop audio thread
     beat_detector: BeatDetector,
     elapsed_secs: f64,
     fft_buffer: Vec<f32>,
@@ -37,6 +38,7 @@ impl AudioState {
             track_name: String::new(),
             volume: 0.5,
             skip_requested: false,
+            shutdown: false,
             beat_detector: BeatDetector::new(),
             elapsed_secs: 0.0,
             fft_buffer: Vec::with_capacity(2048),
@@ -362,9 +364,14 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
 
         stream.play().expect("play audio stream");
 
+        // Keep stream alive until shutdown is requested
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(60));
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if let Ok(s) = state_clone.try_lock() {
+                if s.shutdown { break; }
+            }
         }
+        // stream drops here, stopping audio output
     });
 
     state

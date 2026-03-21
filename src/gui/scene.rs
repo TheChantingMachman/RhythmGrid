@@ -122,6 +122,14 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         push_slab_3d(&mut sv, &mut si, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(*color));
     }
 
+    // Folder button (3D clickable cube)
+    let btn_color = if world.folder_btn_hovered {
+        rgba_to_f32([60, 80, 140, (240.0 * hud_a) as u8])
+    } else {
+        rgba_to_f32([30, 40, 70, (180.0 * hud_a) as u8])
+    };
+    push_slab_3d(&mut sv, &mut si, 12.0, 15.0, 2.0, 1.0, 0.5, btn_color);
+
     // Per-cell clearing animations (shrinking bright cubes)
     for cell in &world.clearing_cells {
         if cell.scale > 0.01 {
@@ -400,6 +408,16 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         push_text(&mut verts, &mut indices, dash_hud_x, 12.0, &display.to_uppercase(), dim_col, 1.0);
     }
     push_text(&mut verts, &mut indices, dash_hud_x, 28.0, "N SKIP  +- VOL", dim_col, 1.0);
+
+    // Folder button label (projected from 3D button screen position)
+    let folder_label_col = if world.folder_btn_hovered { text_col } else { dim_col };
+    let [btn_sx, btn_sy, btn_sw, btn_sh] = world.folder_btn_rect;
+    // Convert from physical pixels to THEME logical coords
+    let scale_x = w / world.window_size[0];
+    let scale_y = h / world.window_size[1];
+    let label_x = btn_sx * scale_x + btn_sw * scale_x * 0.5 - 12.0;
+    let label_y = (btn_sy + btn_sh) * scale_y + 4.0;
+    push_text(&mut verts, &mut indices, label_x, label_y, "FOLDER", folder_label_col, 1.0);
 
     // State overlays
     if world.session.state == GameState::GameOver {
