@@ -159,6 +159,11 @@ pub fn clear_lines(grid: &mut Grid) -> u32 {
     cleared
 }
 
+// --- Lock Delay ---
+
+pub const LOCK_DELAY_MS: u64 = 500;
+pub const MAX_LOCK_RESETS: u32 = 15;
+
 // --- Level and Score ---
 
 pub const LINES_PER_LEVEL: u32 = 10;
@@ -309,6 +314,9 @@ pub struct GameSession {
     pub score: u32,
     pub total_lines: u32,
     pub state: GameState,
+    pub lock_delay_active: bool,
+    pub lock_delay_accumulator_ms: u64,
+    pub lock_delay_resets: u32,
 }
 
 impl GameSession {
@@ -325,6 +333,49 @@ impl GameSession {
             score: 0,
             total_lines: 0,
             state: GameState::Playing,
+            lock_delay_active: false,
+            lock_delay_accumulator_ms: 0,
+            lock_delay_resets: 0,
+        }
+    }
+
+    pub fn move_horizontal(&mut self, delta: i32) -> bool {
+        let result = move_horizontal(&self.grid, &mut self.active_piece, delta);
+        if result && self.lock_delay_active && self.lock_delay_resets < MAX_LOCK_RESETS {
+            self.lock_delay_accumulator_ms = 0;
+            self.lock_delay_resets += 1;
+        }
+        result
+    }
+
+    pub fn rotate(&mut self, clockwise: bool) -> bool {
+        let result = rotate(&self.grid, &mut self.active_piece, clockwise);
+        if result && self.lock_delay_active && self.lock_delay_resets < MAX_LOCK_RESETS {
+            self.lock_delay_accumulator_ms = 0;
+            self.lock_delay_resets += 1;
+        }
+        result
+    }
+
+    pub fn hard_drop(&mut self) -> TickResult {
+        let lines_cleared = hard_drop(&mut self.grid, &self.active_piece);
+        self.lock_delay_active = false;
+        self.lock_delay_accumulator_ms = 0;
+        self.lock_delay_resets = 0;
+        self.gravity_accumulator_ms = 0;
+        self.total_lines += lines_cleared;
+        let new_level = level_for_lines(self.total_lines);
+        self.score += score_for_lines(lines_cleared, new_level);
+        let next_type = TETROMINO_TYPES[self.bag.next()];
+        match try_spawn(next_type, &self.grid) {
+            None => {
+                self.state = GameState::GameOver;
+                TickResult::GameOver
+            }
+            Some((row, col)) => {
+                self.active_piece = ActivePiece { piece_type: next_type, rotation: 0, row, col };
+                TickResult::PieceLocked { lines_cleared }
+            }
         }
     }
 }
@@ -334,25 +385,26 @@ pub fn tick(session: &mut GameSession, dt_secs: f64) -> TickResult {
         return TickResult::Nothing;
     }
 
-    session.gravity_accumulator_ms += (dt_secs * 1000.0) as u64;
+    let dt_ms = (dt_secs * 1000.0) as u64;
 
-    let level = level_for_lines(session.total_lines);
-    let interval = gravity_interval_ms(level);
-
-    if session.gravity_accumulator_ms >= interval {
-        if move_down(&session.grid, &mut session.active_piece) {
-            session.gravity_accumulator_ms = 0;
-            return TickResult::PieceMoved;
-        } else {
+    if session.lock_delay_active {
+        session.lock_delay_accumulator_ms += dt_ms;
+        if session.lock_delay_accumulator_ms >= LOCK_DELAY_MS
+            || session.lock_delay_resets >= MAX_LOCK_RESETS
+        {
             let lines_cleared = lock_piece(&mut session.grid, &session.active_piece);
             let next_type = TETROMINO_TYPES[session.bag.next()];
+            session.lock_delay_active = false;
+            session.lock_delay_accumulator_ms = 0;
+            session.lock_delay_resets = 0;
             match try_spawn(next_type, &session.grid) {
                 None => {
                     session.state = GameState::GameOver;
                     TickResult::GameOver
                 }
                 Some((row, col)) => {
-                    session.active_piece = ActivePiece { piece_type: next_type, rotation: 0, row, col };
+                    session.active_piece =
+                        ActivePiece { piece_type: next_type, rotation: 0, row, col };
                     session.total_lines += lines_cleared;
                     let new_level = level_for_lines(session.total_lines);
                     session.score += score_for_lines(lines_cleared, new_level);
@@ -360,8 +412,28 @@ pub fn tick(session: &mut GameSession, dt_secs: f64) -> TickResult {
                     TickResult::PieceLocked { lines_cleared }
                 }
             }
+        } else {
+            TickResult::Nothing
         }
     } else {
-        TickResult::Nothing
+        session.gravity_accumulator_ms += dt_ms;
+
+        let level = level_for_lines(session.total_lines);
+        let interval = gravity_interval_ms(level);
+
+        if session.gravity_accumulator_ms >= interval {
+            if move_down(&session.grid, &mut session.active_piece) {
+                session.gravity_accumulator_ms = 0;
+                TickResult::PieceMoved
+            } else {
+                session.lock_delay_active = true;
+                session.lock_delay_accumulator_ms = 0;
+                session.lock_delay_resets = 0;
+                session.gravity_accumulator_ms = 0;
+                TickResult::Nothing
+            }
+        } else {
+            TickResult::Nothing
+        }
     }
 }
