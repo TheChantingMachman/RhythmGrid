@@ -270,3 +270,9 @@
   constants: {delay_ms: 400, max_resets: 15}
   depends_on: [game.lock, game.move_down, game.tick]
   modifies: [game.tick]
+- id: music.prev_track
+  section: Music
+  description: Go to the previous track in the playlist. Decrements current_index, wrapping to the last track when at index 0. Returns the new current track path.
+  tags: [core, music, playback]
+  status: draft
+  depends_on: [music.skip]
