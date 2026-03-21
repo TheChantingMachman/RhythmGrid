@@ -161,7 +161,7 @@ pub fn clear_lines(grid: &mut Grid) -> u32 {
 
 // --- Lock Delay ---
 
-pub const LOCK_DELAY_MS: u64 = 500;
+pub const LOCK_DELAY_MS: u64 = 400;
 pub const MAX_LOCK_RESETS: u32 = 15;
 
 // --- Level and Score ---
