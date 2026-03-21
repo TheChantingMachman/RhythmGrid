@@ -38,6 +38,8 @@ pub struct GameWorld {
     pub(super) window_aspect: f32,
     pub(super) hud_opacity: f32,  // 0.0 = invisible, 1.0 = full
     hud_fade_timer: f32,          // seconds until fade starts
+    pub(super) shake_intensity: f32, // 1.0 on trigger, decays to 0.0
+    shake_time: f32,                 // accumulator for shake oscillation
 }
 
 /// Expanding ring in the background
@@ -89,6 +91,8 @@ impl GameWorld {
             window_aspect: THEME.win_w as f32 / THEME.win_h as f32,
             hud_opacity: 1.0,
             hud_fade_timer: 3.0,
+            shake_intensity: 0.0,
+            shake_time: 0.0,
         }
     }
 
@@ -206,6 +210,10 @@ impl GameWorld {
         }
         self.level_up_flash = (self.level_up_flash - dt as f32 * 1.5).max(0.0);
 
+        // Shake decay
+        self.shake_time += dt as f32 * 30.0;
+        self.shake_intensity = (self.shake_intensity - dt as f32 * 1.3).max(0.0);
+
         // Smooth escalation transition
         let target_danger = if escalation_stage(&self.session.grid) == EscalationStage::Danger { 1.0 } else { 0.0 };
         let danger_speed = 2.0; // transition speed
@@ -239,6 +247,7 @@ impl GameWorld {
                 let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
                 let piece_row = pre_piece.row + max_dr;
                 self.spawn_line_clear_particles(lines_cleared, piece_row);
+                self.shake_intensity = (lines_cleared as f32 * 0.3).min(1.0);
             }
         }
     }
@@ -324,6 +333,7 @@ impl GameWorld {
                     if lines > 0 {
                         self.spawn_line_clear_particles(lines, land_bottom);
                     }
+                    self.shake_intensity = (0.2 + lines as f32 * 0.25).min(1.0);
                 }
                 GameAction::RotateCW => { self.session.rotate(true); }
                 GameAction::RotateCCW => { self.session.rotate(false); }
@@ -350,6 +360,8 @@ impl GameWorld {
                     self.danger_level = 0.0;
                     self.level_up_flash = 0.0;
                     self.last_level = 1;
+                    self.shake_intensity = 0.0;
+                    self.shake_time = 0.0;
                 }
             }
         }
@@ -386,8 +398,16 @@ impl GameWorld {
         } else {
             0.0
         };
-        let cam_x = board_cx + orbit;
-        let cam_y = board_cy;
+        // Beat sway — gentle sinusoidal drift
+        let sway_amp = 0.3 + self.danger_level * 0.2;
+        let sway = self.beat_intensity * sway_amp * (self.preview_angle * 2.0).sin();
+
+        // Impact shake — decaying high-frequency offset
+        let shake_x = self.shake_intensity * (self.shake_time * 1.3).sin() * 0.4;
+        let shake_y = self.shake_intensity * (self.shake_time * 1.7).cos() * 0.25;
+
+        let cam_x = board_cx + orbit + sway + shake_x;
+        let cam_y = board_cy + shake_y;
         let cam_z = 16.0;
 
         let eye = [cam_x, cam_y, cam_z];
