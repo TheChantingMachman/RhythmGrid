@@ -122,7 +122,7 @@ impl GameWorld {
             last_level: 1,
             window_aspect: THEME.win_w as f32 / THEME.win_h as f32,
             hud_opacity: 1.0,
-            hud_fade_timer: 3.0,
+            hud_fade_timer: 1.5,
             shake_intensity: 0.0,
             shake_time: 0.0,
             cursor_pos: [0.0; 2],
@@ -203,15 +203,15 @@ impl GameWorld {
 
         // Update particles and line clear animations
         self.particles.update(dt as f32);
-        // HUD auto-fade
+        // HUD auto-fade (1.5s delay, then fast fade)
         self.hud_fade_timer -= dt as f32;
         if self.hud_fade_timer <= 0.0 {
-            self.hud_opacity = (self.hud_opacity - dt as f32 * 2.5).max(0.0);
+            self.hud_opacity = (self.hud_opacity - dt as f32 * 3.5).max(0.0);
         }
         // Full opacity when paused or game over
         if self.session.state == GameState::Paused || self.session.state == GameState::GameOver {
             self.hud_opacity = 1.0;
-            self.hud_fade_timer = 3.0;
+            self.hud_fade_timer = 1.5;
         }
 
         for cell in &mut self.clearing_cells {
@@ -318,6 +318,7 @@ impl GameWorld {
     pub fn hold_piece(&mut self) {
         if self.session.state == GameState::Playing {
             self.session.hold_piece();
+            self.on_mouse_activity();
         }
     }
 
@@ -359,7 +360,7 @@ impl GameWorld {
     /// Call when mouse moves to reveal HUD
     pub fn on_mouse_activity(&mut self) {
         self.hud_opacity = 1.0;
-        self.hud_fade_timer = 3.0;
+        self.hud_fade_timer = 1.5;
     }
 
     pub fn handle_action(&mut self, action: GameAction) {
@@ -550,7 +551,7 @@ impl GameWorld {
             self.session.state = GameState::Paused;
         }
         self.hud_opacity = 1.0;
-        self.hud_fade_timer = 3.0;
+        self.hud_fade_timer = 1.5;
 
         let folder = rfd::FileDialog::new()
             .set_title("Select Music Folder")
