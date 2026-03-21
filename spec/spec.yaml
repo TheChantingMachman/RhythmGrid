@@ -542,7 +542,7 @@
   - core
   - music
   - playback
-  status: draft
+  status: implemented
   depends_on:
   - music.skip
 -
