@@ -548,7 +548,7 @@
 -
   id: game.hold_piece
   section: Game
-  description: Player can hold the current piece, swapping it with the previously held piece. If no piece is held, the current piece is stored and the next piece from the bag spawns. Hold can only be used once per piece placement — after holding, can_hold is set to false and resets to true when the next piece locks. The held piece always resets to rotation 0 and spawns at the standard spawn position when swapped back in.
+  description: Player can hold the current piece, swapping it with the previously held piece. If no piece is held, the current piece is stored and the next piece from the bag spawns. Hold can only be used once per piece placement — after holding, can_hold is set to false and resets to true when any piece locks via tick() returning PieceLocked. The held piece is stored as a TetrominoType (not an ActivePiece). When swapped back in, it spawns at the standard spawn position via try_spawn in rotation 0. If try_spawn fails (board full), the hold is rejected and the game state is unchanged. hold() returns bool — true if the hold succeeded, false if rejected.
   tags:
   - core
   - game
@@ -559,3 +559,10 @@
   - game.tick
   modifies:
   - game.tick
+  fixture_patterns: |
+    - GameSession fields: held_piece: Option<TetrominoType> (None initially), can_hold: bool (true initially)
+    - Hold: session.hold() -> bool (true=success, false=rejected)
+    - Reset: can_hold resets to true inside tick() when PieceLocked occurs
+    - Held type stored as TetrominoType not ActivePiece — rotation always 0 on swap-in
+    - Swap-in uses try_spawn — if board full, hold() returns false, state unchanged
+    - Test setup: GameSession::new() starts with held_piece=None, can_hold=true
