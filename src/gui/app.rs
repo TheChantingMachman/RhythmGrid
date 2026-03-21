@@ -63,6 +63,11 @@ impl ApplicationHandler for App {
                 self.world.on_mouse_activity();
             }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
+                // Refresh hover state before checking click — avoids stale hover from previous frame
+                if let Some(gpu) = &self.gpu {
+                    let uniforms = self.world.compute_uniforms(gpu.aspect_ratio());
+                    self.world.update_button_rects(&uniforms, gpu.aspect_ratio());
+                }
                 self.world.handle_click();
             }
             WindowEvent::RedrawRequested => {
