@@ -109,6 +109,28 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 - **Escalation:** all effects intensify as stack height enters danger zone
 - Future: color palette shifts, multiple visual themes
 
+### Dynamic Audio-Visual Mapping (phased)
+Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
+
+**Phase A — Peak hold indicators (GUI-side, current 3 bands):**
+- Track decaying peak per FFT band, render as thin slab at peak height on each column
+- Gives visual persistence and shows where energy lives in a song
+
+**Phase B — Expand to 5 bands + rolling energy ranking:**
+- Update `audio.fft` spec: sub-bass, bass, mids, upper-mids, highs
+- Rolling window (5-10s) cumulative energy per band → dominant band detection
+- Detects verse/chorus/breakdown transitions in real time
+
+**Phase C — Effect routing by dominant band:**
+- Map dominant band to visual intensity: bass → beat rings, mids → grid shimmer, highs → particle sparkle
+- Board color tinting shifts based on current energy profile
+- Escalation effects modulated by which bands are hot, not just stack height
+
+**Phase D — Per-song adaptation:**
+- Track cumulative fingerprint across full song playback
+- Auto-tune effect sensitivity to each song's dynamic range
+- Normalize quiet vs loud tracks for consistent visual intensity
+
 ### Architecture Note — Effects Modularity
 Sound effects and visual effects should be behind trait interfaces, not hardcoded. A "theme" is conceptually a bundle of: particle behavior, color palette, sound effect set, camera behavior, and block appearance (pixel art tiles). V1 ships one theme with plain cubes, but the architecture doesn't preclude adding theme packs later. No plugin system needed — just clean trait boundaries.
 
@@ -154,6 +176,7 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Visual themes and palette system
 - Settings (audio sensitivity, visual intensity, controls)
 - Align key bindings to Tetris Guideline (X=RotateCW, C/Shift=Hold) — requires `game.hold_piece` first, then update `input.key_map` spec
+- Decrease HUD fade timer. Core game controls (move, rotate, drop) should NOT de-fade the HUD; non-core mapped keys (audio controls, hold, pause) should reveal HUD
 - XDG-compliant config and data paths
 - Linux packaging (Flatpak, Snap, AUR)
 - Expand FFT from 3 bands to 5 (sub-bass, bass, mids, upper-mids, highs) — update `audio.fft` spec + GUI visualizer
