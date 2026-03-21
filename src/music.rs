@@ -76,6 +76,14 @@ impl Playlist {
         self.current_index = (self.current_index + 1) % self.files.len();
     }
 
+    pub fn prev_track(&mut self) -> Option<&PathBuf> {
+        if self.files.is_empty() {
+            return None;
+        }
+        self.current_index = (self.current_index + self.files.len() - 1) % self.files.len();
+        self.files.get(self.current_index)
+    }
+
     pub fn toggle_shuffle(&mut self) {
         self.shuffle = !self.shuffle;
         if self.shuffle {
