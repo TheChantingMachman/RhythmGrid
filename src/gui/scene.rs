@@ -31,7 +31,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         for col in (0..WIDTH).rev() {
             if let CellState::Occupied(ti) = world.session.grid.cells[row][col] {
                 let color = rgba_to_f32(piece_color(ti));
-                let band_glow = world.bands[(ti as usize) % 7] * 2.0;
+                let band_glow = world.bands_norm[(ti as usize) % 7] * 2.0;
                 push_cube_3d(&mut sv, &mut si, col as f32, row as f32, cube_depth, color, band_glow);
             }
         }
@@ -56,7 +56,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 
         // Active piece — pulses with its frequency band
         let color = rgba_to_f32(piece_color(world.session.active_piece.piece_type as u32));
-        let active_glow = world.bands[(world.session.active_piece.piece_type as usize) % 7] * 2.0;
+        let active_glow = world.bands_norm[(world.session.active_piece.piece_type as usize) % 7] * 2.0;
         for &(dr, dc) in &cells {
             let r = world.session.active_piece.row + dr;
             let c = world.session.active_piece.col + dc;
@@ -68,7 +68,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 
     // Grid lines — shimmer driven by presence (band 5) + beat
     let line_boost = (beat * 40.0) as u8;
-    let presence = world.bands[5];
+    let presence = world.bands_norm[5];
     let presence_boost = (presence * 80.0) as u8;
     let lc: [u8; 4] = [40, 45, 70, 255];
     let line_color = rgba_to_f32([
@@ -245,8 +245,8 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
     let geo_z = -2.0;
     let geo_n = [0.0f32, 0.0, 1.0];
     let geo_time = world.preview_angle * (0.3 + d * 0.4);
-    let low_mids = world.bands[2];
-    let sub_bass = world.bands[0];
+    let low_mids = world.bands_norm[2];
+    let sub_bass = world.bands_norm[0];
     let geo_alpha = 0.03 + low_mids * 0.15 + d * 0.05;
 
     // Hex dot grid — size driven by low-mids, color warmth by sub-bass

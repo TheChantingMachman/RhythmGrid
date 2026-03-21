@@ -30,6 +30,7 @@ pub struct GameWorld {
     pub highs: f32,
     pub(super) bands: [f32; 7],
     pub(super) peak_bands: [f32; 7],
+    pub(super) bands_norm: [f32; 7], // each band normalized to its own peak (0-1)
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
@@ -115,6 +116,7 @@ impl GameWorld {
             highs: 0.0,
             bands: [0.0; 7],
             peak_bands: [0.0; 7],
+            bands_norm: [0.0; 7],
             particles: ParticleSystem::new(),
             prev_beat: false,
             clearing_cells: Vec::new(),
@@ -171,6 +173,12 @@ impl GameWorld {
                 self.bands[i]
             } else {
                 (self.peak_bands[i] - peak_decay).max(self.bands[i])
+            };
+            // Normalize each band to its own peak — gives equal visual weight
+            self.bands_norm[i] = if self.peak_bands[i] > 0.001 {
+                (self.bands[i] / self.peak_bands[i]).min(1.0)
+            } else {
+                0.0
             };
         }
 
