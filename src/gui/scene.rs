@@ -154,34 +154,34 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let fft_x = -4.5;
     let fft_y = 14.0;
     let fft_max_h = 5.0;
-    let col_w = 0.2;
-    let col_gap = 0.25;
+    let col_w = 0.12;
+    let col_gap = 0.1;
     let fft_depth = 0.35;
-    // Display 3 representative bands: bass(1), mids(3), brilliance(6)
-    let display_indices: [usize; 3] = [1, 3, 6];
-    let display_colors: [[u8; 3]; 3] = [
-        [40, 60, 180],   // bass — blue
-        [60, 160, 100],  // mids — green
-        [180, 80, 60],   // brilliance — warm
+    // All 7 bands, gradient blue → cyan → green → yellow → orange → red
+    let band_colors: [[u8; 3]; 7] = [
+        [30, 30, 180],   // sub-bass — deep blue
+        [40, 80, 180],   // bass — blue
+        [40, 160, 160],  // low-mids — cyan
+        [60, 170, 80],   // mids — green
+        [180, 180, 40],  // upper-mids — yellow
+        [200, 100, 40],  // presence — orange
+        [200, 50, 50],   // brilliance — red
     ];
-    let bands: Vec<(f32, [u8; 4])> = display_indices.iter().zip(&display_colors).map(|(&idx, col)| {
-        (world.bands[idx], [col[0], col[1], col[2], (220.0 * fft_a) as u8])
-    }).collect();
-    let peaks: Vec<f32> = display_indices.iter().map(|&idx| world.peak_bands[idx]).collect();
-    for (i, (val, color)) in bands.iter().enumerate() {
+    for (i, (val, color)) in world.bands.iter().zip(&band_colors).enumerate() {
+        let color = [color[0], color[1], color[2], (220.0 * fft_a) as u8];
         let bx = fft_x + i as f32 * (col_w + col_gap);
         let filled_h = (fft_max_h * val).max(0.05);
         let bg_color = rgba_to_f32([12, 12, 25, (120.0 * fft_a) as u8]);
         push_slab_3d(&mut sv, &mut si, bx, fft_y, col_w, fft_max_h, fft_depth * 0.3, bg_color);
         let fill_y = fft_y + (fft_max_h - filled_h);
-        push_slab_3d(&mut sv, &mut si, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(*color));
-        let peak_h = (fft_max_h * peaks[i]).max(0.05);
+        push_slab_3d(&mut sv, &mut si, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(color));
+        let peak_h = (fft_max_h * world.peak_bands[i]).max(0.05);
         let peak_y = fft_y + (fft_max_h - peak_h);
         let peak_color = rgba_to_f32([255, 255, 255, (160.0 * fft_a) as u8]);
         push_slab_3d(&mut sv, &mut si, bx, peak_y, col_w, 0.1, fft_depth + 0.1, peak_color);
     }
     // FFT lock toggle button (below FFT bars, fades with HUD not with bars)
-    let fft_total_w = 3.0 * col_w + 2.0 * col_gap;
+    let fft_total_w = 7.0 * col_w + 6.0 * col_gap;
     let lock_color = if world.fft_locked {
         rgba_to_f32([80, 120, 80, (240.0 * hud_a) as u8])
     } else if world.btn_hovered(super::world::ButtonId::FftLock) {

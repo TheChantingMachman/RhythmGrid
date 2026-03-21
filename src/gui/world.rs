@@ -132,7 +132,7 @@ impl GameWorld {
             buttons: vec![
                 Button { id: ButtonId::VolDown, world_x: 12.5, world_y: 15.5, world_w: 0.5, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
                 Button { id: ButtonId::VolUp, world_x: 15.0, world_y: 15.5, world_w: 0.5, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
-                Button { id: ButtonId::FftLock, world_x: -4.5, world_y: 19.2, world_w: 1.1, world_h: 0.3, screen_rect: [0.0; 4], hovered: false },
+                Button { id: ButtonId::FftLock, world_x: -4.5, world_y: 19.2, world_w: 1.44, world_h: 0.3, screen_rect: [0.0; 4], hovered: false },
                 Button { id: ButtonId::Back, world_x: 12.5, world_y: 17.0, world_w: 0.6, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
                 Button { id: ButtonId::PlayPause, world_x: 13.3, world_y: 17.0, world_w: 0.6, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
                 Button { id: ButtonId::Skip, world_x: 14.1, world_y: 17.0, world_w: 0.6, world_h: 0.5, screen_rect: [0.0; 4], hovered: false },
