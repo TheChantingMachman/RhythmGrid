@@ -47,6 +47,7 @@ impl ApplicationHandler for App {
                 use winit::keyboard::KeyCode as K;
                 match code {
                     K::KeyN => self.world.skip_track(),
+                    K::KeyC | K::ShiftLeft | K::ShiftRight => self.world.hold_piece(),
                     K::Equal | K::NumpadAdd => self.world.adjust_volume(0.05),
                     K::Minus | K::NumpadSubtract => self.world.adjust_volume(-0.05),
                     _ => {

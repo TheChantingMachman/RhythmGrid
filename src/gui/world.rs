@@ -307,6 +307,12 @@ impl GameWorld {
         }
     }
 
+    pub fn hold_piece(&mut self) {
+        if self.session.state == GameState::Playing {
+            self.session.hold_piece();
+        }
+    }
+
     pub fn skip_track(&mut self) {
         if let Ok(mut audio) = self.audio.try_lock() {
             audio.skip_requested = true;

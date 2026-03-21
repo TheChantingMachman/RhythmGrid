@@ -413,20 +413,99 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         }
     }
 
+    // Held piece preview (top-left, mirrors next piece position)
+    if let Some(held_type) = world.session.held_piece {
+        let held_cells = piece_cells(held_type, 0);
+        let held_color = rgba_to_f32(piece_color(held_type as u32));
+        let held_cx = 66.0;
+        let held_cy = np_y + 52.0;
+        let held_scale = 18.0;
+
+        let mut held_center = [0.0f32; 3];
+        for &(dr, dc) in &held_cells {
+            held_center[0] += dc as f32;
+            held_center[1] += dr as f32;
+        }
+        held_center[0] /= held_cells.len() as f32;
+        held_center[1] /= held_cells.len() as f32;
+
+        // Slower rotation than next piece
+        let hax = world.preview_angle * 0.2;
+        let hay = world.preview_angle * 0.5;
+        let (hsx, hcx) = (hax.sin(), hax.cos());
+        let (hsy, hcy) = (hay.sin(), hay.cos());
+
+        for &(dr, dc) in &held_cells {
+            let lx = dc as f32 - held_center[0];
+            let ly = dr as f32 - held_center[1];
+            let corners: [[f32; 3]; 8] = [
+                [lx - cube_half, ly - cube_half, -cube_half],
+                [lx + cube_half, ly - cube_half, -cube_half],
+                [lx + cube_half, ly + cube_half, -cube_half],
+                [lx - cube_half, ly + cube_half, -cube_half],
+                [lx - cube_half, ly - cube_half, cube_half],
+                [lx + cube_half, ly - cube_half, cube_half],
+                [lx + cube_half, ly + cube_half, cube_half],
+                [lx - cube_half, ly + cube_half, cube_half],
+            ];
+            let mut proj = [[0.0f32; 2]; 8];
+            for (i, c) in corners.iter().enumerate() {
+                let y1 = c[1] * hcx - c[2] * hsx;
+                let z1 = c[1] * hsx + c[2] * hcx;
+                let x2 = c[0] * hcy + z1 * hsy;
+                let z2 = -c[0] * hsy + z1 * hcy;
+                let persp = 4.0 / (4.0 + z2 * 0.3);
+                proj[i] = [
+                    held_cx + x2 * held_scale * persp * aspect_corr,
+                    held_cy + y1 * held_scale * persp,
+                ];
+            }
+            let faces: &[([usize; 4], [f32; 3])] = &[
+                ([4, 5, 6, 7], [0.0, 0.0, 1.0]),
+                ([5, 1, 2, 6], [1.0, 0.0, 0.0]),
+                ([0, 1, 5, 4], [0.0, -1.0, 0.0]),
+                ([0, 3, 7, 4], [-1.0, 0.0, 0.0]),
+                ([3, 2, 6, 7], [0.0, 1.0, 0.0]),
+                ([0, 1, 2, 3], [0.0, 0.0, -1.0]),
+            ];
+            let mut fo: Vec<(usize, f32)> = faces.iter().enumerate().map(|(i, (_, n))| {
+                let nz1 = n[1] * hsx + n[2] * hcx;
+                let nz2 = -n[0] * hsy + nz1 * hcy;
+                (i, nz2)
+            }).collect();
+            fo.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            for &(fi, nz) in &fo {
+                if nz < 0.0 { continue; }
+                let (ci, _) = &faces[fi];
+                let shade = 0.4 + nz * 0.6;
+                let fc = [held_color[0] * shade, held_color[1] * shade, held_color[2] * shade, held_color[3]];
+                let base = verts.len() as u32;
+                for &idx in ci {
+                    let px = proj[idx];
+                    let (nx, ny) = px_to_ndc(px[0], px[1], w, h);
+                    verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc });
+                }
+                indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            }
+        }
+    }
+
     let preview_end_vert = verts.len();
 
-    // Score
-    push_text(&mut verts, &mut indices, 12.0, 12.0, "SCORE", dim_col, 1.0);
-    push_text(&mut verts, &mut indices, 12.0, 24.0, &format!("{}", world.session.score), text_col, 2.0);
+    // Hold label (top-left, above held piece preview)
+    push_text(&mut verts, &mut indices, 12.0, 12.0, "HOLD", dim_col, 1.0);
 
-    // Level
-    push_text(&mut verts, &mut indices, 12.0, 50.0, "LEVEL", dim_col, 1.0);
+    // Score / Level / Lines (left side, below held piece area)
+    let stats_y = 110.0;
+    push_text(&mut verts, &mut indices, 12.0, stats_y, "SCORE", dim_col, 1.0);
+    push_text(&mut verts, &mut indices, 12.0, stats_y + 12.0, &format!("{}", world.session.score), text_col, 2.0);
+
     let level = level_for_lines(world.session.total_lines);
-    push_text(&mut verts, &mut indices, 12.0, 62.0, &format!("{}", level), text_col, 2.0);
+    push_text(&mut verts, &mut indices, 12.0, stats_y + 38.0, "LEVEL", dim_col, 1.0);
+    push_text(&mut verts, &mut indices, 12.0, stats_y + 50.0, &format!("{}", level), text_col, 2.0);
 
-    // Lines
-    push_text(&mut verts, &mut indices, 12.0, 88.0, "LINES", dim_col, 1.0);
-    push_text(&mut verts, &mut indices, 12.0, 100.0, &format!("{}", world.session.total_lines), text_col, 2.0);
+    push_text(&mut verts, &mut indices, 12.0, stats_y + 76.0, "LINES", dim_col, 1.0);
+    push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", world.session.total_lines), text_col, 2.0);
 
     // Music dashboard labels (right side, aligned with 3D elements)
     let dash_hud_x = w - 140.0;
