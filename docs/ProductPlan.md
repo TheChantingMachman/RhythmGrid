@@ -127,10 +127,19 @@ Real-time song fingerprinting to make visuals respond to what's musically intere
 - Rolling window (5-10s) cumulative energy per band → dominant band detection
 - Detects verse/chorus/breakdown transitions in real time
 
+**Phase B+ — Rolling averages + dominant band ranking:**
+- Exponential moving average per band (7 floats, ~5-10s settling period)
+- Sort to find top 3 or 5 most active bands per song section
+- Infrastructure only — visual assignments come in Phase C
+- Open: how to handle ranking transitions mid-song (verse→chorus)? Hard cutover vs smooth crossfade blend weights?
+- Open: should settling period reset on track change?
+
 **Phase C — Effect routing by dominant band:**
-- Map dominant band to visual intensity: bass → beat rings, mids → grid shimmer, highs → particle sparkle
+- Map top-N active bands to specific visual elements dynamically
+- Bass-dominant → beat rings intensify, mids-dominant → grid shimmer, highs-dominant → particle sparkle
 - Board color tinting shifts based on current energy profile
 - Escalation effects modulated by which bands are hot, not just stack height
+- Open: how many elements to assign (3 or 5)? More = richer but harder to notice individual assignments
 
 **Phase D — Per-song adaptation:**
 - Track cumulative fingerprint across full song playback
