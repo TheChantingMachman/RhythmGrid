@@ -424,6 +424,10 @@ impl GpuState {
         self.config.width as f32 / self.config.height.max(1) as f32
     }
 
+    pub fn size(&self) -> (f32, f32) {
+        (self.config.width as f32, self.config.height as f32)
+    }
+
     pub fn update_uniforms(&self, uniforms: &Uniforms) {
         self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[*uniforms]));
     }

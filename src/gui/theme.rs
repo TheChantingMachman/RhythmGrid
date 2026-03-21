@@ -10,8 +10,8 @@ pub struct Theme {
 }
 
 pub const THEME: Theme = Theme {
-    win_w: 580,
-    win_h: 680,
+    win_w: 900,
+    win_h: 720,
     panel_bg: [8, 8, 16, 220],
     panel_border: [25, 40, 65, 150],
     text_color: [160, 170, 200, 255],

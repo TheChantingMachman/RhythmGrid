@@ -69,11 +69,11 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 - Track name (2D overlay text)
 - Volume bar (3D slab, responds to +/- keys)
 - FFT visualizer (3D columns — bass/mids/highs, audio-reactive)
-- Control hints (2D overlay text)
+- 3D button cubes: play/pause, back, skip, shuffle, folder picker
 - All elements fade with HUD auto-hide, audio controls reveal HUD
 
 **Future:**
-- Folder path field + filesystem browser to locate music directory
+- 3D in-game filesystem browser (replaces native OS dialog)
 - Playlist management, queue editing, reordering
 - Track metadata display (artist, album, artwork)
 
@@ -96,7 +96,13 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 ### Music Integration
 - **No music configured:** Procedurally generated audio for out-of-box experience and first-time players. Zero licensing issues at any release tier, deterministic output for pipeline testing.
 - **Basic (V1):** Point at a folder via path field or filesystem browser. Play files sequentially or shuffled. Seamless auto-advance between tracks.
-- **Future:** Playlist support, queue management, metadata-driven theming
+
+**Known issues:**
+- Track transitions are slow — full decode before playback starts. Need chunked streaming so playback begins within ~100ms of track change.
+- Silence gap during transition feels like the app is broken. Need visual feedback (loading indicator or immediate track name update).
+- Transport button clicks sometimes miss on first press — hover detection may lag one frame behind click event.
+
+**Future:** Playlist support, queue management, metadata-driven theming
 
 ### Visual Layer
 - **3D rendering** — volumetric blocks, basic lighting/shading, camera in 3D space
@@ -108,6 +114,37 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 - **Beat pulse effect** — grid/elements pulse on detected beats
 - **Escalation:** all effects intensify as stack height enters danger zone
 - Future: color palette shifts, multiple visual themes
+
+### Dynamic Audio-Visual Mapping (phased)
+Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
+
+**Phase A — Peak hold indicators (GUI-side, current 3 bands):**
+- Track decaying peak per FFT band, render as thin slab at peak height on each column
+- Gives visual persistence and shows where energy lives in a song
+
+**Phase B — Expand to 5 bands + rolling energy ranking:**
+- Update `audio.fft` spec: sub-bass, bass, mids, upper-mids, highs
+- Rolling window (5-10s) cumulative energy per band → dominant band detection
+- Detects verse/chorus/breakdown transitions in real time
+
+**Phase B+ — Rolling averages + dominant band ranking:**
+- Exponential moving average per band (7 floats, ~5-10s settling period)
+- Sort to find top 3 or 5 most active bands per song section
+- Infrastructure only — visual assignments come in Phase C
+- Open: how to handle ranking transitions mid-song (verse→chorus)? Hard cutover vs smooth crossfade blend weights?
+- Open: should settling period reset on track change?
+
+**Phase C — Effect routing by dominant band:**
+- Map top-N active bands to specific visual elements dynamically
+- Bass-dominant → beat rings intensify, mids-dominant → grid shimmer, highs-dominant → particle sparkle
+- Board color tinting shifts based on current energy profile
+- Escalation effects modulated by which bands are hot, not just stack height
+- Open: how many elements to assign (3 or 5)? More = richer but harder to notice individual assignments
+
+**Phase D — Per-song adaptation:**
+- Track cumulative fingerprint across full song playback
+- Auto-tune effect sensitivity to each song's dynamic range
+- Normalize quiet vs loud tracks for consistent visual intensity
 
 ### Architecture Note — Effects Modularity
 Sound effects and visual effects should be behind trait interfaces, not hardcoded. A "theme" is conceptually a bundle of: particle behavior, color palette, sound effect set, camera behavior, and block appearance (pixel art tiles). V1 ships one theme with plain cubes, but the architecture doesn't preclude adding theme packs later. No plugin system needed — just clean trait boundaries.
@@ -145,14 +182,23 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Particle effects and beat pulse
 - 2-stage panic escalation (speed up music, intensify effects)
 - Bundled fallback track (debug + first-time experience)
-- Filesystem browser for music folder selection
+- Music folder selection via native OS dialog (3D button + rfd crate)
+- Beat-driven camera sway and impact shake on line clears/hard drops
+- Future: 3D in-game filesystem browser replaces native dialog
 
 ### Phase 3 — Polish & Ship
 - Idle/visualizer/demo mode
 - Visual themes and palette system
 - Settings (audio sensitivity, visual intensity, controls)
+- Align key bindings to Tetris Guideline (X=RotateCW, C/Shift=Hold) — requires `game.hold_piece` first, then update `input.key_map` spec
+- Decrease HUD fade timer. Core game controls (move, rotate, drop) should NOT de-fade the HUD; non-core mapped keys (audio controls, hold, pause) should reveal HUD
 - XDG-compliant config and data paths
 - Linux packaging (Flatpak, Snap, AUR)
+- Expand FFT from 3 bands to 7 (sub-bass, bass, low-mids, mids, upper-mids, presence, brilliance) — `audio.fft` spec updated, pipeline rebuild + GUI visualizer update pending
+- Shaped transport buttons (play triangle, pause bars, skip arrows) replacing square placeholders — remove text labels once shapes are self-explanatory
+- Button press animation: halve depth on click to simulate depression
+- Responsive layout: side assemblies track window edges rather than fixed world-space positions
+- Future: user-remappable key bindings (settings UI + persisted config)
 
 ---
 

@@ -1,6 +1,6 @@
 // @spec-tags: core,game,timing
-// @invariants: LOCK_DELAY_MS=500 and MAX_LOCK_RESETS=15 constants; GameSession lock delay fields initialize to false/0/0; tick() starts lock delay when move_down fails; lock delay accumulates across ticks and expires after 500ms; move_horizontal/rotate reset accumulator and increment resets when lock_delay_active; hard_drop bypasses lock delay; resets exhausted causes immediate lock; GameSession::move_horizontal and rotate return bool matching free fn result
-// @build: 65
+// @invariants: LOCK_DELAY_MS=400 and MAX_LOCK_RESETS=15 constants; GameSession lock delay fields initialize to false/0/0; tick() starts lock delay when move_down fails; lock delay accumulates across ticks and expires after 400ms; move_horizontal/rotate reset accumulator and increment resets when lock_delay_active; hard_drop bypasses lock delay; resets exhausted causes immediate lock; GameSession::move_horizontal and rotate return bool matching free fn result
+// @build: 72
 
 use rhythm_grid::game::{
     tick, GameSession, GameState, TickResult, ActivePiece,
@@ -11,8 +11,8 @@ use rhythm_grid::pieces::{TetrominoType, TETROMINO_TYPES};
 // --- Constants ---
 
 #[test]
-fn lock_delay_ms_is_500() {
-    assert_eq!(LOCK_DELAY_MS, 500u64);
+fn lock_delay_ms_is_400() {
+    assert_eq!(LOCK_DELAY_MS, 400u64);
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn lock_delay_returns_nothing_before_expiry() {
         col: 4,
     };
     tick(&mut session, 1.0); // lock delay active
-    let result = tick(&mut session, 0.3); // 300ms < 500ms
+    let result = tick(&mut session, 0.3); // 300ms < 400ms
     assert_eq!(result, TickResult::Nothing);
     assert!(session.lock_delay_active);
 }
@@ -142,7 +142,7 @@ fn lock_delay_returns_nothing_before_expiry() {
 // --- Lock delay expiry ---
 
 #[test]
-fn lock_delay_expires_at_exactly_500ms() {
+fn lock_delay_expires_at_exactly_400ms() {
     let mut session = GameSession::new();
     session.active_piece = ActivePiece {
         piece_type: TetrominoType::I,
@@ -151,16 +151,16 @@ fn lock_delay_expires_at_exactly_500ms() {
         col: 4,
     };
     tick(&mut session, 1.0); // lock delay active
-    let result = tick(&mut session, 0.5); // 500ms = LOCK_DELAY_MS
+    let result = tick(&mut session, 0.4); // 400ms = LOCK_DELAY_MS
     assert!(
         matches!(result, TickResult::PieceLocked { .. }),
-        "Expected PieceLocked at 500ms, got {:?}",
+        "Expected PieceLocked at 400ms, got {:?}",
         result
     );
 }
 
 #[test]
-fn lock_delay_expires_after_500ms_accumulation_across_ticks() {
+fn lock_delay_expires_after_400ms_accumulation_across_ticks() {
     let mut session = GameSession::new();
     session.active_piece = ActivePiece {
         piece_type: TetrominoType::I,
@@ -170,10 +170,10 @@ fn lock_delay_expires_after_500ms_accumulation_across_ticks() {
     };
     tick(&mut session, 1.0); // lock delay active
     tick(&mut session, 0.2); // 200ms — still active
-    let result = tick(&mut session, 0.3); // total 500ms — should expire
+    let result = tick(&mut session, 0.2); // total 400ms — should expire
     assert!(
         matches!(result, TickResult::PieceLocked { .. }),
-        "Expected PieceLocked after cumulative 500ms, got {:?}",
+        "Expected PieceLocked after cumulative 400ms, got {:?}",
         result
     );
 }
@@ -188,7 +188,7 @@ fn lock_delay_cleared_after_expiry() {
         col: 4,
     };
     tick(&mut session, 1.0); // lock delay active
-    tick(&mut session, 0.5); // expires and locks
+    tick(&mut session, 0.4); // expires and locks
     assert!(!session.lock_delay_active);
     assert_eq!(session.lock_delay_accumulator_ms, 0);
     assert_eq!(session.lock_delay_resets, 0);
@@ -204,7 +204,7 @@ fn lock_delay_expiry_spawns_new_piece() {
         col: 4,
     };
     tick(&mut session, 1.0);
-    tick(&mut session, 0.5);
+    tick(&mut session, 0.4);
     assert!(session.active_piece.row <= 1);
 }
 
@@ -456,4 +456,14 @@ fn game_session_hard_drop_state_remains_playing_when_grid_not_full() {
     let mut session = GameSession::new();
     session.hard_drop();
     assert_eq!(session.state, GameState::Playing);
+}
+
+// --- hard_drop resets can_hold ---
+
+#[test]
+fn game_session_hard_drop_resets_can_hold() {
+    let mut session = GameSession::new();
+    session.can_hold = false;
+    session.hard_drop();
+    assert!(session.can_hold, "can_hold must reset to true after hard_drop");
 }

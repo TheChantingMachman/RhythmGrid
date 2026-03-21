@@ -161,7 +161,7 @@ pub fn clear_lines(grid: &mut Grid) -> u32 {
 
 // --- Lock Delay ---
 
-pub const LOCK_DELAY_MS: u64 = 500;
+pub const LOCK_DELAY_MS: u64 = 400;
 pub const MAX_LOCK_RESETS: u32 = 15;
 
 // --- Level and Score ---
@@ -317,6 +317,8 @@ pub struct GameSession {
     pub lock_delay_active: bool,
     pub lock_delay_accumulator_ms: u64,
     pub lock_delay_resets: u32,
+    pub held_piece: Option<TetrominoType>,
+    pub can_hold: bool,
 }
 
 impl GameSession {
@@ -336,6 +338,8 @@ impl GameSession {
             lock_delay_active: false,
             lock_delay_accumulator_ms: 0,
             lock_delay_resets: 0,
+            held_piece: None,
+            can_hold: true,
         }
     }
 
@@ -374,7 +378,66 @@ impl GameSession {
             }
             Some((row, col)) => {
                 self.active_piece = ActivePiece { piece_type: next_type, rotation: 0, row, col };
+                self.can_hold = true;
                 TickResult::PieceLocked { lines_cleared }
+            }
+        }
+    }
+
+    pub fn hold_piece(&mut self) -> bool {
+        if !self.can_hold {
+            return false;
+        }
+
+        let saved_held = self.held_piece;
+        let saved_active = self.active_piece;
+
+        match self.held_piece {
+            None => {
+                // Peek at next from bag without consuming
+                let next_idx = self.bag.peek();
+                let spawn_type = TETROMINO_TYPES[next_idx];
+                match try_spawn(spawn_type, &self.grid) {
+                    None => {
+                        // Restore (nothing changed yet, but be explicit)
+                        self.held_piece = saved_held;
+                        self.active_piece = saved_active;
+                        false
+                    }
+                    Some((row, col)) => {
+                        // Consume from bag only on success
+                        self.bag.next();
+                        self.held_piece = Some(saved_active.piece_type);
+                        self.active_piece =
+                            ActivePiece { piece_type: spawn_type, rotation: 0, row, col };
+                        self.can_hold = false;
+                        self.gravity_accumulator_ms = 0;
+                        self.lock_delay_active = false;
+                        self.lock_delay_accumulator_ms = 0;
+                        self.lock_delay_resets = 0;
+                        true
+                    }
+                }
+            }
+            Some(held_type) => {
+                match try_spawn(held_type, &self.grid) {
+                    None => {
+                        self.held_piece = saved_held;
+                        self.active_piece = saved_active;
+                        false
+                    }
+                    Some((row, col)) => {
+                        self.held_piece = Some(saved_active.piece_type);
+                        self.active_piece =
+                            ActivePiece { piece_type: held_type, rotation: 0, row, col };
+                        self.can_hold = false;
+                        self.gravity_accumulator_ms = 0;
+                        self.lock_delay_active = false;
+                        self.lock_delay_accumulator_ms = 0;
+                        self.lock_delay_resets = 0;
+                        true
+                    }
+                }
             }
         }
     }
@@ -409,6 +472,7 @@ pub fn tick(session: &mut GameSession, dt_secs: f64) -> TickResult {
                     let new_level = level_for_lines(session.total_lines);
                     session.score += score_for_lines(lines_cleared, new_level);
                     session.gravity_accumulator_ms = 0;
+                    session.can_hold = true;
                     TickResult::PieceLocked { lines_cleared }
                 }
             }

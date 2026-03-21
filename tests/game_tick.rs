@@ -1,6 +1,6 @@
 // @spec-tags: core,game,timing
 // @invariants: TickResult enum variants are correct; GameSession::new initializes correctly; tick() accumulates dt, fires gravity, returns PieceMoved/PieceLocked/GameOver/Nothing; TETROMINO_TYPES constant maps indices to TetrominoType
-// @build: 52
+// @build: 72
 
 use rhythm_grid::game::{tick, GameSession, GameState, TickResult, ActivePiece};
 use rhythm_grid::pieces::{TetrominoType, TETROMINO_TYPES};
@@ -233,7 +233,7 @@ fn tick_returns_piece_locked_when_piece_at_bottom() {
     let mut session = GameSession::new();
     // Place I-piece at row 19 (bottom). move_down tries row 20 → out of bounds.
     // Lock delay: first tick starts the delay and returns Nothing.
-    // Second tick of 500ms expires the delay and locks.
+    // Second tick of 400ms expires the delay and locks.
     session.active_piece = ActivePiece {
         piece_type: TetrominoType::I,
         rotation: 0,
@@ -242,7 +242,7 @@ fn tick_returns_piece_locked_when_piece_at_bottom() {
     };
     let first = tick(&mut session, 1.0);
     assert_eq!(first, TickResult::Nothing, "Expected Nothing (lock delay started), got {:?}", first);
-    let result = tick(&mut session, 0.5);
+    let result = tick(&mut session, 0.4);
     assert!(
         matches!(result, TickResult::PieceLocked { lines_cleared: _ }),
         "Expected PieceLocked, got {:?}",
@@ -254,7 +254,7 @@ fn tick_returns_piece_locked_when_piece_at_bottom() {
 fn tick_piece_locked_zero_lines_when_row_not_full() {
     let mut session = GameSession::new();
     // I-piece at row 19 locks only 4 cells in row 19 (not full row of 10).
-    // First tick starts lock delay (Nothing). Second tick (500ms) expires delay and locks.
+    // First tick starts lock delay (Nothing). Second tick (400ms) expires delay and locks.
     session.active_piece = ActivePiece {
         piece_type: TetrominoType::I,
         rotation: 0,
@@ -263,7 +263,7 @@ fn tick_piece_locked_zero_lines_when_row_not_full() {
     };
     let first = tick(&mut session, 1.0);
     assert_eq!(first, TickResult::Nothing);
-    let result = tick(&mut session, 0.5);
+    let result = tick(&mut session, 0.4);
     assert_eq!(result, TickResult::PieceLocked { lines_cleared: 0 });
 }
 
@@ -279,8 +279,8 @@ fn tick_piece_locked_resets_accumulator() {
     // First tick: lock delay starts, gravity accumulator resets to 0.
     tick(&mut session, 1.0);
     assert_eq!(session.gravity_accumulator_ms, 0);
-    // Second tick: lock delay expires (500ms), piece locks, accumulator stays 0.
-    tick(&mut session, 0.5);
+    // Second tick: lock delay expires (400ms), piece locks, accumulator stays 0.
+    tick(&mut session, 0.4);
     assert_eq!(session.gravity_accumulator_ms, 0);
 }
 
@@ -297,7 +297,7 @@ fn tick_piece_locked_spawns_new_active_piece() {
     let first = tick(&mut session, 1.0);
     assert_eq!(first, TickResult::Nothing);
     // Second tick: lock delay expires, piece locks, new piece spawns near row 0.
-    tick(&mut session, 0.5);
+    tick(&mut session, 0.4);
     assert!(session.active_piece.row <= 1);
 }
 
@@ -313,7 +313,7 @@ fn tick_piece_locked_state_remains_playing() {
     // First tick: lock delay starts.
     tick(&mut session, 1.0);
     // Second tick: lock delay expires, piece locks, new piece spawns. Grid not full → Playing.
-    tick(&mut session, 0.5);
+    tick(&mut session, 0.4);
     assert_eq!(session.state, GameState::Playing);
 }
 
@@ -345,13 +345,13 @@ fn tick_returns_nothing_during_active_lock_delay() {
         col: 4,
     };
     tick(&mut session, 1.0); // lock delay now active
-    // Tick with 200ms (< 500ms threshold) — delay not yet expired.
+    // Tick with 200ms (< 400ms threshold) — delay not yet expired.
     let result = tick(&mut session, 0.2);
-    assert_eq!(result, TickResult::Nothing, "Expected Nothing while lock delay < 500ms, got {:?}", result);
+    assert_eq!(result, TickResult::Nothing, "Expected Nothing while lock delay < 400ms, got {:?}", result);
 }
 
 #[test]
-fn tick_lock_delay_expires_and_locks_after_500ms() {
+fn tick_lock_delay_expires_and_locks_after_400ms() {
     let mut session = GameSession::new();
     // Start lock delay.
     session.active_piece = ActivePiece {
@@ -361,11 +361,42 @@ fn tick_lock_delay_expires_and_locks_after_500ms() {
         col: 4,
     };
     tick(&mut session, 1.0); // lock delay active
-    // Tick with exactly 500ms — delay expires, piece locks.
-    let result = tick(&mut session, 0.5);
+    // Tick with exactly 400ms — delay expires, piece locks.
+    let result = tick(&mut session, 0.4);
     assert!(
         matches!(result, TickResult::PieceLocked { lines_cleared: _ }),
-        "Expected PieceLocked after 500ms lock delay, got {:?}",
+        "Expected PieceLocked after 400ms lock delay, got {:?}",
         result
     );
+}
+
+// --- GameSession::new hold_piece fields ---
+
+#[test]
+fn game_session_new_held_piece_is_none() {
+    let session = GameSession::new();
+    assert_eq!(session.held_piece, None);
+}
+
+#[test]
+fn game_session_new_can_hold_is_true() {
+    let session = GameSession::new();
+    assert!(session.can_hold);
+}
+
+// --- tick() resets can_hold on PieceLocked ---
+
+#[test]
+fn tick_resets_can_hold_on_piece_lock() {
+    let mut session = GameSession::new();
+    session.can_hold = false;
+    session.active_piece = ActivePiece {
+        piece_type: TetrominoType::I,
+        rotation: 0,
+        row: 19,
+        col: 4,
+    };
+    tick(&mut session, 1.0); // lock delay starts
+    tick(&mut session, 0.4); // lock delay expires, piece locks
+    assert!(session.can_hold, "can_hold must reset to true after PieceLocked via tick");
 }

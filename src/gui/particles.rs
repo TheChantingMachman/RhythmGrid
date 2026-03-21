@@ -34,14 +34,14 @@ impl ParticleSystem {
 
     /// Spawn particles for a line clear spread across a vertical range.
     pub fn spawn_line_clear(&mut self, top_y: f32, height: f32, board_x: f32, board_w: f32, color: [f32; 4]) {
-        let count = 45;
+        let count = 120;
         for _ in 0..count {
             let x = board_x + self.rand_f32().abs() * board_w;
             let y_offset = self.rand_f32().abs() * height;
             let vx = (self.rand_f32() - 0.5) * 90.0;
             let vy = (self.rand_f32() - 0.7) * 120.0;
-            let life = 1.0 + self.rand_f32().abs() * 1.2;
-            let size = 2.0 + self.rand_f32().abs() * 4.0;
+            let life = 0.5 + self.rand_f32().abs() * 0.6;
+            let size = 0.5 + self.rand_f32().abs() * 1.0;
             self.particles.push(Particle {
                 x, y: top_y + y_offset, vx, vy, life, max_life: life, color, size,
             });
@@ -50,7 +50,7 @@ impl ParticleSystem {
 
     /// Spawn particles on a beat — dramatic burst from board edges.
     pub fn spawn_beat_pulse(&mut self, board_x: f32, board_y: f32, board_w: f32, board_h: f32, intensity: f32) {
-        let count = (15.0 * intensity) as usize;
+        let count = (40.0 * intensity) as usize;
         for _ in 0..count {
             let edge = (self.rand_f32().abs() * 4.0) as u8;
             let speed = 40.0 + intensity * 30.0;
@@ -60,11 +60,11 @@ impl ParticleSystem {
                 2 => (board_x, board_y + self.rand_f32().abs() * board_h, -self.rand_f32().abs() * speed * 1.5, (self.rand_f32() - 0.5) * speed),
                 _ => (board_x + board_w, board_y + self.rand_f32().abs() * board_h, self.rand_f32().abs() * speed * 1.5, (self.rand_f32() - 0.5) * speed),
             };
-            let life = 0.8 + self.rand_f32().abs() * 1.0;
+            let life = 1.6 + self.rand_f32().abs() * 2.0;
             let r = 0.3 + self.rand_f32().abs() * 0.3;
             let g = 0.4 + self.rand_f32().abs() * 0.4;
             let b = 0.7 + self.rand_f32().abs() * 0.3;
-            let size = 2.0 + self.rand_f32().abs() * 3.0;
+            let size = 0.5 + self.rand_f32().abs() * 1.0;
             self.particles.push(Particle {
                 x, y, vx, vy, life, max_life: life, color: [r, g, b, 0.7], size,
             });
