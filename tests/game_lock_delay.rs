@@ -1,6 +1,6 @@
 // @spec-tags: core,game,timing
 // @invariants: LOCK_DELAY_MS=400 and MAX_LOCK_RESETS=15 constants; GameSession lock delay fields initialize to false/0/0; tick() starts lock delay when move_down fails; lock delay accumulates across ticks and expires after 400ms; move_horizontal/rotate reset accumulator and increment resets when lock_delay_active; hard_drop bypasses lock delay; resets exhausted causes immediate lock; GameSession::move_horizontal and rotate return bool matching free fn result
-// @build: 68
+// @build: 72
 
 use rhythm_grid::game::{
     tick, GameSession, GameState, TickResult, ActivePiece,
@@ -456,4 +456,14 @@ fn game_session_hard_drop_state_remains_playing_when_grid_not_full() {
     let mut session = GameSession::new();
     session.hard_drop();
     assert_eq!(session.state, GameState::Playing);
+}
+
+// --- hard_drop resets can_hold ---
+
+#[test]
+fn game_session_hard_drop_resets_can_hold() {
+    let mut session = GameSession::new();
+    session.can_hold = false;
+    session.hard_drop();
+    assert!(session.can_hold, "can_hold must reset to true after hard_drop");
 }
