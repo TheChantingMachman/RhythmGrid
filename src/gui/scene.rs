@@ -585,13 +585,21 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     // State overlays
     if world.session.state == GameState::GameOver {
-        push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([180, 0, 0, 60]), 0.08);
-        let go_w = 200.0; let go_h = 50.0;
+        push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([120, 0, 0, 80]), 0.08);
+        let go_w = 200.0; let go_h = 120.0;
         let go_x = (w - go_w) / 2.0;
         let go_y = (h - go_h) / 2.0;
         push_panel(&mut verts, &mut indices, go_x, go_y, go_w, go_h, 0.09);
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 8.0, "GAME OVER", rgba_to_f32([255, 80, 80, 255]), 2.0);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 30.0, "ENTER TO RESTART", dim_col, 1.0);
+        // Final score prominent
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 34.0, "SCORE", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 46.0,
+                  &format!("{}", world.session.score), text_col, 3.0);
+        // Stats
+        let level = level_for_lines(world.session.total_lines);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 72.0,
+                  &format!("LEVEL {}  LINES {}", level, world.session.total_lines), dim_col, 1.0);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 92.0, "ENTER TO RESTART", dim_col, 1.0);
     }
 
     if world.session.state == GameState::Paused {
