@@ -156,6 +156,7 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Align key bindings to Tetris Guideline (X=RotateCW, C/Shift=Hold) — requires `game.hold_piece` first, then update `input.key_map` spec
 - XDG-compliant config and data paths
 - Linux packaging (Flatpak, Snap, AUR)
+- Expand FFT from 3 bands to 5 (sub-bass, bass, mids, upper-mids, highs) — update `audio.fft` spec + GUI visualizer
 - Future: user-remappable key bindings (settings UI + persisted config)
 
 ---
