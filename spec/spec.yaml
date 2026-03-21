@@ -501,12 +501,12 @@
 -
   id: audio.fft
   section: Audio
-  description: 'Compute FFT frequency decomposition of audio samples. Takes a window of PCM samples and returns energy in 3 frequency bands: bass (20-250Hz), mids (250-4000Hz), highs (4000-20000Hz). Each band is a normalized 0.0-1.0 value representing relative energy. Function fft_bands(samples: &[f32], sample_rate: u32) -> (f32, f32, f32) returns (bass, mids, highs).'
+  description: 'Compute FFT frequency decomposition of audio samples. Takes a window of PCM samples and returns energy in 7 frequency bands: sub-bass (20-60Hz), bass (60-250Hz), low-mids (250-500Hz), mids (500-2000Hz), upper-mids (2000-4000Hz), presence (4000-8000Hz), brilliance (8000-20000Hz). Each band is a normalized 0.0-1.0 value representing relative energy. Function fft_bands(samples: &[f32], sample_rate: u32) -> [f32; 7] returns an array in frequency order.'
   tags:
   - core
   - audio
   - analysis
-  status: implemented
+  status: stale
   constants:
     bass_high: "250"
     bass_low: "20"
@@ -514,6 +514,7 @@
     highs_low: "4000"
     mids_high: "4000"
     mids_low: "250"
+    sub_bass_low: 20,sub_bass_high=60,bass_low=60,bass_high=250,low_mids_low=250,low_mids_high=500,mids_low=500,mids_high=2000,upper_mids_low=2000,upper_mids_high=4000,presence_low=4000,presence_high=8000,brilliance_low=8000,brilliance_high=20000
   depends_on:
   - audio.amplitude
 -
