@@ -25,31 +25,6 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     // Background geometry
     build_background(&mut sv, &mut si, world, gw, gh);
 
-    // Grid floor (brightens on level up)
-    let lf = world.level_up_flash;
-    let floor_r = (5.0 + lf * 40.0).min(255.0) as u8;
-    let floor_g = (5.0 + lf * 80.0).min(255.0) as u8;
-    let floor_b = (12.0 + lf * 100.0).min(255.0) as u8;
-    let floor_color = rgba_to_f32([floor_r, floor_g, floor_b, 200]);
-    push_grid_floor(&mut sv, &mut si, gw, gh, floor_color);
-
-    // Grid lines — beat + highs drive shimmer
-    let line_boost = (beat * 40.0) as u8;
-    let highs_boost = (world.highs * 60.0) as u8;
-    let lc: [u8; 4] = [40, 45, 70, 255];
-    let line_color = rgba_to_f32([
-        lc[0].saturating_add(line_boost).saturating_add(highs_boost / 3),
-        lc[1].saturating_add(line_boost).saturating_add(highs_boost / 2),
-        lc[2].saturating_add(line_boost * 2).saturating_add(highs_boost),
-        lc[3],
-    ]);
-    for col in 0..=WIDTH {
-        push_grid_line_v(&mut sv, &mut si, col as f32, gh, line_color);
-    }
-    for row in 0..=HEIGHT {
-        push_grid_line_h(&mut sv, &mut si, -(row as f32), gw, line_color);
-    }
-
     // Occupied cells as 3D cubes (bottom-to-top, right-to-left for correct face overlap)
     for row in (0..HEIGHT).rev() {
         for col in (0..WIDTH).rev() {
@@ -86,6 +61,23 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
                 push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth, color, amp * 2.0);
             }
         }
+    }
+
+    // Grid lines — drawn after cubes so they overlay the top faces
+    let line_boost = (beat * 40.0) as u8;
+    let highs_boost = (world.highs * 60.0) as u8;
+    let lc: [u8; 4] = [40, 45, 70, 255];
+    let line_color = rgba_to_f32([
+        lc[0].saturating_add(line_boost).saturating_add(highs_boost / 3),
+        lc[1].saturating_add(line_boost).saturating_add(highs_boost / 2),
+        lc[2].saturating_add(line_boost * 2).saturating_add(highs_boost),
+        lc[3],
+    ]);
+    for col in 0..=WIDTH {
+        push_grid_line_v(&mut sv, &mut si, col as f32, gh, line_color);
+    }
+    for row in 0..=HEIGHT {
+        push_grid_line_h(&mut sv, &mut si, -(row as f32), gw, line_color);
     }
 
     // --- 3D Music Dashboard ---

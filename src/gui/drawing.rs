@@ -78,8 +78,8 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let x1 = col + 1.0 - gap;
     let y0 = -row - gap;        // top of cell (y-up)
     let y1 = -row - 1.0 + gap;  // bottom of cell
-    let z0 = 0.0;               // back face
-    let z1 = depth;              // front face (toward camera)
+    let z0 = -depth * 0.5;      // back face (behind grid plane)
+    let z1 = depth * 0.5;       // front face (in front of grid plane)
 
     // Modulate color with amplitude: quiet = desaturated, loud = vivid + bright
     let saturation = 0.8 + glow_boost * 0.2; // 0.8 base, up to 1.0+ when loud
@@ -140,18 +140,6 @@ pub fn push_slab_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
         }
         indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
     }
-}
-
-/// 3D grid floor quad in world space
-pub fn push_grid_floor(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
-                       width: f32, height: f32, color: [f32; 4]) {
-    let n = [0.0f32, 0.0, 1.0];
-    let base = verts.len() as u32;
-    verts.push(Vertex { position: [0.0, 0.0, -0.01], normal: n, color });
-    verts.push(Vertex { position: [width, 0.0, -0.01], normal: n, color });
-    verts.push(Vertex { position: [width, -height, -0.01], normal: n, color });
-    verts.push(Vertex { position: [0.0, -height, -0.01], normal: n, color });
-    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
 pub fn push_grid_line_v(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
