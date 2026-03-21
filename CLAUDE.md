@@ -65,4 +65,6 @@ Key rules:
   - `type_breakage_risk` — warning if modified spec is `implemented`
 - **When to use `modifies`:** Ask: "will implementing this draft change behavior or types that another spec's tests assert?" If yes, add `--modifies <that-spec-id>`. Common cases: adding struct fields, changing function return values, altering function behavior.
 - **Auto-stale:** The pipeline auto-stales `implemented` entries that appear in a building spec's `modifies` field. No manual stale needed — just set `modifies` correctly and the pipeline handles the rest.
-- **Inline hints (v2.9.0+):** The CLI will emit stderr hints at add/update time if modifies IDs are not in depends_on or if they're implemented. Current v2.8.0 stores modifies as opaque strings — the enhanced validation lands with v2.9.0.
+- **Inline hints:** The CLI emits stderr hints at add/update time if modifies IDs are not in depends_on or if they're implemented.
+- **`fixture_patterns` field (v3.1.0+):** Optional free-form string describing how to construct test fixtures for a type. Use `specdb fixtures --id <id> --depth N` to walk the depends_on chain and collect fixture guidance.
+- **Current version:** v3.1.0 (ground-up rebuild from v2.9.0, feature-parity plus fixture_patterns).
