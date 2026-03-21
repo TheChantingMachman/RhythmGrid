@@ -231,14 +231,18 @@ fn tick_piece_moved_advances_row() {
 #[test]
 fn tick_returns_piece_locked_when_piece_at_bottom() {
     let mut session = GameSession::new();
-    // Place I-piece at row 19 (bottom). move_down tries row 20 → out of bounds → lock.
+    // Place I-piece at row 19 (bottom). move_down tries row 20 → out of bounds.
+    // Lock delay: first tick starts the delay and returns Nothing.
+    // Second tick of 500ms expires the delay and locks.
     session.active_piece = ActivePiece {
         piece_type: TetrominoType::I,
         rotation: 0,
         row: 19,
         col: 4,
     };
-    let result = tick(&mut session, 1.0);
+    let first = tick(&mut session, 1.0);
+    assert_eq!(first, TickResult::Nothing, "Expected Nothing (lock delay started), got {:?}", first);
+    let result = tick(&mut session, 0.5);
     assert!(
         matches!(result, TickResult::PieceLocked { lines_cleared: _ }),
         "Expected PieceLocked, got {:?}",
@@ -250,13 +254,16 @@ fn tick_returns_piece_locked_when_piece_at_bottom() {
 fn tick_piece_locked_zero_lines_when_row_not_full() {
     let mut session = GameSession::new();
     // I-piece at row 19 locks only 4 cells in row 19 (not full row of 10).
+    // First tick starts lock delay (Nothing). Second tick (500ms) expires delay and locks.
     session.active_piece = ActivePiece {
         piece_type: TetrominoType::I,
         rotation: 0,
         row: 19,
         col: 4,
     };
-    let result = tick(&mut session, 1.0);
+    let first = tick(&mut session, 1.0);
+    assert_eq!(first, TickResult::Nothing);
+    let result = tick(&mut session, 0.5);
     assert_eq!(result, TickResult::PieceLocked { lines_cleared: 0 });
 }
 
@@ -269,7 +276,11 @@ fn tick_piece_locked_resets_accumulator() {
         row: 19,
         col: 4,
     };
+    // First tick: lock delay starts, gravity accumulator resets to 0.
     tick(&mut session, 1.0);
+    assert_eq!(session.gravity_accumulator_ms, 0);
+    // Second tick: lock delay expires (500ms), piece locks, accumulator stays 0.
+    tick(&mut session, 0.5);
     assert_eq!(session.gravity_accumulator_ms, 0);
 }
 
@@ -282,10 +293,11 @@ fn tick_piece_locked_spawns_new_active_piece() {
         row: 19,
         col: 4,
     };
-    tick(&mut session, 1.0);
-    // After locking the I-piece at row 19, a new piece should be active.
-    // The new piece should not be at row 19 (it was just locked there).
-    // It should be at a spawn position near row 0.
+    // First tick: lock delay starts, piece stays at row 19.
+    let first = tick(&mut session, 1.0);
+    assert_eq!(first, TickResult::Nothing);
+    // Second tick: lock delay expires, piece locks, new piece spawns near row 0.
+    tick(&mut session, 0.5);
     assert!(session.active_piece.row <= 1);
 }
 
@@ -298,7 +310,62 @@ fn tick_piece_locked_state_remains_playing() {
         row: 19,
         col: 4,
     };
+    // First tick: lock delay starts.
     tick(&mut session, 1.0);
-    // Grid is not full at top, so next spawn should succeed, state stays Playing.
+    // Second tick: lock delay expires, piece locks, new piece spawns. Grid not full → Playing.
+    tick(&mut session, 0.5);
     assert_eq!(session.state, GameState::Playing);
+}
+
+// --- tick() lock delay integration ---
+
+#[test]
+fn tick_starts_lock_delay_when_piece_at_bottom() {
+    let mut session = GameSession::new();
+    // Place I-piece at row 19 (floor). Gravity fires, move_down fails → lock delay starts.
+    session.active_piece = ActivePiece {
+        piece_type: TetrominoType::I,
+        rotation: 0,
+        row: 19,
+        col: 4,
+    };
+    let result = tick(&mut session, 1.0);
+    assert_eq!(result, TickResult::Nothing, "Expected Nothing when lock delay starts, got {:?}", result);
+    assert!(session.lock_delay_active, "Expected lock_delay_active to be true after failed move_down");
+}
+
+#[test]
+fn tick_returns_nothing_during_active_lock_delay() {
+    let mut session = GameSession::new();
+    // Start lock delay: place piece at row 19, tick 1.0s.
+    session.active_piece = ActivePiece {
+        piece_type: TetrominoType::I,
+        rotation: 0,
+        row: 19,
+        col: 4,
+    };
+    tick(&mut session, 1.0); // lock delay now active
+    // Tick with 200ms (< 500ms threshold) — delay not yet expired.
+    let result = tick(&mut session, 0.2);
+    assert_eq!(result, TickResult::Nothing, "Expected Nothing while lock delay < 500ms, got {:?}", result);
+}
+
+#[test]
+fn tick_lock_delay_expires_and_locks_after_500ms() {
+    let mut session = GameSession::new();
+    // Start lock delay.
+    session.active_piece = ActivePiece {
+        piece_type: TetrominoType::I,
+        rotation: 0,
+        row: 19,
+        col: 4,
+    };
+    tick(&mut session, 1.0); // lock delay active
+    // Tick with exactly 500ms — delay expires, piece locks.
+    let result = tick(&mut session, 0.5);
+    assert!(
+        matches!(result, TickResult::PieceLocked { lines_cleared: _ }),
+        "Expected PieceLocked after 500ms lock delay, got {:?}",
+        result
+    );
 }
