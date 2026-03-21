@@ -1,6 +1,6 @@
 // @spec-tags: core,game,timing
 // @invariants: TickResult enum variants are correct; GameSession::new initializes correctly; tick() accumulates dt, fires gravity, returns PieceMoved/PieceLocked/GameOver/Nothing; TETROMINO_TYPES constant maps indices to TetrominoType
-// @build: 68
+// @build: 72
 
 use rhythm_grid::game::{tick, GameSession, GameState, TickResult, ActivePiece};
 use rhythm_grid::pieces::{TetrominoType, TETROMINO_TYPES};
@@ -368,4 +368,35 @@ fn tick_lock_delay_expires_and_locks_after_400ms() {
         "Expected PieceLocked after 400ms lock delay, got {:?}",
         result
     );
+}
+
+// --- GameSession::new hold_piece fields ---
+
+#[test]
+fn game_session_new_held_piece_is_none() {
+    let session = GameSession::new();
+    assert_eq!(session.held_piece, None);
+}
+
+#[test]
+fn game_session_new_can_hold_is_true() {
+    let session = GameSession::new();
+    assert!(session.can_hold);
+}
+
+// --- tick() resets can_hold on PieceLocked ---
+
+#[test]
+fn tick_resets_can_hold_on_piece_lock() {
+    let mut session = GameSession::new();
+    session.can_hold = false;
+    session.active_piece = ActivePiece {
+        piece_type: TetrominoType::I,
+        rotation: 0,
+        row: 19,
+        col: 4,
+    };
+    tick(&mut session, 1.0); // lock delay starts
+    tick(&mut session, 0.4); // lock delay expires, piece locks
+    assert!(session.can_hold, "can_hold must reset to true after PieceLocked via tick");
 }

@@ -153,6 +153,7 @@ pub fn try_spawn(piece: TetrominoType, grid: &crate::grid::Grid) -> Option<(i32,
     for offset in 0..5i32 {
         let spawn_row = -offset;
         let mut valid = true;
+        let mut has_visible = false;
         for &(dr, dc) in &cells {
             let r = spawn_row + dr;
             let c = spawn_col + dc;
@@ -160,6 +161,7 @@ pub fn try_spawn(piece: TetrominoType, grid: &crate::grid::Grid) -> Option<(i32,
             if r < 0 {
                 continue;
             }
+            has_visible = true;
             let r_u = r as usize;
             let c_u = c as usize;
             if r_u >= crate::grid::HEIGHT || c_u >= crate::grid::WIDTH {
@@ -171,7 +173,7 @@ pub fn try_spawn(piece: TetrominoType, grid: &crate::grid::Grid) -> Option<(i32,
                 break;
             }
         }
-        if valid {
+        if valid && has_visible {
             return Some((spawn_row, spawn_col));
         }
     }

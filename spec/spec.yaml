@@ -552,7 +552,7 @@
   tags:
   - core
   - game
-  status: draft
+  status: implemented
   depends_on:
   - game.next_piece
   - game.state
