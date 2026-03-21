@@ -508,14 +508,23 @@
   - analysis
   status: stale
   constants:
-    band_count: 7,freq_min=20,freq_max=20000,band0_low=20,band0_high=60,band1_low=61,band1_high=250,band2_low=251,band2_high=500,band3_low=501,band3_high=2000,band4_low=2001,band4_high=4000,band5_low=4001,band5_high=8000,band6_low=8001,band6_high=20000
-    bass_high: "250"
-    bass_low: "20"
-    highs_high: "20000"
-    highs_low: "4000"
-    mids_high: "4000"
-    mids_low: "250"
-    sub_bass_low: 20,sub_bass_high=60,bass_low=60,bass_high=250,low_mids_low=250,low_mids_high=500,mids_low=500,mids_high=2000,upper_mids_low=2000,upper_mids_high=4000,presence_low=4000,presence_high=8000,brilliance_low=8000,brilliance_high=20000
+    band_count: "7"
+    freq_min: "20"
+    freq_max: "20000"
+    band0_low: "20"
+    band0_high: "60"
+    band1_low: "61"
+    band1_high: "250"
+    band2_low: "251"
+    band2_high: "500"
+    band3_low: "501"
+    band3_high: "2000"
+    band4_low: "2001"
+    band4_high: "4000"
+    band5_low: "4001"
+    band5_high: "8000"
+    band6_low: "8001"
+    band6_high: "20000"
   depends_on:
   - audio.amplitude
   fixture_patterns: |
