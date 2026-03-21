@@ -72,7 +72,10 @@ impl AudioState {
         const FFT_WINDOW: usize = 2048;
         if self.fft_buffer.len() >= FFT_WINDOW {
             let window: Vec<f32> = self.fft_buffer.drain(..FFT_WINDOW).collect();
-            let (b, m, h) = fft_bands(&window, sample_rate);
+            let bands = fft_bands(&window, sample_rate);
+            let b = bands[0] + bands[1]; // sub-bass + bass
+            let m = bands[2] + bands[3] + bands[4]; // low-mids + mids + upper-mids
+            let h = bands[5] + bands[6]; // presence + brilliance
             // Smooth toward new values
             self.bass = self.bass * 0.6 + b * 0.4;
             self.mids = self.mids * 0.6 + m * 0.4;
