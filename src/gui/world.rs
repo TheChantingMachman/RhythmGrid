@@ -230,33 +230,16 @@ impl GameWorld {
         }
         self.last_tick = now;
 
-        self.session.gravity_accumulator_ms += (dt * 1000.0) as u64;
-        let level = level_for_lines(self.session.total_lines);
-        let interval = gravity_interval_ms(level);
-        if self.session.gravity_accumulator_ms >= interval {
-            if !move_down(&self.session.grid, &mut self.session.active_piece) {
-                let lines = lock_piece(&mut self.session.grid, &self.session.active_piece);
-                let next_type = TETROMINO_TYPES[self.session.bag.next()];
-                match try_spawn(next_type, &self.session.grid) {
-                    None => { self.session.state = GameState::GameOver; }
-                    Some((row, col)) => {
-                        self.session.active_piece = ActivePiece {
-                            piece_type: next_type, rotation: 0, row, col
-                        };
-                        // If spawned in vanish zone and can't move down, board is full
-                        if row < 0 {
-                            let cells = piece_cells(next_type, 0);
-                            if !is_valid_position(&self.session.grid, &cells, row + 1, col) {
-                                self.session.state = GameState::GameOver;
-                            }
-                        }
-                        self.session.total_lines += lines;
-                        let new_level = level_for_lines(self.session.total_lines);
-                        self.session.score += score_for_lines(lines, new_level);
-                    }
-                }
+        // Capture pre-tick piece for visual effects (tick replaces active_piece on lock)
+        let pre_piece = self.session.active_piece;
+
+        if let TickResult::PieceLocked { lines_cleared } = tick(&mut self.session, dt) {
+            if lines_cleared > 0 {
+                let cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
+                let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
+                let piece_row = pre_piece.row + max_dr;
+                self.spawn_line_clear_particles(lines_cleared, piece_row);
             }
-            self.session.gravity_accumulator_ms = 0;
         }
     }
 
@@ -281,16 +264,14 @@ impl GameWorld {
     pub fn handle_action(&mut self, action: GameAction) {
         match self.session.state {
             GameState::Playing => match action {
-                GameAction::MoveLeft => { move_horizontal(&self.session.grid, &mut self.session.active_piece, -1); }
-                GameAction::MoveRight => { move_horizontal(&self.session.grid, &mut self.session.active_piece, 1); }
+                GameAction::MoveLeft => { self.session.move_horizontal(-1); }
+                GameAction::MoveRight => { self.session.move_horizontal(1); }
                 GameAction::SoftDrop => {
-                    if !move_down(&self.session.grid, &mut self.session.active_piece) {
-                        self.lock_and_spawn();
-                    }
+                    move_down(&self.session.grid, &mut self.session.active_piece);
                     self.session.gravity_accumulator_ms = 0;
                 }
                 GameAction::HardDrop => {
-                    // Find landing position before hard_drop
+                    // Capture landing position and clearing cells before hard_drop
                     let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
                     let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
                     let mut land_row = self.session.active_piece.row;
@@ -299,7 +280,7 @@ impl GameWorld {
                     }
                     let land_bottom = land_row + max_dr;
 
-                    // Simulate placement to capture clearing cells
+                    // Simulate placement to capture clearing cells for dissolve animation
                     let piece_type = self.session.active_piece.piece_type;
                     let piece_col = self.session.active_piece.col;
                     for &(dr, dc) in &cells {
@@ -332,18 +313,18 @@ impl GameWorld {
                         }
                     }
 
-                    let lines = hard_drop(&mut self.session.grid, &self.session.active_piece);
+                    // Use session method — handles lock, score, spawn, lock delay reset
+                    let result = self.session.hard_drop();
+                    let lines = match result {
+                        TickResult::PieceLocked { lines_cleared } => lines_cleared,
+                        _ => 0,
+                    };
                     if lines > 0 {
                         self.spawn_line_clear_particles(lines, land_bottom);
                     }
-                    self.session.total_lines += lines;
-                    let level = level_for_lines(self.session.total_lines);
-                    self.session.score += score_for_lines(lines, level);
-                    self.spawn_or_game_over();
-                    self.session.gravity_accumulator_ms = 0;
                 }
-                GameAction::RotateCW => { rotate(&self.session.grid, &mut self.session.active_piece, true); }
-                GameAction::RotateCCW => { rotate(&self.session.grid, &mut self.session.active_piece, false); }
+                GameAction::RotateCW => { self.session.rotate(true); }
+                GameAction::RotateCCW => { self.session.rotate(false); }
                 GameAction::TogglePause => { self.session.state = GameState::Paused; }
                 _ => {}
             }
@@ -372,60 +353,6 @@ impl GameWorld {
         }
     }
 
-    fn lock_and_spawn(&mut self) {
-        let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
-        let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
-        let piece_row = self.session.active_piece.row + max_dr;
-
-        // Write piece cells to grid temporarily to detect which rows will clear
-        let piece_type = self.session.active_piece.piece_type;
-        for &(dr, dc) in &cells {
-            let r = self.session.active_piece.row + dr;
-            let c = self.session.active_piece.col + dc;
-            if r >= 0 && r < HEIGHT as i32 && c >= 0 && c < WIDTH as i32 {
-                self.session.grid.cells[r as usize][c as usize] = CellState::Occupied(piece_type as u32);
-            }
-        }
-
-        // Capture clearing cells before lock_piece removes them
-        let mut rows_to_clear = Vec::new();
-        for row in 0..HEIGHT {
-            if self.session.grid.cells[row].iter().all(|c| *c != CellState::Empty) {
-                rows_to_clear.push(row);
-                for col in 0..WIDTH {
-                    if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
-                        let _color = rgba_to_f32(piece_color(ti));
-                        self.clearing_cells.push(ClearingCell {
-                            col: col as i32,
-                            row: row as i32,
-                            timer: LINE_CLEAR_DURATION,
-                            _color,
-                            scale: 1.0,
-                        });
-                    }
-                }
-            }
-        }
-
-        // Undo the manual cell writes — let lock_piece handle it properly
-        for &(dr, dc) in &cells {
-            let r = self.session.active_piece.row + dr;
-            let c = self.session.active_piece.col + dc;
-            if r >= 0 && r < HEIGHT as i32 && c >= 0 && c < WIDTH as i32 {
-                self.session.grid.cells[r as usize][c as usize] = CellState::Empty;
-            }
-        }
-
-        let lines = lock_piece(&mut self.session.grid, &self.session.active_piece);
-        if lines > 0 {
-            self.spawn_line_clear_particles(lines, piece_row);
-        }
-        self.session.total_lines += lines;
-        let level = level_for_lines(self.session.total_lines);
-        self.session.score += score_for_lines(lines, level);
-        self.spawn_or_game_over();
-    }
-
     fn spawn_line_clear_particles(&mut self, lines: u32, piece_row: i32) {
         // Approximate screen-space bounds for particle spawning
         let w = THEME.win_w as f32;
@@ -445,24 +372,6 @@ impl GameWorld {
         };
         for _ in 0..lines {
             self.particles.spawn_line_clear(top_y, clear_height, bx, bw, color);
-        }
-    }
-
-    fn spawn_or_game_over(&mut self) {
-        let s = &mut self.session;
-        let next_type = TETROMINO_TYPES[s.bag.next()];
-        match try_spawn(next_type, &s.grid) {
-            None => { s.state = GameState::GameOver; }
-            Some((r, c)) => {
-                s.active_piece = ActivePiece { piece_type: next_type, rotation: 0, row: r, col: c };
-                // If spawned in vanish zone and can't move down, board is full
-                if r < 0 {
-                    let cells = piece_cells(next_type, 0);
-                    if !is_valid_position(&s.grid, &cells, r + 1, c) {
-                        s.state = GameState::GameOver;
-                    }
-                }
-            }
         }
     }
 
@@ -494,5 +403,3 @@ impl GameWorld {
         super::scene::build_scene_and_hud(self)
     }
 }
-
-
