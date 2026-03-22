@@ -1,7 +1,7 @@
 // Beat rings — expanding concentric rings spawned on bass/sub-bass beats.
 
 use super::{AudioEffect, AudioFrame, RenderContext, RenderPass};
-use crate::gui::drawing::{Vertex, rgba_to_f32};
+use crate::gui::drawing::Vertex;
 
 pub struct BgRing {
     pub radius: f32,

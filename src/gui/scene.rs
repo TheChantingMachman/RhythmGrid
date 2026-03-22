@@ -13,7 +13,6 @@ use super::world::GameWorld;
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)
 /// Returns (opaque_scene, transparent_scene, hud) geometry.
 pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
-    let beat = world.beat_intensity;
     let cube_depth = 0.75; // chunkier cubes for more substantial 3D feel
 
     let mut sv = Vec::new(); // opaque scene
