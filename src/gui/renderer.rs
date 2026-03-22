@@ -531,9 +531,11 @@ impl GpuState {
                 });
                 pass.set_pipeline(&self.scene_pipeline);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
-                pass.set_vertex_buffer(0, opaque_vb.slice(..));
-                pass.set_index_buffer(opaque_ib.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..opaque_indices.len() as u32, 0, 0..1);
+                if !opaque_indices.is_empty() {
+                    pass.set_vertex_buffer(0, opaque_vb.slice(..));
+                    pass.set_index_buffer(opaque_ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..opaque_indices.len() as u32, 0, 0..1);
+                }
             }
             self.queue.submit(std::iter::once(encoder.finish()));
         }

@@ -36,41 +36,49 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: world.hud_opacity,
         };
-        if world.fireworks_enabled {
+        if world.effect_flags.fireworks {
             world.fireworks.render(&mut tv, &mut ti, &fx_ctx);
         }
     }
 
-    // Occupied cells as translucent 3D cubes — back faces visible through front
+    // Occupied cells as translucent 3D cubes
+    let ef = &world.effect_flags;
     for cell in &world.render_board.occupied {
         let band = (cell.type_index as usize) % 7;
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
-        color[3] = 0.75; // translucent — see through to back faces
-        let band_glow = world.bands_norm[band] * 2.0;
-        let beat_pulse = world.band_beat_intensity[band];
-        let depth = cube_depth + beat_pulse * 0.3;
+        color[3] = 0.75;
+        let (band_glow, depth) = if ef.cube_glow {
+            (world.bands_norm[band] * 2.0, cube_depth + world.band_beat_intensity[band] * 0.3)
+        } else {
+            (0.0, cube_depth)
+        };
         push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow);
     }
 
-    // Ghost piece via render state
-    for cell in &world.render_board.ghost {
-        let base_color = world.themed_piece_color(cell.type_index);
-        let ghost_color = rgba_to_f32([base_color[0], base_color[1], base_color[2], 40]);
-        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0);
+    // Ghost piece
+    if ef.ghost_piece {
+        for cell in &world.render_board.ghost {
+            let base_color = world.themed_piece_color(cell.type_index);
+            let ghost_color = rgba_to_f32([base_color[0], base_color[1], base_color[2], 40]);
+            push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0);
+        }
     }
 
-    // Active piece — slightly more opaque than locked pieces
+    // Active piece
     for cell in &world.render_board.active {
         let band = (cell.type_index as usize) % 7;
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
-        color[3] = 0.85; // active piece slightly more solid
-        let active_glow = world.bands_norm[band] * 2.0;
-        let active_depth = cube_depth + world.band_beat_intensity[band] * 0.3;
+        color[3] = 0.85;
+        let (active_glow, active_depth) = if ef.active_piece_pulse {
+            (world.bands_norm[band] * 2.0, cube_depth + world.band_beat_intensity[band] * 0.3)
+        } else {
+            (0.0, cube_depth)
+        };
         push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, active_depth, color, active_glow);
     }
 
     // Grid lines (effect module)
-    {
+    if ef.grid_lines {
         use super::effects::AudioEffect;
         let grid_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
@@ -148,7 +156,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     push_slab_3d(&mut tv, &mut ti, fld.world_x, fld.world_y, fld.world_w, fld.world_h, 0.4, fld_color);
 
     // FFT visualizer (effect module)
-    {
+    if ef.fft_visualizer {
         use super::effects::AudioEffect;
         let fft_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
@@ -161,7 +169,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     }
 
     // Per-cell clearing animations (shrinking bright cubes)
-    for cell in &world.clearing_cells {
+    if ef.clearing_flash { for cell in &world.clearing_cells {
         if cell.scale > 0.01 {
             // Stay white throughout, fade alpha
             let progress = 1.0 - (cell.timer / super::world::LINE_CLEAR_DURATION).max(0.0);
@@ -198,7 +206,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             tv.push(Vertex { position: [x1, y0, z1], normal: n_top, color: top_color });
             ti.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
         }
-    }
+    }}
 
     // HUD
     let (hv, hi) = build_hud(world);
@@ -219,14 +227,17 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
     use super::effects::AudioEffect;
 
     // Hex background (effect module)
-    if world.hex_enabled {
+    if world.effect_flags.hex_background {
         world.hex_background.render(sv, si, &ctx);
     }
 
     // Beat rings (effect module)
-    world.beat_rings.render(sv, si, &ctx);
+    if world.effect_flags.beat_rings {
+        world.beat_rings.render(sv, si, &ctx);
+    }
 
     // Legacy level-up rings (still inline)
+    if !world.effect_flags.level_up_rings { return; }
     let ring_cx = gw / 2.0;
     let ring_cy = -gh / 2.0;
     let ring_z = -1.0;
@@ -263,6 +274,7 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
 fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     let mut verts = Vec::new();
     let mut indices = Vec::new();
+    let ef = &world.effect_flags;
     let t = &THEME;
     let w = t.win_w as f32;
     let h = t.win_h as f32;
@@ -461,17 +473,24 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", rs.total_lines), text_col, 2.0);
 
     // T-spin flash
-    if world.t_spin_flash > 0.01 {
+    if ef.t_spin_flash && world.t_spin_flash > 0.01 {
         let ta = (world.t_spin_flash * 255.0) as u8;
         push_text(&mut verts, &mut indices, w / 2.0 - 40.0, h / 2.0 - 60.0,
                   "T-SPIN", rgba_to_f32([255, 100, 255, ta]), 3.0);
     }
 
     // Combo counter (only visible during active combo)
-    if rs.combo_count > 0 {
+    if ef.combo_text && rs.combo_count > 0 {
         let combo_col = rgba_to_f32([255, 200, 60, 255]);
         push_text(&mut verts, &mut indices, 12.0, stats_y + 114.0,
                   &format!("COMBO {}", rs.combo_count), combo_col, 2.0);
+    }
+
+    // Toast message (theme switch notification)
+    if world.toast_timer > 0.0 {
+        let ta = (world.toast_timer.min(1.0) * 255.0) as u8;
+        push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
+                  &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
     }
 
     // Music dashboard labels (right side, aligned with 3D elements)

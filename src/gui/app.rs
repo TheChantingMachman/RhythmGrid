@@ -47,7 +47,8 @@ impl ApplicationHandler for App {
                 self.world.demo_idle_timer = 0.0; // any key resets idle
                 use winit::keyboard::KeyCode as K;
                 match code {
-                    K::KeyN => self.world.skip_track(), // keep as keyboard shortcut alongside button
+                    K::F1 => self.world.cycle_theme(),
+                    K::KeyN => self.world.skip_track(),
                     K::ShiftLeft | K::ShiftRight => self.world.hold_piece(),
                     K::Equal | K::NumpadAdd => self.world.adjust_volume(0.05),
                     K::Minus | K::NumpadSubtract => self.world.adjust_volume(-0.05),

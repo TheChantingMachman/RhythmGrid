@@ -53,8 +53,7 @@ pub struct GameWorld {
     pub(super) fft_vis: FftVisualizer,
     pub(super) grid_lines: GridLines,
     pub(super) fireworks: Fireworks,
-    pub(super) hex_enabled: bool,
-    pub(super) fireworks_enabled: bool,
+    pub(super) effect_flags: themes::EffectFlags,
     pub(super) danger_level: f32,
     pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
     last_level: u32,
@@ -71,6 +70,9 @@ pub struct GameWorld {
     pub(super) render_board: BoardRenderState,
     pub(super) render_status: GameStatusRender,
     pub(super) render_held: Option<HeldPieceRender>,
+    pub(super) toast_text: String,
+    pub(super) toast_timer: f32,
+    theme_index: usize,
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -164,8 +166,7 @@ impl GameWorld {
             fft_vis: FftVisualizer::new(theme.fft),
             grid_lines: GridLines::new(theme.grid),
             fireworks: Fireworks::new(),
-            hex_enabled: theme.hex_enabled,
-            fireworks_enabled: theme.fireworks_enabled,
+            effect_flags: theme.effects.clone(),
             piece_colors: theme.piece_colors,
             render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
             render_status: GameStatusRender {
@@ -174,6 +175,9 @@ impl GameWorld {
                 state: GameState::Menu, can_hold: true,
             },
             render_held: None,
+            toast_text: String::new(),
+            toast_timer: 0.0,
+            theme_index: 0,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -268,14 +272,15 @@ impl GameWorld {
         let bh = h * 0.85;
         let bx = (w - bw) / 2.0;
         let by = (h - bh) / 2.0;
-        for band in 4..6 {
-            if self.band_beat_intensity[band] > 0.95 {
-                self.particles.spawn_beat_pulse(bx, by, bw, bh, 0.6);
+        if self.effect_flags.particle_beat_pulse {
+            for band in 4..6 {
+                if self.band_beat_intensity[band] > 0.95 {
+                    self.particles.spawn_beat_pulse(bx, by, bw, bh, 0.6);
+                }
             }
-        }
-        // Fallback: legacy overall beat particles
-        if got_beat && !self.prev_beat && self.band_beat_intensity[4..6].iter().all(|&b| b < 0.95) {
-            self.particles.spawn_beat_pulse(bx, by, bw, bh, 1.0);
+            if got_beat && !self.prev_beat && self.band_beat_intensity[4..6].iter().all(|&b| b < 0.95) {
+                self.particles.spawn_beat_pulse(bx, by, bw, bh, 1.0);
+            }
         }
         self.prev_beat = got_beat;
 
@@ -302,9 +307,11 @@ impl GameWorld {
         // Level up detection
         let current_level = level_for_lines(self.session.total_lines);
         if current_level > self.last_level {
-            self.level_up_flash = 1.0;
             self.hud_opacity = 1.0;
             self.hud_fade_timer = 2.0;
+            if self.effect_flags.level_up_rings {
+                self.level_up_flash = 1.0;
+            }
             // Spawn celebratory rings
             for i in 0..3 {
                 self.bg_rings.push(BgRing {
@@ -351,16 +358,17 @@ impl GameWorld {
             dt: dt as f32,
         };
 
-        // Update all effect modules + camera
+        // Update all effect modules + camera (guarded by effect_flags)
         use super::effects::AudioEffect;
-        self.beat_rings.update(&self.audio_frame);
-        if self.hex_enabled { self.hex_background.update(&self.audio_frame); }
+        let ef = &self.effect_flags;
+        if ef.beat_rings { self.beat_rings.update(&self.audio_frame); }
+        if ef.hex_background { self.hex_background.update(&self.audio_frame); }
         self.fft_vis.locked = self.fft_locked;
         self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
-        self.fft_vis.update(&self.audio_frame);
-        self.grid_lines.update(&self.audio_frame);
-        if self.fireworks_enabled { self.fireworks.update(&self.audio_frame); }
-        self.camera.update(&self.audio_frame);
+        if ef.fft_visualizer { self.fft_vis.update(&self.audio_frame); }
+        if ef.grid_lines { self.grid_lines.update(&self.audio_frame); }
+        if ef.fireworks { self.fireworks.update(&self.audio_frame); }
+        if ef.camera_sway { self.camera.update(&self.audio_frame); }
 
         // Decay AFTER effects have consumed the frame
         for i in 0..7 {
@@ -369,6 +377,7 @@ impl GameWorld {
 
         // T-spin flash decay
         self.t_spin_flash = (self.t_spin_flash - dt as f32 * 1.0).max(0.0);
+        self.toast_timer = (self.toast_timer - dt as f32).max(0.0);
 
         // Smooth escalation transition
         let target_danger = if escalation_stage(&self.session.grid) == EscalationStage::Danger { 1.0 } else { 0.0 };
@@ -411,8 +420,12 @@ impl GameWorld {
                     let cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
                     let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
                     let piece_row = pre_piece.row + max_dr;
-                    self.spawn_line_clear_particles(lines_cleared, piece_row);
-                    self.camera.trigger_shake((lines_cleared as f32 * 0.3).min(1.0));
+                    if self.effect_flags.line_clear_particles {
+                        self.spawn_line_clear_particles(lines_cleared, piece_row);
+                    }
+                    if self.effect_flags.camera_shake {
+                        self.camera.trigger_shake((lines_cleared as f32 * 0.3).min(1.0));
+                    }
                 }
                 // Secondary game over check: if new piece spawned in vanish zone
                 // and can't move down, the board is full
@@ -477,6 +490,25 @@ impl GameWorld {
         self.render_board = board_state(&self.session);
         self.render_status = game_status(&self.session);
         self.render_held = held_piece_state(&self.session);
+    }
+
+    pub fn cycle_theme(&mut self) {
+        let theme_fns: &[fn() -> themes::VisualTheme] = &[
+            themes::default_theme,
+            themes::water_theme,
+            themes::debug_theme,
+        ];
+        self.theme_index = (self.theme_index + 1) % theme_fns.len();
+        let theme = theme_fns[self.theme_index]();
+        self.effect_flags = theme.effects.clone();
+        self.piece_colors = theme.piece_colors;
+        self.beat_rings = BeatRings::new(theme.rings);
+        self.hex_background = HexBackground::new(theme.hex);
+        self.fft_vis = FftVisualizer::new(theme.fft);
+        self.grid_lines = GridLines::new(theme.grid);
+        self.camera = CameraReactor::new(theme.camera);
+        self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
+        self.toast_timer = 2.0;
     }
 
     pub fn hold_piece(&mut self) {
@@ -602,10 +634,12 @@ impl GameWorld {
                         TickResult::PieceLocked { lines_cleared } => lines_cleared,
                         _ => 0,
                     };
-                    if lines > 0 {
+                    if lines > 0 && self.effect_flags.line_clear_particles {
                         self.spawn_line_clear_particles(lines, land_bottom);
                     }
-                    self.camera.trigger_shake((0.2 + lines as f32 * 0.25).min(1.0));
+                    if self.effect_flags.camera_shake {
+                        self.camera.trigger_shake((0.2 + lines as f32 * 0.25).min(1.0));
+                    }
                     // Secondary game over check for vanish zone spawn
                     if self.session.active_piece.row < 0 && self.session.state == GameState::Playing {
                         let hd_cells = piece_cells(self.session.active_piece.piece_type, 0);

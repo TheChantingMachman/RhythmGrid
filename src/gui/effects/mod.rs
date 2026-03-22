@@ -54,23 +54,4 @@ pub trait AudioEffect {
     fn render(&self, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, ctx: &RenderContext);
 }
 
-/// A collection of effects that defines a visual theme.
-pub struct Theme {
-    pub effects: Vec<Box<dyn AudioEffect>>,
-}
 
-impl Theme {
-    pub fn update_all(&mut self, audio: &AudioFrame) {
-        for effect in &mut self.effects {
-            effect.update(audio);
-        }
-    }
-
-    pub fn render_pass(&self, pass: RenderPass, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, ctx: &RenderContext) {
-        for effect in &self.effects {
-            if effect.pass() == pass {
-                effect.render(verts, indices, ctx);
-            }
-        }
-    }
-}
