@@ -84,11 +84,13 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         lc[2].saturating_add(line_boost * 2).saturating_add(presence_boost),
         lc[3],
     ]);
+    let presence_beat = world.band_beat_intensity[5];
+    let line_thickness = 0.02 + presence_beat * 0.03;
     for col in 0..=WIDTH {
-        push_grid_line_v(&mut sv, &mut si, col as f32, gh, line_color);
+        push_grid_line_v(&mut sv, &mut si, col as f32, gh, line_color, line_thickness);
     }
     for row in 0..=HEIGHT {
-        push_grid_line_h(&mut sv, &mut si, -(row as f32), gw, line_color);
+        push_grid_line_h(&mut sv, &mut si, -(row as f32), gw, line_color, line_thickness);
     }
 
     // --- 3D Music Dashboard ---
