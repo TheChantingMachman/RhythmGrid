@@ -570,20 +570,34 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     if rs.state == GameState::Paused {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, 60]), 0.08);
-        let pa_w = 110.0; let pa_h = 160.0;
+        let pa_w = 130.0; let pa_h = 240.0;
         let pa_x = (w - pa_w) / 2.0;
         let pa_y = (h - pa_h) / 2.0;
         push_panel(&mut verts, &mut indices, pa_x, pa_y, pa_w, pa_h, 0.09);
         let px = pa_x + 8.0;
-        push_text(&mut verts, &mut indices, px, pa_y + 8.0, "PAUSED", rgba_to_f32([255, 255, 100, 255]), 2.0);
+        let highlight = rgba_to_f32([255, 255, 100, 255]);
+        push_text(&mut verts, &mut indices, px, pa_y + 8.0, "PAUSED", highlight, 2.0);
+        // Controls
         push_text(&mut verts, &mut indices, px, pa_y + 30.0, "L-R MOVE", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 42.0, "DN  SOFT DROP", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 54.0, "SPC HARD DROP", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 66.0, "UP  CW  Z CCW", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 78.0, "C   HOLD", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 90.0, "P   RESUME", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 108.0, "N SKIP +- VOL", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 120.0, "L-R ORBIT CAM", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 102.0, "N SKIP +- VOL", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 114.0, "F1  THEME", dim_col, 1.0);
+        // Settings section
+        push_text(&mut verts, &mut indices, px, pa_y + 136.0, "SETTINGS", highlight, 1.5);
+        // Volume
+        let vol = if let Ok(audio) = world.audio.try_lock() { audio.volume } else { 0.8 };
+        push_text(&mut verts, &mut indices, px, pa_y + 154.0,
+                  &format!("VOL  {:.0}%", vol * 100.0), text_col, 1.0);
+        // Theme
+        let theme_names = ["DEFAULT", "WATER", "DEBUG"];
+        let theme_name = theme_names.get(world.theme_index).unwrap_or(&"DEFAULT");
+        push_text(&mut verts, &mut indices, px, pa_y + 166.0,
+                  &format!("THEME  {}", theme_name), text_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 210.0, "ESC  MENU", dim_col, 1.0);
     }
 
     // Particles (always visible, not affected by HUD fade)

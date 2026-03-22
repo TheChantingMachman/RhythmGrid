@@ -72,7 +72,7 @@ pub struct GameWorld {
     pub(super) render_held: Option<HeldPieceRender>,
     pub(super) toast_text: String,
     pub(super) toast_timer: f32,
-    theme_index: usize,
+    pub(super) theme_index: usize,
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
