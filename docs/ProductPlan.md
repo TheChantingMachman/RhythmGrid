@@ -168,15 +168,26 @@ Real-time song fingerprinting to make visuals respond to what's musically intere
 - Most songs concentrate energy in the lower 5 bands (sub-bass through upper-mids). Presence and brilliance often flat. May need per-band normalization or logarithmic scaling.
 - Beat detection is RMS-only — misses rhythmic content in specific bands
 
-**Beat detection overhaul:**
-- Current: single RMS amplitude spike detection. Cheap but misses a lot.
-- Goal: budget multi-band beat detection that's still computationally cheap
-- Run spike detection per-band (sub-bass for kicks, upper-mids for snares, presence for hi-hats)
-- Beat event typed by source band — enables band-specific visual responses (kick → ring, snare → flash, hat → shimmer)
-- Requires `audio.beat_detect` spec update + pipeline rebuild
-- Open: threshold tuning per band — bass needs different sensitivity than highs
+**Beat detection overhaul (done — multi-band):**
+- 7 independent detectors, one per FFT band
+- Per-band beat events with decaying intensity
+- Routed to different visual effects (bass→rings, upper-mids→particles, presence→grid)
+
+**Beat band fingerprinting (new — dynamic beat routing):**
+- Problem: we hardcode bass bands (0,1) as "the beat" for rings/sway/pulse. But some songs carry rhythm in mids (snare-driven), upper-mids (electronic), or presence (hi-hats). The visual beat misses the actual musical beat.
+- Goal: detect which band(s) carry the most *rhythmic regularity* (not just energy) and assign those to the core beat visual effects.
+- Approach: track per-band beat *regularity* over a settling window (~10s). The band with the most consistent inter-beat intervals is the rhythm carrier. Could be as simple as variance of beat gaps per band — low variance = regular = rhythmic.
+- Route the identified "beat band" to: rings, board pulse, camera bass sway, bass zoom. These become the song's visual heartbeat.
+- This could run as a cheap rolling computation alongside existing beat detection.
+- Can also work as a one-time fingerprint pass on the first ~10s of a song, then lock in.
+- Open: what happens during transitions where the beat shifts to a different band? Smooth crossfade or hard switch?
+- Open: should there be a primary beat band + secondary? (kick + snare = two-layer rhythm)
+- Open: can the FFT visualizer show which band is identified as the beat? (highlight or marker)
+- This is the single most impactful audio-visual sync improvement remaining.
+
+**Beat detection tuning:**
+- Per-band threshold tuning — bass needs different sensitivity than highs
 - Open: should beat events carry intensity, or just binary on/off?
-- This has huge impact on look and feel — priority design decision
 
 **Visual effects interface:**
 - Inventory all GUI elements currently hooked to audio data (TODO)
