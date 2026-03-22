@@ -232,8 +232,11 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Bass zoom (camera Z push on bass beats)
 
 **Remaining:**
-- Wire spectral centroid → color temperature, spectral flux → transition effects
-- Visual themes and palette system (→ effects interface, see AudioVisualCatalog.md)
+- Effects interface: AudioEffect trait defined, 4 audio effects + CameraReactor migrated. Theme struct ready but not wired. See AudioVisualCatalog.md for migration status.
+- Build a second theme to prove the system (different ring style, hex pattern, camera behavior)
+- Spectral centroid wired to grid color temp (done). Spectral flux wired to background brightness (done). More routing possible.
+- Rolling averages + dominant band ranking (infrastructure for dynamic effect routing)
+- Settings persistence (volume, shuffle state survive restart)
 - 3D elements replacing 2D HUD overlays:
   - Shaped transport buttons (play triangle, pause bars, skip arrows)
   - Button press animation (depth halve on click)
@@ -242,7 +245,7 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Responsive layout: side assemblies track window edges
 - XDG-compliant config and data paths
 - Linux packaging (Flatpak, Snap, AUR)
-- Future: user-remappable key bindings, 3D in-game filesystem browser
+- Future: user-remappable key bindings, 3D in-game filesystem browser, multi-band beat tuning per-band thresholds
 
 ---
 
