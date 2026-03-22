@@ -17,6 +17,7 @@ use super::effects::beat_rings::BeatRings;
 use super::effects::hex_background::HexBackground;
 use super::effects::fft_visualizer::FftVisualizer;
 use super::effects::grid_lines::GridLines;
+use super::effects::fireworks::Fireworks;
 use super::effects::themes;
 use super::particles::ParticleSystem;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
@@ -51,6 +52,7 @@ pub struct GameWorld {
     pub(super) hex_background: HexBackground,
     pub(super) fft_vis: FftVisualizer,
     pub(super) grid_lines: GridLines,
+    pub(super) fireworks: Fireworks,
     pub(super) danger_level: f32,
     pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
     last_level: u32,
@@ -147,6 +149,7 @@ impl GameWorld {
             hex_background: HexBackground::new(theme.hex),
             fft_vis: FftVisualizer::new(theme.fft),
             grid_lines: GridLines::new(theme.grid),
+            fireworks: Fireworks::new(),
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -332,6 +335,7 @@ impl GameWorld {
         self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
         self.fft_vis.update(&self.audio_frame);
         self.grid_lines.update(&self.audio_frame);
+        self.fireworks.update(&self.audio_frame);
         self.camera.update(&self.audio_frame);
 
         // Decay AFTER effects have consumed the frame

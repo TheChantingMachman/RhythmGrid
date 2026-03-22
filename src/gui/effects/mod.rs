@@ -7,6 +7,7 @@ pub mod hex_background;
 pub mod fft_visualizer;
 pub mod grid_lines;
 pub mod themes;
+pub mod fireworks;
 
 use super::drawing::Vertex;
 

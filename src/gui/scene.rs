@@ -26,6 +26,19 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     // Background geometry (transparent — behind everything)
     build_background(&mut tv, &mut ti, world, gw, gh);
 
+    // Fireworks (transparent, behind board)
+    {
+        use super::effects::AudioEffect;
+        let fx_ctx = super::effects::RenderContext {
+            board_width: gw, board_height: gh,
+            win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
+            window_aspect: world.window_aspect,
+            preview_angle: world.preview_angle,
+            hud_opacity: world.hud_opacity,
+        };
+        world.fireworks.render(&mut tv, &mut ti, &fx_ctx);
+    }
+
     // Occupied cells as 3D cubes — depth testing handles occlusion
     // Each piece type pulses depth and glow with its frequency band
     for row in 0..HEIGHT {
