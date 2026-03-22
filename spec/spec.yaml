@@ -606,7 +606,7 @@
   - core
   - game
   - scoring
-  status: draft
+  status: implemented
   depends_on:
   - game.lock
   - game.rotate
@@ -622,7 +622,7 @@
   - core
   - game
   - scoring
-  status: draft
+  status: implemented
   depends_on:
   - game.score
   - game.tick
@@ -636,7 +636,7 @@
   tags:
   - core
   - game
-  status: draft
+  status: implemented
   depends_on:
   - game.tick
   - game.combo
