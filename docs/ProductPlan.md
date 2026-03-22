@@ -165,6 +165,15 @@ Inspired by Tetris Effect and Geometry Wars — techniques to consider as the vi
 - Replaces hex grid as background in a "Calm" theme preset
 - Could pair with softer cube materials (glass/ice) and slower camera
 
+**Particle flow field (theme: Flow/Ambient):**
+- Sea of particles following a 2D curl noise vector field — natural swirling currents
+- Quiet music = smooth laminar drift, beats inject turbulence that settles back
+- Audio mapping: sub-bass beats → field disruption (scatter), low-mids → eddy scale, centroid → color temp, flux → new eddies on transitions
+- Technique: curl noise — few noise lookups per particle per frame for flow direction. Divergence-free = natural swirls, no convergence points.
+- Hundreds of small persistent particles drifting and swirling — mesmerizing idle visualizer
+- Could layer with water surface or stand alone as background
+- Pairs with ambient, classical, chillout music
+
 ### Dynamic Audio-Visual Mapping (phased)
 Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
 
