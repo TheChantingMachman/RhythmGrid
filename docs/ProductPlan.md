@@ -223,13 +223,17 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Game over screen with stats (score, combo, pieces, time)
 - Streaming decode for instant track transitions
 - Proper depth testing (opaque + transparent passes)
-- Camera bass sway + hi-freq jitter
-- Guideline key bindings spec (pipeline, pending delivery)
+- Camera bass sway + hi-freq jitter + bass zoom
+- Guideline key bindings (X=RotateCW, C=Hold, GameAction::Hold)
+- Spectral centroid + flux signals (pipeline delivered)
+- Board pulse (cube depth modulated by per-band beat)
+- Grid line thickness pulse on presence beats
+- Dashboard elements in transparent pass (no black boxes on fade)
+- Bass zoom (camera Z push on bass beats)
 
 **Remaining:**
+- Wire spectral centroid → color temperature, spectral flux → transition effects
 - Visual themes and palette system (→ effects interface, see AudioVisualCatalog.md)
-- Settings (audio sensitivity, visual intensity, controls)
-- Spectral centroid + flux (pipeline, pending delivery → color temperature, transition detection)
 - 3D elements replacing 2D HUD overlays:
   - Shaped transport buttons (play triangle, pause bars, skip arrows)
   - Button press animation (depth halve on click)
