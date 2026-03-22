@@ -353,6 +353,12 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Theme switching UI — button or keyboard shortcut to swap themes at runtime
 - More themes: fire, neon, minimal, etc.
 - Rolling averages + dominant band ranking (infrastructure for dynamic effect routing)
+- **Grid distortion workshop** — explore variations:
+  - Per-band warp points: each frequency band drives its own distortion point at a fixed grid position
+  - Piece-tracking warp: falling piece subtly pulls the grid like a rubber band as it passes through
+  - Multiple gentle ripple points that interfere with each other
+  - Warp intensity driven by band energy (gentle ambient undulation vs beat-driven pulses)
+  - Currently on debug theme only — needs tuning before promoting to default/water
 - Settings persistence (volume, shuffle state, selected theme survive restart)
 - 3D elements replacing 2D HUD overlays:
   - Shaped transport buttons (play triangle, pause bars, skip arrows)

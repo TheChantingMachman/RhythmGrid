@@ -385,7 +385,10 @@ impl GameWorld {
         self.fft_vis.locked = self.fft_locked;
         self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
         if ef.fft_visualizer { self.fft_vis.update(&self.audio_frame); }
-        if ef.grid_lines { self.grid_lines.update(&self.audio_frame); }
+        if ef.grid_lines {
+            self.grid_lines.distortion_enabled = ef.grid_distortion;
+            self.grid_lines.update(&self.audio_frame);
+        }
         if ef.fireworks { self.fireworks.update(&self.audio_frame); }
         if ef.camera_sway { self.camera.update(&self.audio_frame); }
 
@@ -444,6 +447,11 @@ impl GameWorld {
                     }
                     if self.effect_flags.camera_shake {
                         self.camera.trigger_shake((lines_cleared as f32 * 0.3).min(1.0));
+                    }
+                    if self.effect_flags.grid_distortion {
+                        let cx = pre_piece.col as f32;
+                        let cy = piece_row as f32;
+                        self.grid_lines.add_force(cx, cy, lines_cleared as f32 * 0.6);
                     }
                 }
                 // Secondary game over check: if new piece spawned in vanish zone
@@ -660,6 +668,10 @@ impl GameWorld {
                     }
                     if self.effect_flags.camera_shake {
                         self.camera.trigger_shake((0.2 + lines as f32 * 0.25).min(1.0));
+                    }
+                    if self.effect_flags.grid_distortion {
+                        let cx = self.session.active_piece.col as f32;
+                        self.grid_lines.add_force(cx, land_bottom as f32, 0.3 + lines as f32 * 0.4);
                     }
                     // Secondary game over check for vanish zone spawn
                     if self.session.active_piece.row < 0 && self.session.state == GameState::Playing {
