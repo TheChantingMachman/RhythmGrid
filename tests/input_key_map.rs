@@ -1,6 +1,6 @@
 // @spec-tags: input,controls
 // @invariants: Validates GameAction enum variants and map_key function mapping KeyCode to Option<GameAction>
-// @build: 51
+// @build: 82
 
 use rhythm_grid::input::{GameAction, KeyCode, map_key};
 
@@ -64,12 +64,13 @@ fn test_game_action_variants_are_distinct() {
         GameAction::HardDrop,
         GameAction::RotateCW,
         GameAction::RotateCCW,
+        GameAction::Hold,
         GameAction::TogglePause,
         GameAction::BackToMenu,
         GameAction::StartGame,
     ];
-    // Verify we have exactly 9 distinct variants by checking count
-    assert_eq!(actions.len(), 9);
+    // Verify we have exactly 10 distinct variants by checking count
+    assert_eq!(actions.len(), 10);
 }
 
 #[test]
@@ -80,10 +81,12 @@ fn test_map_key_all_default_mappings_are_some() {
         KeyCode::Down,
         KeyCode::Up,
         KeyCode::Z,
+        KeyCode::X,
         KeyCode::Space,
         KeyCode::P,
         KeyCode::Escape,
         KeyCode::Enter,
+        KeyCode::C,
     ];
     for key in mapped_keys {
         assert!(
@@ -103,12 +106,38 @@ fn test_map_key_returns_correct_action_type_for_each_mapping() {
         (KeyCode::Down,   GameAction::SoftDrop),
         (KeyCode::Up,     GameAction::RotateCW),
         (KeyCode::Z,      GameAction::RotateCCW),
+        (KeyCode::X,      GameAction::RotateCW),
         (KeyCode::Space,  GameAction::HardDrop),
         (KeyCode::P,      GameAction::TogglePause),
         (KeyCode::Escape, GameAction::BackToMenu),
         (KeyCode::Enter,  GameAction::StartGame),
+        (KeyCode::C,      GameAction::Hold),
     ];
     for (key, action) in expected {
         assert_eq!(map_key(key), Some(action));
     }
+}
+
+#[test]
+fn test_map_key_x_returns_rotate_cw() {
+    assert_eq!(map_key(KeyCode::X), Some(GameAction::RotateCW));
+}
+
+#[test]
+fn test_map_key_c_returns_hold() {
+    assert_eq!(map_key(KeyCode::C), Some(GameAction::Hold));
+}
+
+#[test]
+fn test_game_action_hold_variant_exists() {
+    let hold = GameAction::Hold;
+    let cloned = hold.clone();
+    assert_eq!(hold, cloned);
+    let debug_str = format!("{:?}", hold);
+    assert!(debug_str.contains("Hold"));
+}
+
+#[test]
+fn test_map_key_x_and_up_both_map_to_rotate_cw() {
+    assert_eq!(map_key(KeyCode::X), map_key(KeyCode::Up));
 }

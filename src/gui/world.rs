@@ -33,6 +33,8 @@ pub struct GameWorld {
     pub(super) norm_ceil: [f32; 7],    // fast decay — normalization ceiling
     pub(super) bands_norm: [f32; 7],   // each band normalized to its own ceiling (0-1)
     pub(super) band_beat_intensity: [f32; 7], // per-band beat decay (1.0 on beat, decays)
+    pub(super) centroid: f32,         // spectral centroid 0-1 (dark↔bright)
+    pub(super) flux: f32,             // spectral flux (rate of spectral change)
     pub(super) t_spin_flash: f32, // 1.0 on t-spin, decays to 0
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
@@ -122,6 +124,8 @@ impl GameWorld {
             norm_ceil: [0.01; 7],
             bands_norm: [0.0; 7],
             band_beat_intensity: [0.0; 7],
+            centroid: 0.0,
+            flux: 0.0,
             t_spin_flash: 0.0,
             particles: ParticleSystem::new(),
             prev_beat: false,
@@ -169,6 +173,8 @@ impl GameWorld {
             self.mids = audio.mids;
             self.highs = audio.highs;
             self.bands = audio.bands;
+            self.centroid = audio.centroid;
+            self.flux = audio.flux;
             for i in 0..7 {
                 if audio.band_beats[i] {
                     self.band_beat_intensity[i] = 1.0;
@@ -566,6 +572,7 @@ impl GameWorld {
                 }
                 GameAction::RotateCW => { self.session.rotate(true); }
                 GameAction::RotateCCW => { self.session.rotate(false); }
+                GameAction::Hold => { self.session.hold_piece(); }
                 GameAction::TogglePause => { self.session.state = GameState::Paused; }
                 _ => {}
             }
@@ -730,9 +737,12 @@ impl GameWorld {
         let shake_x = self.shake_intensity * (self.shake_time * 1.3).sin() * 0.4;
         let shake_y = self.shake_intensity * (self.shake_time * 1.7).cos() * 0.25;
 
+        // Bass zoom — camera pushes forward on heavy bass hits
+        let bass_zoom = bass_beat * 0.5;
+
         let cam_x = board_cx + orbit + sway + jitter_x + shake_x;
         let cam_y = board_cy + jitter_y + shake_y;
-        let cam_z = 16.0;
+        let cam_z = 16.0 - bass_zoom;
 
         let eye = [cam_x, cam_y, cam_z];
         let target = [board_cx, board_cy, 0.0];

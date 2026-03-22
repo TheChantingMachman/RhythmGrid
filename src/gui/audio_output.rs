@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rhythm_grid::audio::{fft_bands, generate_procedural, BeatDetector, MultiBeatDetector, StreamingDecoder, DEFAULT_BPM};
+use rhythm_grid::audio::{fft_bands, spectral_centroid, generate_procedural, BeatDetector, MultiBeatDetector, SpectralFluxDetector, StreamingDecoder, DEFAULT_BPM};
 use rhythm_grid::music::{scan_folder, Playlist};
 
 /// Shared state between the audio thread and the game loop.
@@ -18,6 +18,8 @@ pub struct AudioState {
     pub highs: f32,
     pub bands: [f32; 7], // all 7 FFT bands
     pub band_beats: [bool; 7], // per-band beat this frame
+    pub centroid: f32,         // spectral centroid 0.0 (dark) to 1.0 (bright)
+    pub flux: f32,             // spectral flux (rate of spectral change)
     pub track_name: String,
     pub volume: f32,           // 0.0-1.0, applied in audio callback
     pub skip_requested: bool,  // set by game loop, consumed by decode thread
@@ -27,6 +29,7 @@ pub struct AudioState {
     pub shutdown: bool,        // set to stop audio thread
     beat_detector: BeatDetector,
     multi_beat_detector: MultiBeatDetector,
+    flux_detector: SpectralFluxDetector,
     elapsed_secs: f64,
     fft_buffer: Vec<f32>,
     fft_sample_rate: u32,
@@ -43,6 +46,8 @@ impl AudioState {
             highs: 0.0,
             bands: [0.0; 7],
             band_beats: [false; 7],
+            centroid: 0.0,
+            flux: 0.0,
             track_name: String::new(),
             volume: 0.5,
             skip_requested: false,
@@ -52,6 +57,7 @@ impl AudioState {
             shutdown: false,
             beat_detector: BeatDetector::new(),
             multi_beat_detector: MultiBeatDetector::new(),
+            flux_detector: SpectralFluxDetector::new(),
             elapsed_secs: 0.0,
             fft_buffer: Vec::with_capacity(2048),
             fft_sample_rate: 44100,
@@ -93,6 +99,9 @@ impl AudioState {
             for e in &events {
                 self.band_beats[e.band] = true;
             }
+            // Spectral centroid + flux
+            self.centroid = self.centroid * 0.7 + spectral_centroid(&window, sample_rate) * 0.3;
+            self.flux = self.flux_detector.detect(&self.bands);
             // Keep buffer from growing unbounded
             if self.fft_buffer.len() > FFT_WINDOW * 2 {
                 self.fft_buffer.drain(..self.fft_buffer.len() - FFT_WINDOW);

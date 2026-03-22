@@ -475,6 +475,74 @@ impl StreamingDecoder {
     }
 }
 
+// --- Spectral Centroid ---
+
+pub fn spectral_centroid(samples: &[f32], sample_rate: u32) -> f32 {
+    if samples.is_empty() || sample_rate == 0 {
+        return 0.0;
+    }
+
+    let n = samples.len();
+    // Apply Hann window to reduce spectral leakage, which otherwise biases
+    // the centroid of low-frequency tones toward higher frequencies.
+    let denom = if n > 1 { (n - 1) as f32 } else { 1.0 };
+    let mut buffer: Vec<Complex<f32>> = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let w = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / denom).cos());
+            Complex { re: s * w, im: 0.0 }
+        })
+        .collect();
+
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(n);
+    fft.process(&mut buffer);
+
+    let num_bins = n / 2 + 1;
+    let bin_hz = sample_rate as f32 / n as f32;
+
+    let mut weighted_sum = 0.0f32;
+    let mut magnitude_sum = 0.0f32;
+
+    for bin in 0..num_bins {
+        let freq = bin as f32 * bin_hz;
+        if freq < 20.0 || freq > 20000.0 {
+            continue;
+        }
+        let c = buffer[bin];
+        let mag = (c.re * c.re + c.im * c.im).sqrt();
+        weighted_sum += freq * mag;
+        magnitude_sum += mag;
+    }
+
+    if magnitude_sum == 0.0 {
+        return 0.0;
+    }
+
+    let centroid_hz = weighted_sum / magnitude_sum;
+    ((centroid_hz - 20.0) / (20000.0 - 20.0)).clamp(0.0, 1.0)
+}
+
+// --- Spectral Flux Detector ---
+
+#[derive(Debug)]
+pub struct SpectralFluxDetector {
+    prev: [f32; 7],
+}
+
+impl SpectralFluxDetector {
+    pub fn new() -> Self {
+        SpectralFluxDetector { prev: [0.0f32; 7] }
+    }
+
+    pub fn detect(&mut self, bands: &[f32; 7]) -> f32 {
+        let flux = (0..7).map(|i| (bands[i] - self.prev[i]).max(0.0)).sum::<f32>();
+        self.prev = *bands;
+        flux
+    }
+}
+
 pub fn generate_procedural(bpm: u32, duration_secs: f32, sample_rate: u32) -> DecodedAudio {
     let num_samples = (sample_rate as f32 * duration_secs) as usize;
     let beat_period = 60.0 / bpm as f32; // seconds per beat

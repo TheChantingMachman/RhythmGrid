@@ -143,8 +143,8 @@ pub fn push_slab_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
 }
 
 pub fn push_grid_line_v(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
-                        x: f32, height: f32, color: [f32; 4]) {
-    let w = 0.02;
+                        x: f32, height: f32, color: [f32; 4], thickness: f32) {
+    let w = thickness;
     let n = [0.0f32, 0.0, 1.0];
     let base = verts.len() as u32;
     verts.push(Vertex { position: [x - w, 0.0, 0.0], normal: n, color });
@@ -155,8 +155,8 @@ pub fn push_grid_line_v(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
 }
 
 pub fn push_grid_line_h(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
-                        y: f32, width: f32, color: [f32; 4]) {
-    let w = 0.02;
+                        y: f32, width: f32, color: [f32; 4], thickness: f32) {
+    let w = thickness;
     let n = [0.0f32, 0.0, 1.0];
     let base = verts.len() as u32;
     verts.push(Vertex { position: [0.0, y - w, 0.0], normal: n, color });
