@@ -143,15 +143,40 @@ Effects to build, not yet implemented:
 
 ---
 
+## Migration Status
+
+**Migrated to AudioEffect trait** (src/gui/effects/):
+- BeatRings — expanding rings on bass beats
+- HexBackground — rotating dot grid + connecting lines
+- FftVisualizer — 7-band bars with peak hold + lock
+- GridLines — wireframe with centroid color + presence shimmer
+
+**Migrated to CameraReactor** (src/gui/camera.rs):
+- Bass sway, hi-freq jitter, bass zoom, impact shake
+
+**Remaining inline** (game-state dependent — need expanded RenderContext):
+- Cube glow + depth pulse (needs Grid + piece type)
+- Active piece glow (needs ActivePiece)
+- Ghost piece (needs ActivePiece + Grid)
+- Clearing cell flash (needs clearing_cells Vec)
+- Particles (externally triggered — beat pulse + line clear + level-up)
+
+**Not audio effects** (UI controls, stay inline):
+- Volume bar, transport buttons, folder button
+- HUD text (score, level, lines, combo, t-spin, track name)
+- Preview pieces (next + held)
+- Game over / pause overlays
+
 ## Design Notes
 
-**Signal-to-effect binding is currently hardcoded.** Future architecture should support:
-- Effect modules that declare which signal channels they consume
-- Theme presets that map signals → effects (e.g. "Bass Heavy" assigns 3 slots to low bands)
-- Effects that accept a primary signal + danger modifier
-- Some effects naturally want multiple inputs (camera sway = bass beat + danger)
+**AudioEffect trait** works well for purely audio-driven effects. Effects cache audio values in update() and render geometry in render(). Camera lives in its own CameraReactor.
+
+**Boundary:** Game-state-dependent effects (cubes, pieces, clearing) need Grid/ActivePiece access that AudioFrame + RenderContext don't carry. Options:
+- Expand RenderContext with game state references (couples effects to game types)
+- Keep them inline (pragmatic — they're not swappable per-theme anyway)
+- New trait with broader context (over-engineering for now)
 
 **Open questions:**
 - Should bindings be static per theme, or shift dynamically based on dominant band ranking?
 - How many simultaneous effects before visual noise overwhelms? Need a budget.
-- Should spectral centroid/flux be pipeline-owned (audio.rs) or GUI-computed?
+- How to handle game-state-dependent effects in the theme system?
