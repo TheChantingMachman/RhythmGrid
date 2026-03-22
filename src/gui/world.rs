@@ -8,7 +8,7 @@ use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
-use rhythm_grid::render::piece_color;
+use rhythm_grid::render::{piece_color, board_state, held_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender};
 use super::audio_output::{self, AudioState};
 use super::camera::CameraReactor;
 use super::drawing::{Vertex, rgba_to_f32};
@@ -67,6 +67,10 @@ pub struct GameWorld {
     pub window_size: [f32; 2],
     pub(super) buttons: Vec<Button>,
     pub(super) fft_locked: bool, // when true, FFT bars don't fade
+    pub(super) piece_colors: Option<[[u8; 4]; 7]>,
+    pub(super) render_board: BoardRenderState,
+    pub(super) render_status: GameStatusRender,
+    pub(super) render_held: Option<HeldPieceRender>,
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -116,6 +120,14 @@ pub(super) struct ClearingCell {
 pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
 impl GameWorld {
+    pub fn themed_piece_color(&self, type_index: u32) -> [u8; 4] {
+        if let Some(colors) = &self.piece_colors {
+            colors[type_index as usize]
+        } else {
+            piece_color(type_index)
+        }
+    }
+
     pub fn new() -> Self {
         let theme = themes::default_theme();
         // Load settings to check for music folder
@@ -154,6 +166,14 @@ impl GameWorld {
             fireworks: Fireworks::new(),
             hex_enabled: theme.hex_enabled,
             fireworks_enabled: theme.fireworks_enabled,
+            piece_colors: theme.piece_colors,
+            render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
+            render_status: GameStatusRender {
+                score: 0, level: 1, total_lines: 0, combo_count: 0,
+                max_combo: 0, pieces_placed: 0, time_played_secs: 0.0,
+                state: GameState::Menu, can_hold: true,
+            },
+            render_held: None,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -370,6 +390,9 @@ impl GameWorld {
 
         if self.session.state != GameState::Playing {
             self.last_tick = now;
+            self.render_board = board_state(&self.session);
+            self.render_status = game_status(&self.session);
+            self.render_held = held_piece_state(&self.session);
             return;
         }
         self.last_tick = now;
@@ -449,6 +472,11 @@ impl GameWorld {
                 self.camera.reset();
             }
         }
+
+        // Update render state snapshot for scene.rs
+        self.render_board = board_state(&self.session);
+        self.render_status = game_status(&self.session);
+        self.render_held = held_piece_state(&self.session);
     }
 
     pub fn hold_piece(&mut self) {
@@ -552,7 +580,7 @@ impl GameWorld {
                                     self.clearing_cells.push(ClearingCell {
                                         col: col as i32, row: row as i32,
                                         timer: LINE_CLEAR_DURATION,
-                                        _color: rgba_to_f32(piece_color(ti)),
+                                        _color: rgba_to_f32(self.themed_piece_color(ti)),
                                         scale: 1.0,
                                     });
                                 }

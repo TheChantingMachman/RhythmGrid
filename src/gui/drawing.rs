@@ -103,15 +103,36 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
         ([-1.0, 0.0, 0.0], [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]]),  // Left
     ];
 
-    for (normal, corners) in faces {
-        let base = verts.len() as u32;
-        for &pos in corners {
-            verts.push(Vertex { position: pos, normal: *normal, color });
-        }
-        indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-    }
+    // Per-vertex edge glow: edges bright (original color + white),
+    // face centers darker. Creates beveled gemstone look.
+    let cx = (x0 + x1) * 0.5;
+    let cy = (y0 + y1) * 0.5;
+    let cz = (z0 + z1) * 0.5;
 
-    // Glow removed — bloom post-processing handles the soft glow now
+    for (normal, corners) in faces {
+        let base_idx = verts.len() as u32;
+        for &pos in corners {
+            let dx = (pos[0] - cx).abs() / ((x1 - x0) * 0.5);
+            let dy = (pos[1] - cy).abs() / ((y0 - y1) * 0.5);
+            let dz = (pos[2] - cz).abs() / ((z1 - z0) * 0.5);
+            let edge_factor = match normal {
+                [_, _, z] if z.abs() > 0.5 => (dx + dy) * 0.5,
+                [_, y, _] if y.abs() > 0.5 => (dx + dz) * 0.5,
+                _                           => (dy + dz) * 0.5,
+            };
+            // edge_factor 0.0 = face center, 1.0 = cube edge
+            // Center: darken by 15%. Edge: original color + 10% white highlight.
+            let dim = 0.85 + edge_factor * 0.25; // 0.85 at center, 1.10 at edge
+            let vc = [
+                (color[0] * dim).min(1.0),
+                (color[1] * dim).min(1.0),
+                (color[2] * dim).min(1.0),
+                color[3],
+            ];
+            verts.push(Vertex { position: pos, normal: *normal, color: vc });
+        }
+        indices.extend_from_slice(&[base_idx, base_idx+1, base_idx+2, base_idx, base_idx+2, base_idx+3]);
+    }
 }
 
 /// 3D slab in world space — simplified box for dashboard elements.
