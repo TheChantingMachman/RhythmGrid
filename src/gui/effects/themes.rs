@@ -24,6 +24,7 @@ pub struct EffectFlags {
     pub particle_beat_pulse: bool,
     pub line_clear_particles: bool,
     pub camera_shake: bool,
+    pub grid_distortion: bool,     // grid line warping on beats/events
 }
 
 impl EffectFlags {
@@ -35,6 +36,7 @@ impl EffectFlags {
             clearing_flash: true, t_spin_flash: true, level_up_rings: true,
             combo_text: true, particle_beat_pulse: true,
             line_clear_particles: true, camera_shake: true,
+            grid_distortion: false,
         }
     }
     pub fn all_off() -> Self {
@@ -45,6 +47,7 @@ impl EffectFlags {
             clearing_flash: false, t_spin_flash: false, level_up_rings: false,
             combo_text: false, particle_beat_pulse: false,
             line_clear_particles: false, camera_shake: false,
+            grid_distortion: false,
         }
     }
 }
@@ -196,5 +199,7 @@ pub fn debug_theme() -> VisualTheme {
     let mut theme = default_theme();
     theme.name = "Debug";
     theme.effects = EffectFlags::all_off();
+    // Base visibility for debugging
+    theme.effects.grid_lines = true;
     theme
 }

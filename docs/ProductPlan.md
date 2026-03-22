@@ -106,7 +106,9 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 - **No music configured:** Procedurally generated audio for out-of-box experience and first-time players. Zero licensing issues at any release tier, deterministic output for pipeline testing.
 - **Basic (V1):** Point at a folder via path field or filesystem browser. Play files sequentially or shuffled. Seamless auto-advance between tracks.
 
-**Future:** Playlist support, queue management, metadata-driven theming
+**Next (medium-low priority):** Track queue display near audio controls — show upcoming tracks as a small clickable list. Clicking a track plays it next. Respects shuffle order. Graduates into full playlist management later.
+
+**Future:** Full playlist support (create, save, reorder), queue management, metadata-driven theming
 
 ### Visual Layer
 - **3D rendering** — volumetric blocks, Blinn-Phong lighting, bloom post-processing, proper depth testing with opaque + transparent passes
@@ -351,6 +353,12 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Theme switching UI — button or keyboard shortcut to swap themes at runtime
 - More themes: fire, neon, minimal, etc.
 - Rolling averages + dominant band ranking (infrastructure for dynamic effect routing)
+- **Grid distortion workshop** — explore variations:
+  - Per-band warp points: each frequency band drives its own distortion point at a fixed grid position
+  - Piece-tracking warp: falling piece subtly pulls the grid like a rubber band as it passes through
+  - Multiple gentle ripple points that interfere with each other
+  - Warp intensity driven by band energy (gentle ambient undulation vs beat-driven pulses)
+  - Currently on debug theme only — needs tuning before promoting to default/water
 - Settings persistence (volume, shuffle state, selected theme survive restart)
 - 3D elements replacing 2D HUD overlays:
   - Shaped transport buttons (play triangle, pause bars, skip arrows)

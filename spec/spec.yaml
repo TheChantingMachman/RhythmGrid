@@ -355,7 +355,7 @@
 -
   id: music.shuffle
   section: Music
-  description: Shuffle mode randomizes the play order of scanned files. Toggle on/off.
+  description: Shuffle mode randomizes the play order of scanned files. Toggle on/off. Playlist exposes pub fn files(&self) -> &[PathBuf] to access the current file list (shuffled or original order). Playlist exposes pub fn is_shuffled(&self) -> bool to check current shuffle state. When shuffle is toggled on, the file list is randomized. When toggled off, the original scan order is restored and current_index resets to 0.
   tags:
   - core
   - music
@@ -406,13 +406,22 @@
 -
   id: config.load_save
   section: Config
-  description: Settings are persisted as a TOML file. Load on startup, save on change. Missing file uses defaults.
+  description: 'Settings are persisted as a TOML file. Load on startup, save on change. Missing file uses defaults. Settings fields: volume (f32, default 0.8), speed (f32, default 1.0), music_folder (Option<String>, default None), theme (String, default "Default"), shuffle (bool, default false). All new fields use #[serde(default)] so existing TOML files without them load cleanly with defaults. save_settings writes all fields. load_settings returns defaults for missing or malformed files.'
   tags:
   - core
   - config
   status: implemented
   depends_on:
   - config.xdg_paths
+  fixture_patterns: |
+    - Settings { volume: f32, speed: f32, music_folder: Option<String>, theme: String, shuffle: bool }
+    - Default: Settings { volume: 0.8, speed: 1.0, music_folder: None, theme: "Default".to_string(), shuffle: false }
+    - New fields use #[serde(default)] — old TOML files without theme/shuffle load cleanly
+    - theme field stores theme name as String (e.g. "Default", "Water", "Debug")
+    - shuffle field stores playlist shuffle state
+    - TOML round-trip: save then load produces identical Settings
+    - load_settings with missing file returns Default
+    - load_settings with old TOML (no theme/shuffle) returns defaults for missing fields
 -
   id: config.music_folder
   section: Config

@@ -21,6 +21,8 @@ pub struct AudioState {
     pub centroid: f32,         // spectral centroid 0.0 (dark) to 1.0 (bright)
     pub flux: f32,             // spectral flux (rate of spectral change)
     pub track_name: String,
+    pub track_list: Vec<String>,       // all tracks in playlist (filenames only)
+    pub current_track_index: usize,    // index into track_list
     pub volume: f32,           // 0.0-1.0, applied in audio callback
     pub skip_requested: bool,  // set by game loop, consumed by decode thread
     pub back_requested: bool,
@@ -49,6 +51,8 @@ impl AudioState {
             centroid: 0.0,
             flux: 0.0,
             track_name: String::new(),
+            track_list: Vec::new(),
+            current_track_index: 0,
             volume: 0.5,
             skip_requested: false,
             back_requested: false,
@@ -247,6 +251,12 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
         if let Some(folder) = &folder_owned {
             let files = scan_folder(Path::new(folder));
             if !files.is_empty() {
+                // Populate track list for GUI display
+                if let Ok(mut s) = state_clone.lock() {
+                    s.track_list = files.iter()
+                        .map(|p| track_name_from_path(p))
+                        .collect();
+                }
                 playlist = Some(Playlist::new(files));
                 use_procedural = false;
             }
@@ -293,6 +303,10 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
 
                 if let Ok(mut s) = state_decode.lock() {
                     s.reset_for_new_track(&track_name);
+                    // Find current track index by matching name
+                    if let Some(idx) = s.track_list.iter().position(|n| *n == track_name) {
+                        s.current_track_index = idx;
+                    }
                 }
 
                 // Reset buffer for new track
@@ -327,6 +341,11 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                             if let Ok(mut pl) = playlist_decode.try_lock() {
                                 if let Some(p) = pl.as_mut() {
                                     p.toggle_shuffle();
+                                    // Refresh track list with new order
+                                    s.track_list = p.files().iter()
+                                        .map(|path| track_name_from_path(path))
+                                        .collect();
+                                    s.current_track_index = 0;
                                 }
                             }
                             // Restart current track after shuffle

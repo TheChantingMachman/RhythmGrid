@@ -72,7 +72,7 @@ pub struct GameWorld {
     pub(super) render_held: Option<HeldPieceRender>,
     pub(super) toast_text: String,
     pub(super) toast_timer: f32,
-    theme_index: usize,
+    pub(super) theme_index: usize,
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -130,12 +130,31 @@ impl GameWorld {
         }
     }
 
+    fn save_settings(&self) {
+        let vol = if let Ok(audio) = self.audio.try_lock() { audio.volume } else { 0.8 };
+        let theme_names = ["Default", "Water", "Debug"];
+        let settings = rhythm_grid::config::Settings {
+            volume: vol,
+            speed: 1.0,
+            music_folder: None, // TODO: track folder path
+            theme: theme_names.get(self.theme_index).unwrap_or(&"Default").to_string(),
+            shuffle: false, // TODO: track shuffle state
+        };
+        let path = config_dir().join("settings.toml");
+        let _ = save_settings(&settings, &path);
+    }
+
     pub fn new() -> Self {
-        let theme = themes::default_theme();
-        // Load settings to check for music folder
+        // Load settings to restore previous state
         let settings_path = config_dir().join("settings.toml");
         let settings = load_settings(&settings_path);
+        let (theme, theme_index) = match settings.theme.as_str() {
+            "Water" => (themes::water_theme(), 1),
+            "Debug" => (themes::debug_theme(), 2),
+            _ => (themes::default_theme(), 0),
+        };
         let audio = audio_output::start_audio(settings.music_folder.as_deref());
+        if let Ok(mut a) = audio.try_lock() { a.volume = settings.volume; }
         GameWorld {
             session: GameSession::new(),
             last_tick: Instant::now(),
@@ -177,7 +196,7 @@ impl GameWorld {
             render_held: None,
             toast_text: String::new(),
             toast_timer: 0.0,
-            theme_index: 0,
+            theme_index,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -366,7 +385,10 @@ impl GameWorld {
         self.fft_vis.locked = self.fft_locked;
         self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
         if ef.fft_visualizer { self.fft_vis.update(&self.audio_frame); }
-        if ef.grid_lines { self.grid_lines.update(&self.audio_frame); }
+        if ef.grid_lines {
+            self.grid_lines.distortion_enabled = ef.grid_distortion;
+            self.grid_lines.update(&self.audio_frame);
+        }
         if ef.fireworks { self.fireworks.update(&self.audio_frame); }
         if ef.camera_sway { self.camera.update(&self.audio_frame); }
 
@@ -425,6 +447,11 @@ impl GameWorld {
                     }
                     if self.effect_flags.camera_shake {
                         self.camera.trigger_shake((lines_cleared as f32 * 0.3).min(1.0));
+                    }
+                    if self.effect_flags.grid_distortion {
+                        let cx = pre_piece.col as f32;
+                        let cy = piece_row as f32;
+                        self.grid_lines.add_force(cx, cy, lines_cleared as f32 * 0.6);
                     }
                 }
                 // Secondary game over check: if new piece spawned in vanish zone
@@ -509,6 +536,7 @@ impl GameWorld {
         self.camera = CameraReactor::new(theme.camera);
         self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
         self.toast_timer = 2.0;
+        self.save_settings();
     }
 
     pub fn hold_piece(&mut self) {
@@ -551,6 +579,7 @@ impl GameWorld {
             audio.volume = (audio.volume + delta).clamp(0.0, 1.0);
         }
         self.on_mouse_activity();
+        self.save_settings();
     }
 
     /// Call when mouse moves to reveal HUD
@@ -639,6 +668,10 @@ impl GameWorld {
                     }
                     if self.effect_flags.camera_shake {
                         self.camera.trigger_shake((0.2 + lines as f32 * 0.25).min(1.0));
+                    }
+                    if self.effect_flags.grid_distortion {
+                        let cx = self.session.active_piece.col as f32;
+                        self.grid_lines.add_force(cx, land_bottom as f32, 0.3 + lines as f32 * 0.4);
                     }
                     // Secondary game over check for vanish zone spawn
                     if self.session.active_piece.row < 0 && self.session.state == GameState::Playing {

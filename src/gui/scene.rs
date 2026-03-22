@@ -493,16 +493,31 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
                   &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
     }
 
-    // Music dashboard labels (right side, aligned with 3D elements)
-    let dash_hud_x = w - 140.0;
-    let track_name = if let Ok(audio) = world.audio.try_lock() {
-        audio.track_name.clone()
-    } else {
-        String::new()
-    };
-    if !track_name.is_empty() {
-        let display: String = track_name.chars().take(16).collect();
-        push_text(&mut verts, &mut indices, dash_hud_x, 12.0, &display.to_uppercase(), dim_col, 1.0);
+    // Track queue display — positioned above audio controls
+    // Use VolDown button screen rect as anchor for alignment
+    let vol_rect = world.btn_rect(super::world::ButtonId::VolDown);
+    let track_x = vol_rect[0] * (w / world.window_size[0]);
+    let track_bottom = vol_rect[1] * (h / world.window_size[1]) - 8.0; // 8px above vol buttons
+    if let Ok(audio) = world.audio.try_lock() {
+        let list = &audio.track_list;
+        let idx = audio.current_track_index;
+        let num_shown = 4.min(list.len()); // now playing + next 3
+        if !list.is_empty() {
+            let track_top = track_bottom - num_shown as f32 * 10.0;
+            // Now playing (highlighted)
+            let now: String = list.get(idx).map(|s| s.chars().take(16).collect()).unwrap_or_default();
+            push_text(&mut verts, &mut indices, track_x, track_top, &now.to_uppercase(), text_col, 1.0);
+            // Next tracks
+            for i in 1..num_shown {
+                let next_idx = (idx + i) % list.len();
+                let name: String = list[next_idx].chars().take(16).collect();
+                push_text(&mut verts, &mut indices, track_x, track_top + i as f32 * 10.0,
+                          &name.to_uppercase(), dim_col, 1.0);
+            }
+        } else if !audio.track_name.is_empty() {
+            let display: String = audio.track_name.chars().take(16).collect();
+            push_text(&mut verts, &mut indices, track_x, track_bottom - 10.0, &display.to_uppercase(), dim_col, 1.0);
+        }
     }
     // Projected button labels
     let scale_x = w / world.window_size[0];
@@ -570,20 +585,34 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     if rs.state == GameState::Paused {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, 60]), 0.08);
-        let pa_w = 110.0; let pa_h = 160.0;
+        let pa_w = 130.0; let pa_h = 240.0;
         let pa_x = (w - pa_w) / 2.0;
         let pa_y = (h - pa_h) / 2.0;
         push_panel(&mut verts, &mut indices, pa_x, pa_y, pa_w, pa_h, 0.09);
         let px = pa_x + 8.0;
-        push_text(&mut verts, &mut indices, px, pa_y + 8.0, "PAUSED", rgba_to_f32([255, 255, 100, 255]), 2.0);
+        let highlight = rgba_to_f32([255, 255, 100, 255]);
+        push_text(&mut verts, &mut indices, px, pa_y + 8.0, "PAUSED", highlight, 2.0);
+        // Controls
         push_text(&mut verts, &mut indices, px, pa_y + 30.0, "L-R MOVE", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 42.0, "DN  SOFT DROP", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 54.0, "SPC HARD DROP", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 66.0, "UP  CW  Z CCW", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 78.0, "C   HOLD", dim_col, 1.0);
         push_text(&mut verts, &mut indices, px, pa_y + 90.0, "P   RESUME", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 108.0, "N SKIP +- VOL", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 120.0, "L-R ORBIT CAM", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 102.0, "N SKIP +- VOL", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 114.0, "F1  THEME", dim_col, 1.0);
+        // Settings section
+        push_text(&mut verts, &mut indices, px, pa_y + 136.0, "SETTINGS", highlight, 1.5);
+        // Volume
+        let vol = if let Ok(audio) = world.audio.try_lock() { audio.volume } else { 0.8 };
+        push_text(&mut verts, &mut indices, px, pa_y + 154.0,
+                  &format!("VOL  {:.0}%", vol * 100.0), text_col, 1.0);
+        // Theme
+        let theme_names = ["DEFAULT", "WATER", "DEBUG"];
+        let theme_name = theme_names.get(world.theme_index).unwrap_or(&"DEFAULT");
+        push_text(&mut verts, &mut indices, px, pa_y + 166.0,
+                  &format!("THEME  {}", theme_name), text_col, 1.0);
+        push_text(&mut verts, &mut indices, px, pa_y + 210.0, "ESC  MENU", dim_col, 1.0);
     }
 
     // Particles (always visible, not affected by HUD fade)

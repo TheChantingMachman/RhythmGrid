@@ -84,6 +84,14 @@ impl Playlist {
         self.files.get(self.current_index)
     }
 
+    pub fn files(&self) -> &[PathBuf] {
+        &self.files
+    }
+
+    pub fn is_shuffled(&self) -> bool {
+        self.shuffle
+    }
+
     pub fn toggle_shuffle(&mut self) {
         self.shuffle = !self.shuffle;
         if self.shuffle {
