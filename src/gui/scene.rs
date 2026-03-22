@@ -47,7 +47,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         for col in 0..WIDTH {
             if let CellState::Occupied(ti) = world.session.grid.cells[row][col] {
                 let band = (ti as usize) % 7;
-                let color = rgba_to_f32(piece_color(ti));
+                let color = rgba_to_f32(world.themed_piece_color(ti));
                 let band_glow = world.bands_norm[band] * 2.0;
                 let beat_pulse = world.band_beat_intensity[band];
                 let depth = cube_depth + beat_pulse * 0.3;
@@ -63,7 +63,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         while is_valid_position(&world.session.grid, &cells, ghost_row + 1, world.session.active_piece.col) {
             ghost_row += 1;
         }
-        let base_color = piece_color(world.session.active_piece.piece_type as u32);
+        let base_color = world.themed_piece_color(world.session.active_piece.piece_type as u32);
         let ghost_color = rgba_to_f32([base_color[0], base_color[1], base_color[2], 40]);
         for &(dr, dc) in &cells {
             let r = ghost_row + dr;
@@ -75,7 +75,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 
         // Active piece — pulses depth and glow with its frequency band
         let active_band = (world.session.active_piece.piece_type as usize) % 7;
-        let color = rgba_to_f32(piece_color(world.session.active_piece.piece_type as u32));
+        let color = rgba_to_f32(world.themed_piece_color(world.session.active_piece.piece_type as u32));
         let active_glow = world.bands_norm[active_band] * 2.0;
         let active_depth = cube_depth + world.band_beat_intensity[active_band] * 0.3;
         for &(dr, dc) in &cells {
@@ -297,7 +297,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     let next_type_idx = world.session.bag.peek();
     let next_type = TETROMINO_TYPES[next_type_idx];
     let next_cells = piece_cells(next_type, 0);
-    let next_color = rgba_to_f32(piece_color(next_type_idx as u32));
+    let next_color = rgba_to_f32(world.themed_piece_color(next_type_idx as u32));
     // Correct preview scale for window aspect ratio
     let theme_aspect = w / h;
     let aspect_corr = theme_aspect / world.window_aspect;
@@ -387,7 +387,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     // Held piece preview (top-left, mirrors next piece position)
     if let Some(held_type) = world.session.held_piece {
         let held_cells = piece_cells(held_type, 0);
-        let held_color = rgba_to_f32(piece_color(held_type as u32));
+        let held_color = rgba_to_f32(world.themed_piece_color(held_type as u32));
         let held_cx = 66.0;
         let held_cy = np_y + 52.0;
         let held_scale = 18.0;

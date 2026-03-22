@@ -67,6 +67,7 @@ pub struct GameWorld {
     pub window_size: [f32; 2],
     pub(super) buttons: Vec<Button>,
     pub(super) fft_locked: bool, // when true, FFT bars don't fade
+    pub(super) piece_colors: Option<[[u8; 4]; 7]>,
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -116,8 +117,16 @@ pub(super) struct ClearingCell {
 pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
 impl GameWorld {
+    pub fn themed_piece_color(&self, type_index: u32) -> [u8; 4] {
+        if let Some(colors) = &self.piece_colors {
+            colors[type_index as usize]
+        } else {
+            piece_color(type_index)
+        }
+    }
+
     pub fn new() -> Self {
-        let theme = themes::default_theme();
+        let theme = themes::water_theme();
         // Load settings to check for music folder
         let settings_path = config_dir().join("settings.toml");
         let settings = load_settings(&settings_path);
@@ -154,6 +163,7 @@ impl GameWorld {
             fireworks: Fireworks::new(),
             hex_enabled: theme.hex_enabled,
             fireworks_enabled: theme.fireworks_enabled,
+            piece_colors: theme.piece_colors,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -552,7 +562,7 @@ impl GameWorld {
                                     self.clearing_cells.push(ClearingCell {
                                         col: col as i32, row: row as i32,
                                         timer: LINE_CLEAR_DURATION,
-                                        _color: rgba_to_f32(piece_color(ti)),
+                                        _color: rgba_to_f32(self.themed_piece_color(ti)),
                                         scale: 1.0,
                                     });
                                 }

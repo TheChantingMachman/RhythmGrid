@@ -58,6 +58,7 @@ pub struct VisualTheme {
     pub camera: CameraParams,
     pub hex_enabled: bool,
     pub fireworks_enabled: bool,
+    pub piece_colors: Option<[[u8; 4]; 7]>,
 }
 
 pub fn default_theme() -> VisualTheme {
@@ -90,6 +91,7 @@ pub fn default_theme() -> VisualTheme {
         },
         hex_enabled: true,
         fireworks_enabled: false,
+        piece_colors: None,
     }
 }
 
@@ -124,5 +126,14 @@ pub fn water_theme() -> VisualTheme {
         },
         hex_enabled: false,
         fireworks_enabled: true,
+        piece_colors: Some([
+            [100, 180, 255, 255], // I — light blue
+            [ 60, 140, 220, 255], // O — medium blue
+            [ 80, 120, 200, 255], // T — blue-purple
+            [ 40, 160, 180, 255], // S — teal
+            [ 30, 100, 180, 255], // Z — deep blue
+            [ 20,  60, 160, 255], // J — navy
+            [ 60, 200, 200, 255], // L — cyan
+        ]),
     }
 }
