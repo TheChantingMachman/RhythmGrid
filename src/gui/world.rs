@@ -32,6 +32,7 @@ pub struct GameWorld {
     pub(super) peak_bands: [f32; 7],   // slow decay — for visual peak hold indicator
     pub(super) norm_ceil: [f32; 7],    // fast decay — normalization ceiling
     pub(super) bands_norm: [f32; 7],   // each band normalized to its own ceiling (0-1)
+    pub(super) band_beat_intensity: [f32; 7], // per-band beat decay (1.0 on beat, decays)
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
@@ -119,6 +120,7 @@ impl GameWorld {
             peak_bands: [0.0; 7],
             norm_ceil: [0.01; 7],
             bands_norm: [0.0; 7],
+            band_beat_intensity: [0.0; 7],
             particles: ParticleSystem::new(),
             prev_beat: false,
             clearing_cells: Vec::new(),
@@ -165,6 +167,11 @@ impl GameWorld {
             self.mids = audio.mids;
             self.highs = audio.highs;
             self.bands = audio.bands;
+            for i in 0..7 {
+                if audio.band_beats[i] {
+                    self.band_beat_intensity[i] = 1.0;
+                }
+            }
             got_beat = audio.beat_intensity > 0.9; // fresh beat
         }
 
@@ -189,20 +196,31 @@ impl GameWorld {
             self.bands_norm[i] = (self.bands[i] / self.norm_ceil[i]).min(1.0);
         }
 
-        // Spawn background ring on beat
-        if got_beat && !self.prev_beat {
-            let d = self.danger_level;
+        // Per-band beat visual responses
+        let d = self.danger_level;
+        // Sub-bass/bass beats (bands 0-1) → background rings
+        for band in 0..2 {
+            if self.band_beat_intensity[band] > 0.95 {
+                self.bg_rings.push(BgRing {
+                    radius: 0.5,
+                    max_radius: 18.0,
+                    life: 3.0 - d * 1.0,
+                    max_life: 3.0 - d * 1.0,
+                    color: [
+                        0.1 + d * 0.5 + if band == 0 { 0.2 } else { 0.0 },
+                        0.15 - d * 0.05,
+                        0.4 - d * 0.3,
+                        0.3 + d * 0.15 + self.bands_norm[band] * 0.2,
+                    ],
+                });
+            }
+        }
+        // Fallback: also spawn ring on legacy overall beat if no band beats fired
+        if got_beat && !self.prev_beat && self.band_beat_intensity[0..2].iter().all(|&b| b < 0.95) {
             self.bg_rings.push(BgRing {
-                radius: 0.5,
-                max_radius: 18.0,
-                life: 3.0 - d * 1.0, // faster rings in danger
-                max_life: 3.0 - d * 1.0,
-                color: [
-                    0.1 + d * 0.5,
-                    0.15 - d * 0.05,
-                    0.4 - d * 0.3,
-                    0.3 + d * 0.15 + self.bass * 0.2, // bass amplifies ring brightness
-                ],
+                radius: 0.5, max_radius: 18.0,
+                life: 3.0 - d * 1.0, max_life: 3.0 - d * 1.0,
+                color: [0.1 + d * 0.5, 0.15 - d * 0.05, 0.4 - d * 0.3, 0.3 + d * 0.15],
             });
         }
 
@@ -214,15 +232,20 @@ impl GameWorld {
         }
         self.bg_rings.retain(|r| r.life > 0.0);
 
-        // Spawn beat particles (edge-triggered)
-        if got_beat && !self.prev_beat {
-            // Approximate board screen bounds (centered, ~45% width, ~85% height)
-            let w = THEME.win_w as f32;
-            let h = THEME.win_h as f32;
-            let bw = w * 0.35;
-            let bh = h * 0.85;
-            let bx = (w - bw) / 2.0;
-            let by = (h - bh) / 2.0;
+        // Upper-mids/presence beats (bands 4-5) → particle burst
+        let w = THEME.win_w as f32;
+        let h = THEME.win_h as f32;
+        let bw = w * 0.35;
+        let bh = h * 0.85;
+        let bx = (w - bw) / 2.0;
+        let by = (h - bh) / 2.0;
+        for band in 4..6 {
+            if self.band_beat_intensity[band] > 0.95 {
+                self.particles.spawn_beat_pulse(bx, by, bw, bh, 0.6);
+            }
+        }
+        // Fallback: legacy overall beat particles
+        if got_beat && !self.prev_beat && self.band_beat_intensity[4..6].iter().all(|&b| b < 0.95) {
             self.particles.spawn_beat_pulse(bx, by, bw, bh, 1.0);
         }
         self.prev_beat = got_beat;
@@ -286,6 +309,11 @@ impl GameWorld {
             self.last_level = current_level;
         }
         self.level_up_flash = (self.level_up_flash - dt as f32 * 1.5).max(0.0);
+
+        // Band beat intensity decay
+        for i in 0..7 {
+            self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 4.0).max(0.0);
+        }
 
         // Shake decay
         self.shake_time += dt as f32 * 30.0;

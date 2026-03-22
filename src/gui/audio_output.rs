@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rhythm_grid::audio::{decode_audio, fft_bands, generate_procedural, BeatDetector, DEFAULT_BPM};
+use rhythm_grid::audio::{decode_audio, fft_bands, generate_procedural, BeatDetector, MultiBeatDetector, DEFAULT_BPM};
 use rhythm_grid::music::{scan_folder, Playlist};
 
 /// Shared state between the audio thread and the game loop.
@@ -16,7 +16,8 @@ pub struct AudioState {
     pub bass: f32,
     pub mids: f32,
     pub highs: f32,
-    pub bands: [f32; 7], // all 7 FFT bands: sub-bass, bass, low-mids, mids, upper-mids, presence, brilliance
+    pub bands: [f32; 7], // all 7 FFT bands
+    pub band_beats: [bool; 7], // per-band beat this frame
     pub track_name: String,
     pub volume: f32,           // 0.0-1.0, applied in audio callback
     pub skip_requested: bool,  // set by game loop, consumed by decode thread
@@ -25,6 +26,7 @@ pub struct AudioState {
     pub paused: bool,
     pub shutdown: bool,        // set to stop audio thread
     beat_detector: BeatDetector,
+    multi_beat_detector: MultiBeatDetector,
     elapsed_secs: f64,
     fft_buffer: Vec<f32>,
     fft_sample_rate: u32,
@@ -40,6 +42,7 @@ impl AudioState {
             mids: 0.0,
             highs: 0.0,
             bands: [0.0; 7],
+            band_beats: [false; 7],
             track_name: String::new(),
             volume: 0.5,
             skip_requested: false,
@@ -48,6 +51,7 @@ impl AudioState {
             paused: false,
             shutdown: false,
             beat_detector: BeatDetector::new(),
+            multi_beat_detector: MultiBeatDetector::new(),
             elapsed_secs: 0.0,
             fft_buffer: Vec::with_capacity(2048),
             fft_sample_rate: 44100,
@@ -83,6 +87,12 @@ impl AudioState {
             self.bass = self.bands[0] + self.bands[1];
             self.mids = self.bands[2] + self.bands[3] + self.bands[4];
             self.highs = self.bands[5] + self.bands[6];
+            // Multi-band beat detection
+            let events = self.multi_beat_detector.detect_bands(&self.bands, self.elapsed_secs);
+            self.band_beats = [false; 7];
+            for e in &events {
+                self.band_beats[e.band] = true;
+            }
             // Keep buffer from growing unbounded
             if self.fft_buffer.len() > FFT_WINDOW * 2 {
                 self.fft_buffer.drain(..self.fft_buffer.len() - FFT_WINDOW);
@@ -92,6 +102,7 @@ impl AudioState {
 
     pub fn tick(&mut self, dt: f32) {
         self.beat_intensity = (self.beat_intensity - dt * 4.0).max(0.0);
+        self.band_beats = [false; 7]; // clear per-frame
         self.beat = false;
     }
 
