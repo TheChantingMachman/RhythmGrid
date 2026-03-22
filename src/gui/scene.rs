@@ -538,6 +538,13 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, 12.0, stats_y + 76.0, "LINES", dim_col, 1.0);
     push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", world.session.total_lines), text_col, 2.0);
 
+    // Combo counter (only visible during active combo)
+    if world.session.combo_count > 0 {
+        let combo_col = rgba_to_f32([255, 200, 60, 255]);
+        push_text(&mut verts, &mut indices, 12.0, stats_y + 114.0,
+                  &format!("COMBO {}", world.session.combo_count), combo_col, 2.0);
+    }
+
     // Music dashboard labels (right side, aligned with 3D elements)
     let dash_hud_x = w - 140.0;
     let track_name = if let Ok(audio) = world.audio.try_lock() {
