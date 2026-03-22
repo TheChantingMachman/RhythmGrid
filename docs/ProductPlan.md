@@ -155,6 +155,16 @@ Inspired by Tetris Effect and Geometry Wars — techniques to consider as the vi
 - Combined with back-face tinting gives gemstone/crystal quality
 - Shader technique — approximate with view-dependent color shift
 
+**Water surface background (theme: Ocean/Calm):**
+- Dense grid of vertices with sine-wave Y displacement — rolling waves
+- Audio-driven wave params: low-mids → amplitude, sub-bass → wavelength, centroid → speed
+- Gentle music = slow rolling waves, aggressive = choppy
+- Fake refraction: darken troughs, brighten crests via vertex color modulation (no extra render pass)
+- ~900 vertices (30x30 grid), few sin() calls per frame — computationally trivial
+- Ideal for smooth/ambient music (Enya, chillout, classical)
+- Replaces hex grid as background in a "Calm" theme preset
+- Could pair with softer cube materials (glass/ice) and slower camera
+
 ### Dynamic Audio-Visual Mapping (phased)
 Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
 
