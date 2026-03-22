@@ -5,6 +5,7 @@
 pub mod beat_rings;
 pub mod hex_background;
 pub mod fft_visualizer;
+pub mod grid_lines;
 
 use super::drawing::Vertex;
 

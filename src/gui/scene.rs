@@ -73,28 +73,17 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Grid lines — shimmer driven by presence (band 5) + beat
-    let line_boost = (beat * 40.0) as u8;
-    let presence = world.bands_norm[5];
-    let presence_boost = (presence * 80.0) as u8;
-    // Centroid shifts color temperature: low=warm (red), high=cool (blue)
-    let c = world.centroid;
-    let lc_r = (40.0 + (1.0 - c) * 25.0) as u8;  // warmer when centroid low
-    let lc_g = 45u8;
-    let lc_b = (70.0 + c * 30.0) as u8;            // cooler when centroid high
-    let line_color = rgba_to_f32([
-        lc_r.saturating_add(line_boost).saturating_add(presence_boost / 3),
-        lc_g.saturating_add(line_boost).saturating_add(presence_boost / 2),
-        lc_b.saturating_add(line_boost * 2).saturating_add(presence_boost),
-        255,
-    ]);
-    let presence_beat = world.band_beat_intensity[5];
-    let line_thickness = 0.02 + presence_beat * 0.03;
-    for col in 0..=WIDTH {
-        push_grid_line_v(&mut sv, &mut si, col as f32, gh, line_color, line_thickness);
-    }
-    for row in 0..=HEIGHT {
-        push_grid_line_h(&mut sv, &mut si, -(row as f32), gw, line_color, line_thickness);
+    // Grid lines (effect module)
+    {
+        use super::effects::AudioEffect;
+        let grid_ctx = super::effects::RenderContext {
+            board_width: gw, board_height: gh,
+            win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
+            window_aspect: world.window_aspect,
+            preview_angle: world.preview_angle,
+            hud_opacity: world.hud_opacity,
+        };
+        world.grid_lines.render(&mut sv, &mut si, &grid_ctx);
     }
 
     // --- 3D Music Dashboard ---
