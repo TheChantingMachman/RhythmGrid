@@ -348,6 +348,36 @@ pub fn fft_bands(samples: &[f32], sample_rate: u32) -> [f32; 7] {
     bands
 }
 
+// --- Multi-Band Beat Detection ---
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BandBeatEvent {
+    pub band: usize,
+    pub timestamp_secs: f64,
+}
+
+pub struct MultiBeatDetector {
+    detectors: [BeatDetector; 7],
+}
+
+impl MultiBeatDetector {
+    pub fn new() -> Self {
+        MultiBeatDetector {
+            detectors: std::array::from_fn(|_| BeatDetector::new()),
+        }
+    }
+
+    pub fn detect_bands(&mut self, bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent> {
+        let mut events = Vec::new();
+        for (i, &energy) in bands.iter().enumerate() {
+            if self.detectors[i].detect(energy, timestamp_secs).is_some() {
+                events.push(BandBeatEvent { band: i, timestamp_secs });
+            }
+        }
+        events
+    }
+}
+
 pub fn generate_procedural(bpm: u32, duration_secs: f32, sample_rate: u32) -> DecodedAudio {
     let num_samples = (sample_rate as f32 * duration_secs) as usize;
     let beat_period = 60.0 / bpm as f32; // seconds per beat

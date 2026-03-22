@@ -316,7 +316,7 @@
   - core
   - audio
   - analysis
-  status: stale
+  status: implemented
   depends_on:
   - audio.amplitude
   - audio.fft
