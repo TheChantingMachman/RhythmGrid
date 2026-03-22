@@ -650,7 +650,7 @@
   - core
   - audio
   - decode
-  status: draft
+  status: implemented
   depends_on:
   - audio.decode
   fixture_patterns: |

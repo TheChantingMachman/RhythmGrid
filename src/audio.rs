@@ -1,9 +1,9 @@
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::path::Path;
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::codecs::{DecoderOptions, Decoder};
 use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::{FormatOptions, FormatReader};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
@@ -375,6 +375,103 @@ impl MultiBeatDetector {
             }
         }
         events
+    }
+}
+
+// --- Streaming Decoder ---
+
+pub struct StreamingDecoder {
+    format: Box<dyn FormatReader>,
+    decoder: Box<dyn Decoder>,
+    track_id: u32,
+    sample_rate: u32,
+    channels: u16,
+}
+
+impl StreamingDecoder {
+    pub fn open(path: &Path) -> Result<StreamingDecoder, AudioError> {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default();
+        if !SUPPORTED_FORMATS.contains(&ext.as_str()) {
+            return Err(AudioError::UnsupportedFormat);
+        }
+
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(AudioError::FileNotFound),
+            Err(e) => return Err(AudioError::IoError(e)),
+        };
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+        let mut hint = Hint::new();
+        hint.with_extension(&ext);
+
+        let probed = symphonia::default::get_probe()
+            .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+            .map_err(|e| AudioError::DecodeError(e.to_string()))?;
+
+        let format = probed.format;
+        let track = format
+            .tracks()
+            .iter()
+            .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+            .ok_or_else(|| AudioError::DecodeError("No audio track found".into()))?;
+
+        let track_id = track.id;
+        let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+        let channels = track
+            .codec_params
+            .channels
+            .map(|c| c.count() as u16)
+            .unwrap_or(2);
+
+        let decoder = symphonia::default::get_codecs()
+            .make(&track.codec_params, &DecoderOptions::default())
+            .map_err(|e| AudioError::DecodeError(e.to_string()))?;
+
+        Ok(StreamingDecoder {
+            format,
+            decoder,
+            track_id,
+            sample_rate,
+            channels,
+        })
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    pub fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    pub fn next_chunk(&mut self) -> Option<Vec<f32>> {
+        loop {
+            let packet = match self.format.next_packet() {
+                Ok(p) => p,
+                Err(SymphoniaError::IoError(_)) | Err(SymphoniaError::ResetRequired) => return None,
+                Err(_) => return None,
+            };
+
+            if packet.track_id() != self.track_id {
+                continue;
+            }
+
+            let decoded = match self.decoder.decode(&packet) {
+                Ok(d) => d,
+                Err(SymphoniaError::IoError(_)) | Err(SymphoniaError::DecodeError(_)) => continue,
+                Err(_) => continue,
+            };
+
+            let spec = *decoded.spec();
+            let mut sample_buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+            sample_buf.copy_interleaved_ref(decoded);
+            return Some(sample_buf.samples().to_vec());
+        }
     }
 }
 
