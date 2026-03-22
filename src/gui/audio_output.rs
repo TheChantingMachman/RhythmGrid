@@ -27,6 +27,7 @@ pub struct AudioState {
     pub skip_requested: bool,  // set by game loop, consumed by decode thread
     pub back_requested: bool,
     pub shuffle_requested: bool,
+    pub shuffled: bool,            // mirrors Playlist::is_shuffled() for GUI display
     pub paused: bool,
     pub shutdown: bool,        // set to stop audio thread
     beat_detector: BeatDetector,
@@ -57,6 +58,7 @@ impl AudioState {
             skip_requested: false,
             back_requested: false,
             shuffle_requested: false,
+            shuffled: false,
             paused: false,
             shutdown: false,
             beat_detector: BeatDetector::new(),
@@ -341,6 +343,7 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                             if let Ok(mut pl) = playlist_decode.try_lock() {
                                 if let Some(p) = pl.as_mut() {
                                     p.toggle_shuffle();
+                                    s.shuffled = p.is_shuffled();
                                     // Refresh track list with new order
                                     s.track_list = p.files().iter()
                                         .map(|path| track_name_from_path(path))

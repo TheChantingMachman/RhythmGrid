@@ -73,6 +73,7 @@ pub struct GameWorld {
     pub(super) toast_text: String,
     pub(super) toast_timer: f32,
     pub(super) theme_index: usize,
+    pub(super) music_folder: Option<String>,
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -136,7 +137,7 @@ impl GameWorld {
         let settings = rhythm_grid::config::Settings {
             volume: vol,
             speed: 1.0,
-            music_folder: None, // TODO: track folder path
+            music_folder: self.music_folder.clone(),
             theme: theme_names.get(self.theme_index).unwrap_or(&"Default").to_string(),
             shuffle: false, // TODO: track shuffle state
         };
@@ -197,6 +198,7 @@ impl GameWorld {
             toast_text: String::new(),
             toast_timer: 0.0,
             theme_index,
+            music_folder: settings.music_folder.clone(),
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -563,6 +565,7 @@ impl GameWorld {
     pub fn toggle_shuffle(&mut self) {
         if let Ok(mut audio) = self.audio.try_lock() {
             audio.shuffle_requested = true;
+            audio.shuffled = !audio.shuffled; // immediate visual feedback
         }
         self.on_mouse_activity();
     }
@@ -807,10 +810,8 @@ impl GameWorld {
 
         if let Some(path) = folder {
             let folder_str = path.to_string_lossy().to_string();
-            let settings_path = config_dir().join("settings.toml");
-            let mut settings = load_settings(&settings_path);
-            settings.music_folder = Some(folder_str.clone());
-            let _ = save_settings(&settings, &settings_path);
+            self.music_folder = Some(folder_str.clone());
+            self.save_settings();
             // Shut down old audio before starting new
             if let Ok(mut audio) = self.audio.lock() {
                 audio.shutdown = true;

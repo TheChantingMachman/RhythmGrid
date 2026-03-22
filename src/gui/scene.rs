@@ -538,15 +538,26 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, vu_x, vu_y, "+", dim_col, 1.0);
 
     // Transport labels
-    let is_paused_lbl = if let Ok(audio) = world.audio.try_lock() { audio.paused } else { false };
+    let (is_paused_lbl, is_shuffled_lbl) = if let Ok(audio) = world.audio.try_lock() {
+        (audio.paused, audio.shuffled)
+    } else {
+        (false, false)
+    };
+    let shuffle_label = if is_shuffled_lbl { "SH*" } else { "SH" };
     let transport_labels = [
         (super::world::ButtonId::Back, "<<"),
         (super::world::ButtonId::PlayPause, if is_paused_lbl { ">" } else { "||" }),
         (super::world::ButtonId::Skip, ">>"),
-        (super::world::ButtonId::Shuffle, "SH"),
+        (super::world::ButtonId::Shuffle, shuffle_label),
     ];
     for (id, label) in transport_labels {
-        let col = if world.btn_hovered(id) { text_col } else { dim_col };
+        let col = if id == super::world::ButtonId::Shuffle && is_shuffled_lbl {
+            rgba_to_f32([100, 200, 255, 255]) // highlighted when active
+        } else if world.btn_hovered(id) {
+            text_col
+        } else {
+            dim_col
+        };
         let (lx, ly) = project_label(id, world);
         push_text(&mut verts, &mut indices, lx, ly, label, col, 1.0);
     }
