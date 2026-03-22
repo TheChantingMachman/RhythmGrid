@@ -28,13 +28,16 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     build_background(&mut tv, &mut ti, world, gw, gh);
 
     // Occupied cells as 3D cubes — depth testing handles occlusion
-    // Each piece type pulses with a different frequency band
+    // Each piece type pulses depth and glow with its frequency band
     for row in 0..HEIGHT {
         for col in 0..WIDTH {
             if let CellState::Occupied(ti) = world.session.grid.cells[row][col] {
+                let band = (ti as usize) % 7;
                 let color = rgba_to_f32(piece_color(ti));
-                let band_glow = world.bands_norm[(ti as usize) % 7] * 2.0;
-                push_cube_3d(&mut sv, &mut si, col as f32, row as f32, cube_depth, color, band_glow);
+                let band_glow = world.bands_norm[band] * 2.0;
+                let beat_pulse = world.band_beat_intensity[band];
+                let depth = cube_depth + beat_pulse * 0.3;
+                push_cube_3d(&mut sv, &mut si, col as f32, row as f32, depth, color, band_glow);
             }
         }
     }
@@ -56,14 +59,16 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             }
         }
 
-        // Active piece — pulses with its frequency band
+        // Active piece — pulses depth and glow with its frequency band
+        let active_band = (world.session.active_piece.piece_type as usize) % 7;
         let color = rgba_to_f32(piece_color(world.session.active_piece.piece_type as u32));
-        let active_glow = world.bands_norm[(world.session.active_piece.piece_type as usize) % 7] * 2.0;
+        let active_glow = world.bands_norm[active_band] * 2.0;
+        let active_depth = cube_depth + world.band_beat_intensity[active_band] * 0.3;
         for &(dr, dc) in &cells {
             let r = world.session.active_piece.row + dr;
             let c = world.session.active_piece.col + dc;
             if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth, color, active_glow);
+                push_cube_3d(&mut sv, &mut si, c as f32, r as f32, active_depth, color, active_glow);
             }
         }
     }
