@@ -486,13 +486,14 @@
 -
   id: input.key_map
   section: Input
-  description: 'Maps keyboard inputs to game actions. Default mapping: Left=MoveLeft, Right=MoveRight, Down=SoftDrop, Up=RotateCW, Z=RotateCCW, Space=HardDrop, P=TogglePause, Escape=BackToMenu, Enter=StartGame. Function map_key(key: KeyCode) -> Option<GameAction> returns the action for a key press. GameAction is an enum: MoveLeft, MoveRight, SoftDrop, HardDrop, RotateCW, RotateCCW, TogglePause, BackToMenu, StartGame.'
+  description: 'Maps keyboard inputs to game actions. Default mapping: Left=MoveLeft, Right=MoveRight, Down=SoftDrop, Up=RotateCW, X=RotateCW, Z=RotateCCW, Space=HardDrop, C=Hold, P=TogglePause, Escape=BackToMenu, Enter=StartGame. Function map_key(key: KeyCode) -> Option<GameAction> returns the action for a key press. GameAction is an enum: MoveLeft, MoveRight, SoftDrop, HardDrop, RotateCW, RotateCCW, Hold, TogglePause, BackToMenu, StartGame. KeyCode gains a C variant.'
   tags:
   - input
   - controls
-  status: implemented
+  status: stale
   depends_on:
   - game.state
+  - game.hold_piece
 -
   id: game.tick
   section: Game
