@@ -341,6 +341,11 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                             if let Ok(mut pl) = playlist_decode.try_lock() {
                                 if let Some(p) = pl.as_mut() {
                                     p.toggle_shuffle();
+                                    // Refresh track list with new order
+                                    s.track_list = p.files().iter()
+                                        .map(|path| track_name_from_path(path))
+                                        .collect();
+                                    s.current_track_index = 0;
                                 }
                             }
                             // Restart current track after shuffle
