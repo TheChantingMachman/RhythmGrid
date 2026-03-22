@@ -127,6 +127,34 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 - **Escalation:** all effects intensify with danger level (ring speed, sway amplitude, hex rotation)
 - Future: color palette shifts, visual themes as effect module bundles, spectral centroid-driven color temperature
 
+### Advanced Visual Techniques (to explore)
+Inspired by Tetris Effect and Geometry Wars — techniques to consider as the visual layer matures:
+
+**Grid distortion (Geometry Wars style):**
+- Displace grid line vertices by force fields (beat sources, line clear shockwaves, stack weight)
+- Board wireframe physically warps with the music — highest impact single effect
+- Fits naturally into GridLines effect module (vertex displacement during render)
+
+**Particle trails / ribbons (Geometry Wars style):**
+- Render ribbon of quads connecting particle's last N positions instead of single quad
+- Neon light-painting look — transforms fireworks and beat particles
+- Moderate effort — track position history per particle, generate ribbon geometry
+
+**Additive blending pass:**
+- Separate render pass with additive blend state for rings, particles, fireworks
+- Overlapping bright elements get brighter, not more opaque — electric neon feel
+- Small effort — new pipeline variant, render select effects into it
+
+**Screen-space distortion:**
+- Post-process pass that warps UVs on impacts (barrel distortion on line clears)
+- Adds physical punch — screen itself reacts to game events
+- Larger effort — new post-process pass after bloom
+
+**Subsurface scattering approximation:**
+- Light appears to pass through semi-transparent cubes
+- Combined with back-face tinting gives gemstone/crystal quality
+- Shader technique — approximate with view-dependent color shift
+
 ### Dynamic Audio-Visual Mapping (phased)
 Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
 
