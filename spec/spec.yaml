@@ -598,3 +598,47 @@
     - Held type stored as TetrominoType not ActivePiece — rotation always 0 on swap-in
     - Swap-in uses try_spawn — if board full, hold() returns false, state unchanged
     - Test setup: GameSession::new() starts with held_piece=None, can_hold=true
+-
+  id: game.t_spin
+  section: Game
+  description: 'T-spin detection. After a T-piece locks via rotation (last move before lock was a rotate), check the 4 corner cells of the T-piece''s bounding box. If 3 or more corners are occupied or out of bounds, it is a T-spin. T-spin line clears award bonus points: T-spin zero=100, single=200, double=600, triple=800, all multiplied by current level. Function detect_t_spin(grid: &Grid, piece: &ActivePiece, last_move_was_rotate: bool) -> bool. Non-T pieces always return false.'
+  tags:
+  - core
+  - game
+  - scoring
+  status: draft
+  depends_on:
+  - game.lock
+  - game.rotate
+  - game.score
+  - game.collision
+  modifies:
+  - game.score
+-
+  id: game.combo
+  section: Game
+  description: 'Consecutive line clear combo. GameSession tracks combo_count: u32 (starts at 0). When tick() or hard_drop() returns PieceLocked with lines_cleared > 0, increment combo_count and add 50 * combo_count * level to the score. When PieceLocked with lines_cleared == 0, reset combo_count to 0. combo_count persists across pieces until a piece locks without clearing.'
+  tags:
+  - core
+  - game
+  - scoring
+  status: draft
+  depends_on:
+  - game.score
+  - game.tick
+  - game.level
+  modifies:
+  - game.tick
+-
+  id: game.stats
+  section: Game
+  description: 'Per-game statistics tracking on GameSession. Fields: pieces_placed: u32, lines_cleared_total: u32, max_combo: u32, time_played_secs: f64. pieces_placed increments each time a piece locks. max_combo tracks the highest combo_count reached. time_played_secs accumulates dt while state is Playing. All fields initialize to 0 in GameSession::new().'
+  tags:
+  - core
+  - game
+  status: draft
+  depends_on:
+  - game.tick
+  - game.combo
+  modifies:
+  - game.tick
