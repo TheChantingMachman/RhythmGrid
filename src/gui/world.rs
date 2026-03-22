@@ -14,6 +14,7 @@ use super::camera::CameraReactor;
 use super::drawing::{Vertex, rgba_to_f32};
 use super::effects::AudioFrame;
 use super::effects::beat_rings::BeatRings;
+use super::effects::hex_background::HexBackground;
 use super::particles::ParticleSystem;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
 use super::theme::{DEFAULT_CAM_ANGLE, THEME};
@@ -44,6 +45,7 @@ pub struct GameWorld {
     pub(super) clearing_cells: Vec<ClearingCell>,
     pub(super) bg_rings: Vec<BgRing>, // legacy — kept for level-up rings
     pub(super) beat_rings: BeatRings,
+    pub(super) hex_background: HexBackground,
     pub(super) danger_level: f32,
     pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
     last_level: u32,
@@ -136,6 +138,7 @@ impl GameWorld {
             clearing_cells: Vec::new(),
             bg_rings: Vec::new(),
             beat_rings: BeatRings::new(),
+            hex_background: HexBackground::new(),
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -212,9 +215,10 @@ impl GameWorld {
             self.bands_norm[i] = (self.bands[i] / self.norm_ceil[i]).min(1.0);
         }
 
-        // Beat rings (effect module)
+        // Effect modules
         use super::effects::AudioEffect;
         self.beat_rings.update(&self.audio_frame);
+        self.hex_background.update(&self.audio_frame);
 
         // Level-up rings still use legacy bg_rings vec
         for ring in &mut self.bg_rings {

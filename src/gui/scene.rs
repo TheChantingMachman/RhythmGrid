@@ -252,80 +252,20 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 
 /// Background geometric field: hex grid + connecting web + beat rings
 fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, gw: f32, gh: f32) {
-    let d = world.danger_level;
-    let geo_cx = gw / 2.0;
-    let geo_cy = -gh / 2.0;
-    let geo_z = -2.0;
-    let geo_n = [0.0f32, 0.0, 1.0];
-    let geo_time = world.preview_angle * (0.3 + d * 0.4);
-    let low_mids = world.bands_norm[2];
-    let sub_bass = world.bands_norm[0];
-    let flux_boost = (world.flux * 0.3).min(0.15); // spectral flux brightens background on transitions
-    let geo_alpha = 0.03 + low_mids * 0.15 + d * 0.05 + flux_boost;
-
-    // Hex dot grid — size driven by low-mids, color warmth by sub-bass
-    let hex_rings = 4;
-    let dot_size = 0.06 + low_mids * 0.24;
-    for ring in 1..=hex_rings {
-        let r = ring as f32 * 3.5;
-        let points = ring * 6;
-        for i in 0..points {
-            let angle = (i as f32 / points as f32) * std::f32::consts::TAU + geo_time;
-            let dx = angle.cos() * r;
-            let dy = angle.sin() * r;
-            let dist_factor = 1.0 - (ring as f32 / hex_rings as f32) * 0.5;
-            let dot_alpha = geo_alpha * dist_factor;
-            let dot_color = [0.15 + d * 0.45 + sub_bass * 0.2, 0.2 - d * 0.08, 0.5 - d * 0.35 - sub_bass * 0.15, dot_alpha];
-
-            let base = sv.len() as u32;
-            sv.push(Vertex { position: [geo_cx + dx - dot_size, geo_cy + dy - dot_size, geo_z], normal: geo_n, color: dot_color });
-            sv.push(Vertex { position: [geo_cx + dx + dot_size, geo_cy + dy - dot_size, geo_z], normal: geo_n, color: dot_color });
-            sv.push(Vertex { position: [geo_cx + dx + dot_size, geo_cy + dy + dot_size, geo_z], normal: geo_n, color: dot_color });
-            sv.push(Vertex { position: [geo_cx + dx - dot_size, geo_cy + dy + dot_size, geo_z], normal: geo_n, color: dot_color });
-            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-        }
-    }
-
-    // Connecting lines
-    for ring in 1..=hex_rings {
-        let r = ring as f32 * 3.5;
-        let points = ring * 6;
-        let line_alpha = geo_alpha * 0.4;
-        let line_color = [0.1 + d * 0.35, 0.15 - d * 0.05, 0.35 - d * 0.25, line_alpha];
-        let line_w = 0.03;
-        for i in 0..points {
-            let a0 = (i as f32 / points as f32) * std::f32::consts::TAU + geo_time;
-            let a1 = ((i + 1) as f32 / points as f32) * std::f32::consts::TAU + geo_time;
-            let x0 = geo_cx + a0.cos() * r;
-            let y0 = geo_cy + a0.sin() * r;
-            let x1 = geo_cx + a1.cos() * r;
-            let y1 = geo_cy + a1.sin() * r;
-            let dx = x1 - x0;
-            let dy = y1 - y0;
-            let len = (dx * dx + dy * dy).sqrt();
-            if len < 0.001 { continue; }
-            let nx = -dy / len * line_w;
-            let ny = dx / len * line_w;
-
-            let base = sv.len() as u32;
-            sv.push(Vertex { position: [x0 + nx, y0 + ny, geo_z], normal: geo_n, color: line_color });
-            sv.push(Vertex { position: [x1 + nx, y1 + ny, geo_z], normal: geo_n, color: line_color });
-            sv.push(Vertex { position: [x1 - nx, y1 - ny, geo_z], normal: geo_n, color: line_color });
-            sv.push(Vertex { position: [x0 - nx, y0 - ny, geo_z], normal: geo_n, color: line_color });
-            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-        }
-    }
-
-    // Beat rings (effect module)
     let ctx = super::effects::RenderContext {
         board_width: gw,
         board_height: gh,
-        win_w: 0.0, win_h: 0.0, // not needed for rings
+        win_w: 0.0, win_h: 0.0,
         window_aspect: 1.0,
         preview_angle: world.preview_angle,
         hud_opacity: world.hud_opacity,
     };
     use super::effects::AudioEffect;
+
+    // Hex background (effect module)
+    world.hex_background.render(sv, si, &ctx);
+
+    // Beat rings (effect module)
     world.beat_rings.render(sv, si, &ctx);
 
     // Legacy level-up rings (still inline)

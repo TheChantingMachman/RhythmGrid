@@ -3,6 +3,7 @@
 // and emits geometry into vertex/index buffers.
 
 pub mod beat_rings;
+pub mod hex_background;
 
 use super::drawing::Vertex;
 
