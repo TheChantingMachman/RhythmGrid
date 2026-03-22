@@ -10,7 +10,9 @@ use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
 use rhythm_grid::render::piece_color;
 use super::audio_output::{self, AudioState};
+use super::camera::CameraReactor;
 use super::drawing::{Vertex, rgba_to_f32};
+use super::effects::AudioFrame;
 use super::particles::ParticleSystem;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
 use super::theme::{DEFAULT_CAM_ANGLE, THEME};
@@ -46,8 +48,8 @@ pub struct GameWorld {
     pub(super) window_aspect: f32,
     pub(super) hud_opacity: f32,  // 0.0 = invisible, 1.0 = full
     hud_fade_timer: f32,          // seconds until fade starts
-    pub(super) shake_intensity: f32, // 1.0 on trigger, decays to 0.0
-    shake_time: f32,                 // accumulator for shake oscillation
+    pub camera: CameraReactor,
+    pub(super) audio_frame: AudioFrame,
     pub cursor_pos: [f32; 2],
     pub window_size: [f32; 2],
     pub(super) buttons: Vec<Button>,
@@ -137,8 +139,11 @@ impl GameWorld {
             window_aspect: THEME.win_w as f32 / THEME.win_h as f32,
             hud_opacity: 1.0,
             hud_fade_timer: 1.5,
-            shake_intensity: 0.0,
-            shake_time: 0.0,
+            camera: CameraReactor::new(),
+            audio_frame: AudioFrame {
+                bands: [0.0; 7], bands_norm: [0.0; 7], peak_bands: [0.0; 7],
+                band_beats: [0.0; 7], centroid: 0.0, flux: 0.0, danger: 0.0, dt: 0.0,
+            },
             cursor_pos: [0.0; 2],
             window_size: [THEME.win_w as f32, THEME.win_h as f32],
             buttons: vec![
@@ -326,9 +331,18 @@ impl GameWorld {
         // T-spin flash decay
         self.t_spin_flash = (self.t_spin_flash - dt as f32 * 1.0).max(0.0);
 
-        // Shake decay
-        self.shake_time += dt as f32 * 30.0;
-        self.shake_intensity = (self.shake_intensity - dt as f32 * 1.3).max(0.0);
+        // Build AudioFrame and update camera reactor
+        self.audio_frame = AudioFrame {
+            bands: self.bands,
+            bands_norm: self.bands_norm,
+            peak_bands: self.peak_bands,
+            band_beats: self.band_beat_intensity,
+            centroid: self.centroid,
+            flux: self.flux,
+            danger: self.danger_level,
+            dt: dt as f32,
+        };
+        self.camera.update(&self.audio_frame);
 
         // Smooth escalation transition
         let target_danger = if escalation_stage(&self.session.grid) == EscalationStage::Danger { 1.0 } else { 0.0 };
@@ -369,7 +383,7 @@ impl GameWorld {
                     let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
                     let piece_row = pre_piece.row + max_dr;
                     self.spawn_line_clear_particles(lines_cleared, piece_row);
-                    self.shake_intensity = (lines_cleared as f32 * 0.3).min(1.0);
+                    self.camera.trigger_shake((lines_cleared as f32 * 0.3).min(1.0));
                 }
                 // Secondary game over check: if new piece spawned in vanish zone
                 // and can't move down, the board is full
@@ -397,8 +411,7 @@ impl GameWorld {
                 self.danger_level = 0.0;
                 self.level_up_flash = 0.0;
                 self.last_level = 1;
-                self.shake_intensity = 0.0;
-                self.shake_time = 0.0;
+                self.camera.reset();
             }
         }
         if self.demo_mode && self.session.state == GameState::Playing {
@@ -427,8 +440,7 @@ impl GameWorld {
                 self.danger_level = 0.0;
                 self.level_up_flash = 0.0;
                 self.last_level = 1;
-                self.shake_intensity = 0.0;
-                self.shake_time = 0.0;
+                self.camera.reset();
             }
         }
     }
@@ -492,8 +504,7 @@ impl GameWorld {
             self.danger_level = 0.0;
             self.level_up_flash = 0.0;
             self.last_level = 1;
-            self.shake_intensity = 0.0;
-            self.shake_time = 0.0;
+            self.camera.reset();
         }
         self.demo_idle_timer = 0.0;
     }
@@ -560,7 +571,7 @@ impl GameWorld {
                     if lines > 0 {
                         self.spawn_line_clear_particles(lines, land_bottom);
                     }
-                    self.shake_intensity = (0.2 + lines as f32 * 0.25).min(1.0);
+                    self.camera.trigger_shake((0.2 + lines as f32 * 0.25).min(1.0));
                     // Secondary game over check for vanish zone spawn
                     if self.session.active_piece.row < 0 && self.session.state == GameState::Playing {
                         let hd_cells = piece_cells(self.session.active_piece.piece_type, 0);
@@ -596,9 +607,8 @@ impl GameWorld {
                     self.danger_level = 0.0;
                     self.level_up_flash = 0.0;
                     self.last_level = 1;
-                    self.shake_intensity = 0.0;
-                    self.shake_time = 0.0;
-                }
+                    self.camera.reset();
+                    }
             }
         }
     }
@@ -723,26 +733,8 @@ impl GameWorld {
         } else {
             0.0
         };
-        // Bass sway — slow drift driven by sub-bass/bass band beats
-        let bass_beat = self.band_beat_intensity[0].max(self.band_beat_intensity[1]);
-        let sway_amp = 0.3 + self.danger_level * 0.2;
-        let sway = bass_beat * sway_amp * (self.preview_angle * 2.0).sin();
-
-        // High-frequency micro-jitter from presence/brilliance beats
-        let hi_beat = self.band_beat_intensity[5].max(self.band_beat_intensity[6]);
-        let jitter_x = hi_beat * 0.08 * (self.preview_angle * 7.0).sin();
-        let jitter_y = hi_beat * 0.05 * (self.preview_angle * 11.0).cos();
-
-        // Impact shake — decaying high-frequency offset
-        let shake_x = self.shake_intensity * (self.shake_time * 1.3).sin() * 0.4;
-        let shake_y = self.shake_intensity * (self.shake_time * 1.7).cos() * 0.25;
-
-        // Bass zoom — camera pushes forward on heavy bass hits
-        let bass_zoom = bass_beat * 0.5;
-
-        let cam_x = board_cx + orbit + sway + jitter_x + shake_x;
-        let cam_y = board_cy + jitter_y + shake_y;
-        let cam_z = 16.0 - bass_zoom;
+        let base_eye = [board_cx + orbit, board_cy, 16.0];
+        let [cam_x, cam_y, cam_z] = self.camera.apply(&self.audio_frame, self.preview_angle, base_eye);
 
         let eye = [cam_x, cam_y, cam_z];
         let target = [board_cx, board_cy, 0.0];
