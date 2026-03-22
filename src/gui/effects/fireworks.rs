@@ -50,8 +50,8 @@ impl AudioEffect for Fireworks {
             if is_beat && !self.prev_beat[band] {
                 // Only spawn for stronger bands — skip if energy is low
                 if audio.bands_norm[band] > 0.3 {
-                    let cx = self.rand() * 8.0 + 1.0;  // random x across board area
-                    let cy = -(self.rand().abs() * 16.0 + 2.0); // random y
+                    let cx = self.rand() * 22.0 - 6.0;  // full visible width
+                    let cy = -(self.rand().abs() * 24.0); // full visible height
                     let spark_count = 20 + (audio.bands_norm[band] * 20.0) as usize;
 
                     // Color based on band — low=warm, high=cool
