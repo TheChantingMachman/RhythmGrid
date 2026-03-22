@@ -129,7 +129,7 @@ impl GameWorld {
     }
 
     pub fn new() -> Self {
-        let theme = themes::water_theme();
+        let theme = themes::default_theme();
         // Load settings to check for music folder
         let settings_path = config_dir().join("settings.toml");
         let settings = load_settings(&settings_path);
