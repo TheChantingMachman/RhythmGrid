@@ -175,6 +175,17 @@ Inspired by Tetris Effect and Geometry Wars — techniques to consider as the vi
 - Could layer with water surface or stand alone as background
 - Pairs with ambient, classical, chillout music
 
+**Multi-stage firework shells (90s screensaver, high fidelity):**
+- Three-stage lifecycle: launch → detonate → cascade. 6-10 seconds total per shell.
+- **Launch:** single bright point arcs upward on a parabolic trajectory (3-5s). Leaves a slow-dissipating sparkle trail affected by gravity — builds anticipation.
+- **Detonation:** at apex, shell explodes into 30-50 primary streamers radiating outward in parabolic arcs.
+- **Cascade:** each primary streamer leaves secondary trail particles. Secondaries also gravity-affected, creating drooping curtain shapes. Everything fades over 3-5s.
+- Only 1-2 active at a time — rarity makes each one an event.
+- Trigger: spectral flux spikes (song transitions) or very strong bass beats. Once every 30-60s.
+- Trail particles: gravity-affected, slow fade, long-lived. Key to the anticipation and afterglow feel.
+- Could coexist with quick-burst fireworks (current) — shells are the rare dramatic moments, bursts are the frequent punctuation.
+- Variation: different shell types (palm, willow, chrysanthemum) as theme options
+
 ### Dynamic Audio-Visual Mapping (phased)
 Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
 
