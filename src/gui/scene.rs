@@ -594,7 +594,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     // State overlays
     if world.session.state == GameState::GameOver {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([120, 0, 0, 80]), 0.08);
-        let go_w = 200.0; let go_h = 120.0;
+        let go_w = 200.0; let go_h = 150.0;
         let go_x = (w - go_w) / 2.0;
         let go_y = (h - go_h) / 2.0;
         push_panel(&mut verts, &mut indices, go_x, go_y, go_w, go_h, 0.09);
@@ -606,8 +606,14 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         // Stats
         let level = level_for_lines(world.session.total_lines);
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 72.0,
-                  &format!("LEVEL {}  LINES {}", level, world.session.total_lines), dim_col, 1.0);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 92.0, "ENTER TO RESTART", dim_col, 1.0);
+                  &format!("LVL {}  LINES {}", level, world.session.total_lines), dim_col, 1.0);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 84.0,
+                  &format!("COMBO {}  PCS {}", world.session.max_combo, world.session.pieces_placed), dim_col, 1.0);
+        let mins = (world.session.time_played_secs / 60.0) as u32;
+        let secs = (world.session.time_played_secs % 60.0) as u32;
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 96.0,
+                  &format!("TIME {}:{:02}", mins, secs), dim_col, 1.0);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 116.0, "ENTER TO RESTART", dim_col, 1.0);
     }
 
     if world.session.state == GameState::Paused {
