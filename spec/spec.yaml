@@ -285,7 +285,7 @@
   section: Config
   description: 'Settings are persisted as a TOML file. Load on startup, save on change. Missing file uses defaults. Settings fields: volume (f32, default 0.8), speed (f32, default 1.0), music_folder (Option<String>, default None), theme (String, default "Default"), shuffle (bool, default false), window_width (u32, default 1000), window_height (u32, default 800), window_x (Option<i32>, default None), window_y (Option<i32>, default None). All fields use #[serde(default)] so existing TOML files without them load cleanly with defaults. window_x/window_y are None when no saved position exists (OS chooses placement).'
   tags: [core, config]
-  status: stale
+  status: implemented
   depends_on: [config.xdg_paths]
   fixture_patterns: |
     - Construct with defaults: Settings { volume: 0.3, speed: 1.7, ..Settings::default() }
