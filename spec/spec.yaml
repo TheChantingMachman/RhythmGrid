@@ -323,12 +323,15 @@
   fixture_patterns: |
     - MultiBeatDetector::new() -> Self (7 internal detectors, all zeroed)
     - detect_bands(&mut self, bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent>
-    - BandBeatEvent { band: usize, timestamp_secs: f64 }
+    - BandBeatEvent { band: usize, timestamp_secs: f64 } — derives Debug, Clone, PartialEq
     - Each band has independent 43-sample rolling mean and last_beat_secs
     - Spike threshold: band energy > rolling_mean * 1.5
     - Min inter-beat gap per band: 0.3s
-    - Existing BeatDetector and BeatEvent unchanged (backward compatible)
-    - Test: feed spiky data to one band, flat to others — only spiked band emits events
+    - Input values are per-band FFT energy (0.0-1.0 range, same as fft_bands output)
+    - Existing BeatDetector::new(), BeatDetector::detect(), BeatEvent must remain functional and unchanged
+    - Test old API: BeatDetector::new().detect(0.5, 1.0) still works as before
+    - Test new API: feed spiky data to one band, flat to others — only spiked band emits events
+    - Test independence: two bands spiking at different times emit separate events
 -
   id: audio.procedural
   section: Audio
