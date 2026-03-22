@@ -566,6 +566,7 @@ impl GameWorld {
                 }
                 GameAction::RotateCW => { self.session.rotate(true); }
                 GameAction::RotateCCW => { self.session.rotate(false); }
+                GameAction::Hold => { self.session.hold_piece(); }
                 GameAction::TogglePause => { self.session.state = GameState::Paused; }
                 _ => {}
             }
