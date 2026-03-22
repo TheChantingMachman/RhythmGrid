@@ -110,7 +110,15 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 
 ### Visual Layer
 - **3D rendering** — volumetric blocks, Blinn-Phong lighting, bloom post-processing, proper depth testing with opaque + transparent passes
-- **Block appearance** — V1: plain cubes with per-piece-type frequency band glow. Future: pixel art tiles, swappable block visuals.
+- **Block appearance** — V1: plain cubes with per-piece-type frequency band glow.
+- **Bitmap-extruded blocks** (future):
+  - 2D pixel art bitmap (8x8 or 16x16) defines the block silhouette
+  - Each filled pixel extruded into a mini-voxel column — front looks like pixel art, side/top has depth
+  - Same lighting/glow/transparency/bloom applies to each mini-voxel automatically
+  - Library of normalized bitmaps: `[u8; 8]` per shape, trivial to add new ones
+  - Per-theme block sets: Retro (ghost, invader, heart), Nature (leaf, snowflake), Abstract (spiral, ring)
+  - Swappable per-theme — the VisualTheme holds a block set reference
+  - Render cost: 8x8 = up to 64 mini-cubes per cell vs 1 cube currently. May need LOD for dense boards — simplify to full cube when many cells occupied.
 - **Block material quality** (Tetris Effect style, phased):
   - Semi-transparent cubes with visible back faces (crystalline volume feel)
   - Edge glow / fresnel effect (edges brighter than centers)
