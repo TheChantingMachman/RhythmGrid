@@ -706,16 +706,22 @@ impl GameWorld {
         } else {
             0.0
         };
-        // Beat sway — gentle sinusoidal drift
+        // Bass sway — slow drift driven by sub-bass/bass band beats
+        let bass_beat = self.band_beat_intensity[0].max(self.band_beat_intensity[1]);
         let sway_amp = 0.3 + self.danger_level * 0.2;
-        let sway = self.beat_intensity * sway_amp * (self.preview_angle * 2.0).sin();
+        let sway = bass_beat * sway_amp * (self.preview_angle * 2.0).sin();
+
+        // High-frequency micro-jitter from presence/brilliance beats
+        let hi_beat = self.band_beat_intensity[5].max(self.band_beat_intensity[6]);
+        let jitter_x = hi_beat * 0.08 * (self.preview_angle * 7.0).sin();
+        let jitter_y = hi_beat * 0.05 * (self.preview_angle * 11.0).cos();
 
         // Impact shake — decaying high-frequency offset
         let shake_x = self.shake_intensity * (self.shake_time * 1.3).sin() * 0.4;
         let shake_y = self.shake_intensity * (self.shake_time * 1.7).cos() * 0.25;
 
-        let cam_x = board_cx + orbit + sway + shake_x;
-        let cam_y = board_cy + shake_y;
+        let cam_x = board_cx + orbit + sway + jitter_x + shake_x;
+        let cam_y = board_cy + jitter_y + shake_y;
         let cam_z = 16.0;
 
         let eye = [cam_x, cam_y, cam_z];
