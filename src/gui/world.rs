@@ -53,6 +53,8 @@ pub struct GameWorld {
     pub(super) fft_vis: FftVisualizer,
     pub(super) grid_lines: GridLines,
     pub(super) fireworks: Fireworks,
+    pub(super) hex_enabled: bool,
+    pub(super) fireworks_enabled: bool,
     pub(super) danger_level: f32,
     pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
     last_level: u32,
@@ -115,7 +117,7 @@ pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
 impl GameWorld {
     pub fn new() -> Self {
-        let theme = themes::default_theme(); // swap to water_theme() for water look
+        let theme = themes::default_theme();
         // Load settings to check for music folder
         let settings_path = config_dir().join("settings.toml");
         let settings = load_settings(&settings_path);
@@ -150,6 +152,8 @@ impl GameWorld {
             fft_vis: FftVisualizer::new(theme.fft),
             grid_lines: GridLines::new(theme.grid),
             fireworks: Fireworks::new(),
+            hex_enabled: theme.hex_enabled,
+            fireworks_enabled: theme.fireworks_enabled,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -330,12 +334,12 @@ impl GameWorld {
         // Update all effect modules + camera
         use super::effects::AudioEffect;
         self.beat_rings.update(&self.audio_frame);
-        self.hex_background.update(&self.audio_frame);
+        if self.hex_enabled { self.hex_background.update(&self.audio_frame); }
         self.fft_vis.locked = self.fft_locked;
         self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
         self.fft_vis.update(&self.audio_frame);
         self.grid_lines.update(&self.audio_frame);
-        self.fireworks.update(&self.audio_frame);
+        if self.fireworks_enabled { self.fireworks.update(&self.audio_frame); }
         self.camera.update(&self.audio_frame);
 
         // Decay AFTER effects have consumed the frame

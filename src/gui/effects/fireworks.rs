@@ -49,7 +49,7 @@ impl AudioEffect for Fireworks {
             let is_beat = audio.band_beats[band] > 0.95;
             if is_beat && !self.prev_beat[band] {
                 // Only spawn for stronger bands — skip if energy is low
-                if audio.bands_norm[band] > 0.6 {
+                if audio.bands_norm[band] > 0.85 {
                     let cx = self.rand() * 22.0 - 6.0;  // full visible width
                     let cy = -(self.rand().abs() * 24.0); // full visible height
                     let spark_count = 20 + (audio.bands_norm[band] * 20.0) as usize;
@@ -89,8 +89,8 @@ impl AudioEffect for Fireworks {
             for spark in &mut burst.sparks {
                 spark.x += spark.vx * audio.dt;
                 spark.y += spark.vy * audio.dt;
-                spark.vy += 2.0 * audio.dt; // slight gravity
-                spark.vx *= 0.97; // drag
+                spark.vy += 0.5 * audio.dt; // very slight gravity
+                spark.vx *= 0.99; // less drag — preserve horizontal spread
                 spark.life -= audio.dt;
             }
             burst.sparks.retain(|s| s.life > 0.0);

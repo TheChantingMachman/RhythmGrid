@@ -56,6 +56,8 @@ pub struct VisualTheme {
     pub grid: GridParams,
     pub fft: FftParams,
     pub camera: CameraParams,
+    pub hex_enabled: bool,
+    pub fireworks_enabled: bool,
 }
 
 pub fn default_theme() -> VisualTheme {
@@ -86,6 +88,8 @@ pub fn default_theme() -> VisualTheme {
             jitter_x: 0.08, jitter_y: 0.05,
             zoom_amount: 0.5, shake_decay: 1.3,
         },
+        hex_enabled: true,
+        fireworks_enabled: false,
     }
 }
 
@@ -113,10 +117,12 @@ pub fn water_theme() -> VisualTheme {
             ],
         },
         camera: CameraParams {
-            sway_base: 0.4, sway_danger_add: 0.15, // more sway, underwater drift
-            jitter_x: 0.03, jitter_y: 0.02, // much less jitter — smooth water
-            zoom_amount: 0.3, // gentle zoom
-            shake_decay: 0.8, // slower shake decay — momentum in water
+            sway_base: 0.4, sway_danger_add: 0.15,
+            jitter_x: 0.03, jitter_y: 0.02,
+            zoom_amount: 0.3,
+            shake_decay: 0.8,
         },
+        hex_enabled: false,
+        fireworks_enabled: true,
     }
 }

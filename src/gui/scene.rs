@@ -36,7 +36,9 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: world.hud_opacity,
         };
-        world.fireworks.render(&mut tv, &mut ti, &fx_ctx);
+        if world.fireworks_enabled {
+            world.fireworks.render(&mut tv, &mut ti, &fx_ctx);
+        }
     }
 
     // Occupied cells as 3D cubes — depth testing handles occlusion
@@ -235,7 +237,9 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
     use super::effects::AudioEffect;
 
     // Hex background (effect module)
-    world.hex_background.render(sv, si, &ctx);
+    if world.hex_enabled {
+        world.hex_background.render(sv, si, &ctx);
+    }
 
     // Beat rings (effect module)
     world.beat_rings.render(sv, si, &ctx);
