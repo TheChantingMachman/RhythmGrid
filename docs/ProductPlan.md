@@ -106,7 +106,9 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 - **No music configured:** Procedurally generated audio for out-of-box experience and first-time players. Zero licensing issues at any release tier, deterministic output for pipeline testing.
 - **Basic (V1):** Point at a folder via path field or filesystem browser. Play files sequentially or shuffled. Seamless auto-advance between tracks.
 
-**Future:** Playlist support, queue management, metadata-driven theming
+**Next (medium-low priority):** Track queue display near audio controls — show upcoming tracks as a small clickable list. Clicking a track plays it next. Respects shuffle order. Graduates into full playlist management later.
+
+**Future:** Full playlist support (create, save, reorder), queue management, metadata-driven theming
 
 ### Visual Layer
 - **3D rendering** — volumetric blocks, Blinn-Phong lighting, bloom post-processing, proper depth testing with opaque + transparent passes
