@@ -545,3 +545,49 @@
     - Field mapping: score=session.score, level=level_for_lines(session.total_lines), total_lines=session.total_lines, combo_count=session.combo_count, max_combo=session.max_combo, pieces_placed=session.pieces_placed, time_played_secs=session.time_played_secs, state=session.state, can_hold=session.can_hold
     - GameState imported from rhythm_grid::game::GameState
     - Test: create session, verify all fields match, play moves, verify updates
+-
+  id: render.next_piece_state
+  section: Render
+  description: 'Produces render-ready info for the next piece preview. Function next_piece_state(session: &GameSession) -> NextPieceRender. NextPieceRender { type_index: u32, cells: [(i32, i32); 4] } where cells are the piece''s rotation-0 cell offsets from PIECE_CELLS. type_index is the bag''s peeked value mapped through TETROMINO_TYPES.'
+  tags: [render, state, ui]
+  status: draft
+  depends_on: [game.next_piece, pieces.tetromino_cells]
+  fixture_patterns: |
+    - next_piece_state(session: &GameSession) -> NextPieceRender
+    - NextPieceRender { type_index: u32, cells: [(i32, i32); 4] }
+    - type_index = TETROMINO_TYPES[session.bag.peek()] as u32
+    - cells = PIECE_CELLS[type_index as usize][0] (rotation 0)
+    - Test: create session, verify type_index matches bag.peek(), cells match piece data
+-
+  id: audio.rolling_energy
+  section: Audio
+  description: 'Track rolling average energy per frequency band over a configurable window. RollingEnergy::new(window_secs: f32, sample_rate_hz: f32) creates a tracker. update(&mut self, bands: &[f32; 7]) feeds one frame of band energy. averages(&self) -> [f32; 7] returns the rolling average per band. dominant_bands(&self, count: usize) -> Vec<usize> returns the indices of the N bands with highest rolling average, sorted descending by energy. Used for dynamic audio-visual mapping — identify which frequency bands are most active in the current song section.'
+  tags: [core, audio, analysis]
+  status: draft
+  depends_on: [audio.fft]
+  fixture_patterns: |
+    - RollingEnergy::new(window_secs: f32, sample_rate_hz: f32) -> Self
+    - update(&mut self, bands: &[f32; 7]) — call once per audio frame
+    - averages(&self) -> [f32; 7] — rolling average per band
+    - dominant_bands(&self, count: usize) -> Vec<usize> — top N band indices by average energy
+    - Window: maintains a circular buffer of frames covering window_secs
+    - sample_rate_hz: how many update() calls per second (e.g. 60.0 for 60fps)
+    - Test: feed constant energy to one band, verify it dominates; feed spike then silence, verify average decays
+-
+  id: audio.beat_confidence
+  section: Audio
+  description: 'Measure rhythmic regularity per frequency band. BeatConfidence::new() creates a tracker. update(&mut self, band_beats: &[bool; 7], timestamp_secs: f64) records beat events per band. confidence(&self) -> [f32; 7] returns 0.0-1.0 per band where 1.0 means beats occur at perfectly regular intervals and 0.0 means random/no beats. Regularity measured by coefficient of variation of inter-beat intervals over a rolling window of the last 16 beats per band. The band with highest confidence is likely carrying the song''s rhythmic pulse.'
+  tags: [core, audio, analysis]
+  status: draft
+  depends_on: [audio.beat_detect]
+  fixture_patterns: |
+    - BeatConfidence::new() -> Self
+    - update(&mut self, band_beats: &[bool; 7], timestamp_secs: f64)
+    - confidence(&self) -> [f32; 7] — 0.0 (random) to 1.0 (perfectly regular)
+    - Tracks last 16 inter-beat intervals per band
+    - Confidence = 1.0 - coefficient_of_variation(intervals) clamped to 0.0-1.0
+    - coefficient_of_variation = std_dev / mean
+    - Band with no beats returns 0.0
+    - Band with < 2 intervals returns 0.0 (not enough data)
+    - Test: feed beats at exact 0.5s intervals to one band — confidence near 1.0
+    - Test: feed beats at random intervals — confidence near 0.0
