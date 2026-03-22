@@ -701,7 +701,7 @@ impl GameWorld {
         Uniforms::from_mat(vp)
     }
 
-    pub fn build_scene_and_hud(&self) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
+    pub fn build_scene_and_hud(&self) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
         super::scene::build_scene_and_hud(self)
     }
 }

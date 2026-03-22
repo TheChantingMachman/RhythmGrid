@@ -11,23 +11,26 @@ use super::theme::*;
 use super::world::GameWorld;
 
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)
-pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
+/// Returns (opaque_scene, transparent_scene, hud) geometry.
+pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
     let beat = world.beat_intensity;
     let cube_depth = 0.75; // chunkier cubes for more substantial 3D feel
 
-    let mut sv = Vec::new();
+    let mut sv = Vec::new(); // opaque scene
     let mut si = Vec::new();
+    let mut tv = Vec::new(); // transparent scene
+    let mut ti = Vec::new();
 
     let gw = WIDTH as f32;
     let gh = HEIGHT as f32;
 
-    // Background geometry
-    build_background(&mut sv, &mut si, world, gw, gh);
+    // Background geometry (transparent — behind everything)
+    build_background(&mut tv, &mut ti, world, gw, gh);
 
-    // Occupied cells as 3D cubes (bottom-to-top, right-to-left for correct face overlap)
+    // Occupied cells as 3D cubes — depth testing handles occlusion
     // Each piece type pulses with a different frequency band
-    for row in (0..HEIGHT).rev() {
-        for col in (0..WIDTH).rev() {
+    for row in 0..HEIGHT {
+        for col in 0..WIDTH {
             if let CellState::Occupied(ti) = world.session.grid.cells[row][col] {
                 let color = rgba_to_f32(piece_color(ti));
                 let band_glow = world.bands_norm[(ti as usize) % 7] * 2.0;
@@ -49,7 +52,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             let r = ghost_row + dr;
             let c = world.session.active_piece.col + dc;
             if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth * 0.2, ghost_color, 0.0);
+                push_cube_3d(&mut tv, &mut ti, c as f32, r as f32, cube_depth * 0.2, ghost_color, 0.0);
             }
         }
 
@@ -100,13 +103,6 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
     let vol_fill = rgba_to_f32([60, 100, 180, (220.0 * hud_a) as u8]);
     push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w * vol, vol_h, 0.3, vol_fill);
-    // Vol up button [+] (draw right-to-left)
-    let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
-        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut sv, &mut si, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
     // Vol down button [-]
     let vd_color = if world.btn_hovered(super::world::ButtonId::VolDown) {
         rgba_to_f32([80, 60, 60, (240.0 * hud_a) as u8])
@@ -114,14 +110,21 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
     };
     push_slab_3d(&mut sv, &mut si, vol_minus_x, vol_y, vol_btn_w, 0.5, 0.4, vd_color);
+    // Vol up button [+]
+    let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
+        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
+    } else {
+        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
+    };
+    push_slab_3d(&mut sv, &mut si, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
 
     // Transport buttons: [<<] [>||] [>>] [SH]
-    // Draw right-to-left so left faces don't overwrite right neighbors
+    // Transport buttons: [<<] [>||] [>>] [SH]
     let transport_ids = [
-        super::world::ButtonId::Shuffle,
-        super::world::ButtonId::Skip,
-        super::world::ButtonId::PlayPause,
         super::world::ButtonId::Back,
+        super::world::ButtonId::PlayPause,
+        super::world::ButtonId::Skip,
+        super::world::ButtonId::Shuffle,
     ];
     let is_paused = if let Ok(audio) = world.audio.try_lock() { audio.paused } else { false };
     for &id in &transport_ids {
@@ -212,28 +215,28 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             let n_front = [0.0f32, 0.0, 1.0];
 
             // Just front face + top face for dissolving cells (simpler, faster)
-            let base = sv.len() as u32;
-            sv.push(Vertex { position: [x0, y0, z1], normal: n_front, color: bright_color });
-            sv.push(Vertex { position: [x1, y0, z1], normal: n_front, color: bright_color });
-            sv.push(Vertex { position: [x1, y1, z1], normal: n_front, color: bright_color });
-            sv.push(Vertex { position: [x0, y1, z1], normal: n_front, color: bright_color });
-            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            let base = tv.len() as u32;
+            tv.push(Vertex { position: [x0, y0, z1], normal: n_front, color: bright_color });
+            tv.push(Vertex { position: [x1, y0, z1], normal: n_front, color: bright_color });
+            tv.push(Vertex { position: [x1, y1, z1], normal: n_front, color: bright_color });
+            tv.push(Vertex { position: [x0, y1, z1], normal: n_front, color: bright_color });
+            ti.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
             let n_top = [0.0f32, 1.0, 0.0];
             let top_color = [1.0, 1.0, 1.0, alpha * 0.8];
-            let base = sv.len() as u32;
-            sv.push(Vertex { position: [x0, y0, z1], normal: n_top, color: top_color });
-            sv.push(Vertex { position: [x0, y0, z0], normal: n_top, color: top_color });
-            sv.push(Vertex { position: [x1, y0, z0], normal: n_top, color: top_color });
-            sv.push(Vertex { position: [x1, y0, z1], normal: n_top, color: top_color });
-            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            let base = tv.len() as u32;
+            tv.push(Vertex { position: [x0, y0, z1], normal: n_top, color: top_color });
+            tv.push(Vertex { position: [x0, y0, z0], normal: n_top, color: top_color });
+            tv.push(Vertex { position: [x1, y0, z0], normal: n_top, color: top_color });
+            tv.push(Vertex { position: [x1, y0, z1], normal: n_top, color: top_color });
+            ti.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
         }
     }
 
     // HUD
     let (hv, hi) = build_hud(world);
 
-    ((sv, si), (hv, hi))
+    ((sv, si), (tv, ti), (hv, hi))
 }
 
 /// Background geometric field: hex grid + connecting web + beat rings
