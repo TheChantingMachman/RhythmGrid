@@ -111,6 +111,12 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 ### Visual Layer
 - **3D rendering** — volumetric blocks, Blinn-Phong lighting, bloom post-processing, proper depth testing with opaque + transparent passes
 - **Block appearance** — V1: plain cubes with per-piece-type frequency band glow. Future: pixel art tiles, swappable block visuals.
+- **Block material quality** (Tetris Effect style, phased):
+  - Semi-transparent cubes with visible back faces (crystalline volume feel)
+  - Edge glow / fresnel effect (edges brighter than centers)
+  - Per-face color gradient (not uniform flat color)
+  - Beat-driven material modulation (specular shift, bloom intensity, saturation independently)
+  - Theme-driven material presets (glass, gem, neon, matte)
 - **Board pulse** — cube depth modulated by per-band beat intensity, board is a full-spectrum visualizer
 - **Camera:** Fixed perspective with beat-driven bass sway, hi-freq jitter, and impact shake
 - **Particle effects** — small dense particles. Line clear spray (120 particles), beat burst from board edges, level-up radial burst. Per-band beat triggers: bass → rings, upper-mids → particles.
