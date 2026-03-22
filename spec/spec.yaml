@@ -642,3 +642,23 @@
   - game.combo
   modifies:
   - game.tick
+-
+  id: audio.streaming_decode
+  section: Audio
+  description: 'Streaming audio decoder that yields PCM chunks incrementally. StreamingDecoder::open(path: &Path) -> Result<StreamingDecoder, AudioError> opens a file and reads the format header. sample_rate() -> u32 and channels() -> u16 return format info available immediately after open. next_chunk() -> Option<Vec<f32>> decodes and returns the next chunk of interleaved PCM samples, or None at end of stream. Chunk size varies by codec packet size (typically 1024-4096 frames). The existing decode_audio function remains unchanged for backward compatibility. StreamingDecoder enables lookahead: the caller can decode ahead of playback and run beat analysis on buffered-but-not-yet-played samples for predictive beat detection.'
+  tags:
+  - core
+  - audio
+  - decode
+  status: draft
+  depends_on:
+  - audio.decode
+  fixture_patterns: |
+    - StreamingDecoder::open(path: &Path) -> Result<StreamingDecoder, AudioError>
+    - sample_rate() -> u32, channels() -> u16 — available immediately after open
+    - next_chunk() -> Option<Vec<f32>> — interleaved PCM, None at EOF
+    - Chunk size varies by codec (~1024-4096 frames per call)
+    - Supports MP3, WAV, FLAC, OGG (same formats as decode_audio)
+    - Test: open a file, call next_chunk repeatedly, concat all chunks, compare total sample count with decode_audio output
+    - StreamingDecoder should implement Drop to clean up resources
+    - Existing decode_audio unchanged (backward compatible)
