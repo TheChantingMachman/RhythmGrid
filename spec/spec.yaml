@@ -2,9 +2,7 @@
   id: grid.dimensions
   section: Grid
   description: Grid is 10 columns wide and 20 rows tall. Cells indexed as cells[row][col] with row 0 at top, row 19 at bottom, col 0 at left, col 9 at right. A new Grid initializes all cells to CellState::Empty.
-  tags:
-  - core
-  - grid
+  tags: [core, grid]
   status: implemented
   constants:
     height: "20"
@@ -20,9 +18,7 @@
   id: grid.cell_state
   section: Grid
   description: Each cell is either Empty or Occupied(u32). The u32 value identifies what occupies the cell — interpretation is up to the game layer.
-  tags:
-  - core
-  - grid
+  tags: [core, grid]
   status: implemented
   fixture_patterns: |
     - CellState::Empty — default, no data
@@ -33,9 +29,7 @@
   id: pieces.tetromino_count
   section: Pieces
   description: 'There are exactly 7 tetromino types: I, O, T, S, Z, J, L'
-  tags:
-  - core
-  - pieces
+  tags: [core, pieces]
   status: implemented
   constants:
     count: "7"
@@ -43,193 +37,129 @@
   id: pieces.tetromino_cells
   section: Pieces
   description: Each tetromino is defined by exactly 4 cells
-  tags:
-  - core
-  - pieces
+  tags: [core, pieces]
   status: implemented
   constants:
     cells_per_piece: "4"
-  depends_on:
-  - pieces.tetromino_count
+  depends_on: [pieces.tetromino_count]
 -
   id: pieces.rotation
   section: Pieces
   description: 'Each tetromino has 4 rotation states (0=spawn, 1=90°CW, 2=180°, 3=270°CW). CW transform: (col,row)->(row,-col). All rotation cell data stored in a static [7][4][4] table. Coordinate convention: positive col=right, positive row=down.'
-  tags:
-  - core
-  - pieces
-  - rotation
+  tags: [core, pieces, rotation]
   status: implemented
-  depends_on:
-  - pieces.tetromino_cells
+  depends_on: [pieces.tetromino_cells]
 -
   id: pieces.srs_kicks
   section: Pieces
   description: SRS wall kick data per Tetris Guideline, converted to y-down coordinates. JLSTZ share one kick table, I-piece has a separate table, O-piece has no kicks (rotation is no-op on collision). 8 transitions (4 CW + 4 CCW), 4 kick offsets each. Offsets are (col_delta, row_delta).
-  tags:
-  - core
-  - pieces
-  - rotation
+  tags: [core, pieces, rotation]
   status: implemented
   constants:
     max_kick_tests: "4"
-  depends_on:
-  - pieces.rotation
+  depends_on: [pieces.rotation]
 -
   id: pieces.spawn
   section: Pieces
   description: New pieces spawn at top-center of the grid in rotation state 0. Spawn origin is (col=4, row=0). If spawn position collides, try up to 4 rows above (vanish zone) before declaring game over.
-  tags:
-  - core
-  - pieces
+  tags: [core, pieces]
   status: implemented
-  depends_on:
-  - pieces.tetromino_cells
+  depends_on: [pieces.tetromino_cells]
 -
   id: game.state
   section: Game
   description: 'Game has states: Menu, Playing, Paused, GameOver. Transitions: Menu->Playing, Playing->Paused->Playing, Playing->GameOver, GameOver->Menu.'
-  tags:
-  - core
-  - game
-  - state
+  tags: [core, game, state]
   status: implemented
 -
   id: game.collision
   section: Game
   description: 'A piece position is valid if all its cells satisfy: column is within grid bounds (0..WIDTH), row is not below grid (row < HEIGHT), and the cell is not occupied. Cells with row < 0 (vanish zone / above grid) are always considered valid — they are above the visible area and cannot collide. Uses cells[row][col] indexing with positive col=right, positive row=down.'
-  tags:
-  - core
-  - game
-  - collision
+  tags: [core, game, collision]
   status: implemented
-  depends_on:
-  - grid.dimensions
-  - grid.cell_state
+  depends_on: [grid.dimensions, grid.cell_state]
 -
   id: game.move_horizontal
   section: Game
   description: Pieces move left or right by one column. Move is rejected if the resulting position is invalid.
-  tags:
-  - core
-  - game
-  - movement
+  tags: [core, game, movement]
   status: implemented
-  depends_on:
-  - game.collision
+  depends_on: [game.collision]
 -
   id: game.move_down
   section: Game
   description: Soft drop moves the piece down one row. If the move is invalid, the piece locks in place.
-  tags:
-  - core
-  - game
-  - movement
+  tags: [core, game, movement]
   status: implemented
-  depends_on:
-  - game.collision
+  depends_on: [game.collision]
 -
   id: game.hard_drop
   section: Game
   description: Hard drop instantly moves the piece to the lowest valid row and locks it.
-  tags:
-  - core
-  - game
-  - movement
+  tags: [core, game, movement]
   status: implemented
-  depends_on:
-  - game.collision
+  depends_on: [game.collision]
 -
   id: game.rotate
   section: Game
   description: Rotate piece clockwise or counter-clockwise. Tries unshifted rotation first, then SRS wall kicks if it collides.
-  tags:
-  - core
-  - game
-  - rotation
+  tags: [core, game, rotation]
   status: implemented
-  depends_on:
-  - game.collision
+  depends_on: [game.collision]
 -
   id: game.lock
   section: Game
   description: A piece locks into the grid when it cannot move down. Each cell stored as CellState::Occupied(type_index) where type_index is the piece's zero-based index (I=0, O=1, T=2, S=3, Z=4, J=5, L=6). Lock triggers line clearing.
-  tags:
-  - core
-  - game
+  tags: [core, game]
   status: implemented
-  depends_on:
-  - game.collision
+  depends_on: [game.collision]
 -
   id: game.line_clear
   section: Game
   description: When a row is fully occupied, it is cleared and all rows above shift down. Multiple rows can clear simultaneously. Returns the number of lines cleared so scoring and level can consume it.
-  tags:
-  - core
-  - game
-  - scoring
+  tags: [core, game, scoring]
   status: implemented
-  depends_on:
-  - game.lock
+  depends_on: [game.lock]
 -
   id: game.level
   section: Game
   description: Level starts at 1 and increases every 10 lines cleared. Level determines gravity speed.
-  tags:
-  - core
-  - game
-  - progression
+  tags: [core, game, progression]
   status: implemented
   constants:
     lines_per_level: "10"
     starting_level: "1"
-  depends_on:
-  - game.line_clear
+  depends_on: [game.line_clear]
 -
   id: game.score
   section: Game
   description: 'Score awards points for line clears: 1 line=100, 2=300, 3=500, 4=800, multiplied by current level.'
-  tags:
-  - core
-  - game
-  - scoring
+  tags: [core, game, scoring]
   status: implemented
   constants:
     double: "300"
     single: "100"
     tetris: "800"
     triple: "500"
-  depends_on:
-  - game.line_clear
-  - game.level
+  depends_on: [game.line_clear, game.level]
 -
   id: game.gravity
   section: Game
   description: Pieces fall automatically at a timed interval. Interval decreases as level increases.
-  tags:
-  - core
-  - game
-  - timing
+  tags: [core, game, timing]
   status: implemented
-  depends_on:
-  - game.move_down
-  - game.level
+  depends_on: [game.move_down, game.level]
 -
   id: game.next_piece
   section: Game
   description: The next piece to spawn is visible to the player. Uses a 7-bag randomizer so all 7 types appear before any repeats. Bag is shuffled with a time-based seed (system time at creation) for unique sequences each game.
-  tags:
-  - core
-  - game
+  tags: [core, game]
   status: implemented
 -
   id: game.escalation
   section: Game
   description: '2-stage escalation based on stack height. Normal: baseline effects. Danger: music speeds up, effects intensify.'
-  tags:
-  - core
-  - game
-  - escalation
+  tags: [core, game, escalation]
   status: implemented
   constants:
     danger_threshold_row: "4"
@@ -237,21 +167,14 @@
   id: game.game_over
   section: Game
   description: Game ends when a newly spawned piece immediately collides with occupied cells.
-  tags:
-  - core
-  - game
-  - state
+  tags: [core, game, state]
   status: implemented
-  depends_on:
-  - game.collision
+  depends_on: [game.collision]
 -
   id: audio.decode
   section: Audio
   description: Decode audio files (MP3, WAV, FLAC, OGG) to raw PCM samples. Returns sample rate, channel count, and sample data.
-  tags:
-  - core
-  - audio
-  - decode
+  tags: [core, audio, decode]
   status: implemented
   constants:
     formats: mp3:wav:flac:ogg
@@ -259,67 +182,45 @@
   id: audio.playback
   section: Audio
   description: Play decoded PCM audio through the system audio output device. Supports play, pause, and stop.
-  tags:
-  - core
-  - audio
-  - playback
+  tags: [core, audio, playback]
   status: implemented
-  depends_on:
-  - audio.decode
+  depends_on: [audio.decode]
 -
   id: audio.volume
   section: Audio
   description: Volume control scales PCM sample amplitude. Range 0.0 (mute) to 1.0 (full).
-  tags:
-  - core
-  - audio
-  - playback
+  tags: [core, audio, playback]
   status: implemented
   constants:
     default: "0.8"
     max: "1.0"
     min: "0.0"
-  depends_on:
-  - audio.playback
+  depends_on: [audio.playback]
 -
   id: audio.speed
   section: Audio
   description: Playback speed control resamples audio output. Range 0.5x to 2.0x. Used for panic escalation.
-  tags:
-  - core
-  - audio
-  - playback
-  - escalation
+  tags: [core, audio, playback, escalation]
   status: implemented
   constants:
     default: "1.0"
     max: "2.0"
     min: "0.5"
-  depends_on:
-  - audio.playback
+  depends_on: [audio.playback]
 -
   id: audio.amplitude
   section: Audio
   description: Track real-time RMS amplitude of the audio stream per frame. Returns a normalized 0.0-1.0 value.
-  tags:
-  - core
-  - audio
-  - analysis
+  tags: [core, audio, analysis]
   status: implemented
-  depends_on:
-  - audio.playback
+  depends_on: [audio.playback]
 -
   id: audio.beat_detect
   section: Audio
   description: 'Detect beats per frequency band. MultiBeatDetector holds 7 independent detectors, one per FFT band. detect_bands(bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent> runs spike detection on each band independently. A spike occurs when a band''s energy exceeds its 43-sample rolling mean by 1.5x and at least 0.3s have passed since that band''s last beat. BandBeatEvent { band: usize, timestamp_secs: f64 }. The existing single-band BeatDetector and BeatEvent remain unchanged for backward compatibility.'
-  tags:
-  - core
-  - audio
-  - analysis
+  tags: [core, audio, analysis]
   status: implemented
-  depends_on:
-  - audio.amplitude
-  - audio.fft
+  depends_on: [audio.amplitude, audio.fft]
   fixture_patterns: |
     - MultiBeatDetector::new() -> Self (7 internal detectors, all zeroed)
     - detect_bands(&mut self, bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent>
@@ -336,10 +237,7 @@
   id: audio.procedural
   section: Audio
   description: Generate simple procedural audio with a known BPM and beat pattern. Used as fallback when no music is configured and as a deterministic test fixture.
-  tags:
-  - core
-  - audio
-  - procedural
+  tags: [core, audio, procedural]
   status: implemented
   constants:
     default_bpm: "120"
@@ -347,102 +245,67 @@
   id: music.scan_folder
   section: Music
   description: Scan a directory for supported audio files. Returns a list of file paths filtered by supported extensions.
-  tags:
-  - core
-  - music
-  - filesystem
+  tags: [core, music, filesystem]
   status: implemented
 -
   id: music.shuffle
   section: Music
   description: Shuffle mode randomizes the play order of scanned files. Toggle on/off. Playlist exposes pub fn files(&self) -> &[PathBuf] to access the current file list (shuffled or original order). Playlist exposes pub fn is_shuffled(&self) -> bool to check current shuffle state. When shuffle is toggled on, the file list is randomized. When toggled off, the original scan order is restored and current_index resets to 0.
-  tags:
-  - core
-  - music
-  - playback
+  tags: [core, music, playback]
   status: implemented
-  depends_on:
-  - music.scan_folder
+  depends_on: [music.scan_folder]
 -
   id: music.auto_advance
   section: Music
   description: When a track finishes, the next track in the list starts automatically with no gap.
-  tags:
-  - core
-  - music
-  - playback
+  tags: [core, music, playback]
   status: implemented
-  depends_on:
-  - music.scan_folder
+  depends_on: [music.scan_folder]
 -
   id: music.now_playing
   section: Music
   description: 'Track metadata for the currently playing file: filename, duration, elapsed time.'
-  tags:
-  - core
-  - music
-  - ui
+  tags: [core, music, ui]
   status: implemented
 -
   id: music.skip
   section: Music
   description: Skip to the next track in the list. Wraps to the beginning if at the end.
-  tags:
-  - core
-  - music
-  - playback
+  tags: [core, music, playback]
   status: implemented
-  depends_on:
-  - music.scan_folder
+  depends_on: [music.scan_folder]
 -
   id: config.xdg_paths
   section: Config
   description: Config stored in XDG_CONFIG_HOME/rhythmgrid, data in XDG_DATA_HOME/rhythmgrid. Falls back to ~/.config and ~/.local/share.
-  tags:
-  - core
-  - config
-  - filesystem
+  tags: [core, config, filesystem]
   status: implemented
 -
   id: config.load_save
   section: Config
-  description: 'Settings are persisted as a TOML file. Load on startup, save on change. Missing file uses defaults. Settings fields: volume (f32, default 0.8), speed (f32, default 1.0), music_folder (Option<String>, default None), theme (String, default "Default"), shuffle (bool, default false). All new fields use #[serde(default)] so existing TOML files without them load cleanly with defaults. save_settings writes all fields. load_settings returns defaults for missing or malformed files.'
-  tags:
-  - core
-  - config
-  status: implemented
-  depends_on:
-  - config.xdg_paths
+  description: 'Settings are persisted as a TOML file. Load on startup, save on change. Missing file uses defaults. Settings fields: volume (f32, default 0.8), speed (f32, default 1.0), music_folder (Option<String>, default None), theme (String, default "Default"), shuffle (bool, default false), window_width (u32, default 1000), window_height (u32, default 800), window_x (Option<i32>, default None), window_y (Option<i32>, default None). All fields use #[serde(default)] so existing TOML files without them load cleanly with defaults. window_x/window_y are None when no saved position exists (OS chooses placement).'
+  tags: [core, config]
+  status: stale
+  depends_on: [config.xdg_paths]
   fixture_patterns: |
-    - Settings { volume: f32, speed: f32, music_folder: Option<String>, theme: String, shuffle: bool }
-    - Default: Settings { volume: 0.8, speed: 1.0, music_folder: None, theme: "Default".to_string(), shuffle: false }
-    - New fields use #[serde(default)] — old TOML files without theme/shuffle load cleanly
-    - theme field stores theme name as String (e.g. "Default", "Water", "Debug")
-    - shuffle field stores playlist shuffle state
+    - Settings { volume: f32, speed: f32, music_folder: Option<String>, theme: String, shuffle: bool, window_width: u32, window_height: u32, window_x: Option<i32>, window_y: Option<i32> }
+    - Default: Settings { volume: 0.8, speed: 1.0, music_folder: None, theme: "Default".to_string(), shuffle: false, window_width: 1000, window_height: 800, window_x: None, window_y: None }
+    - New fields use #[serde(default)] — old TOML files load cleanly
+    - window_x/window_y are None when OS should choose placement
     - TOML round-trip: save then load produces identical Settings
-    - load_settings with missing file returns Default
-    - load_settings with old TOML (no theme/shuffle) returns defaults for missing fields
 -
   id: config.music_folder
   section: Config
   description: Music folder path is a persisted setting. If set, it is scanned on startup.
-  tags:
-  - core
-  - config
-  - music
+  tags: [core, config, music]
   status: implemented
-  depends_on:
-  - config.load_save
-  - music.scan_folder
-  modifies:
-  - config.load_save
+  depends_on: [config.load_save, music.scan_folder]
+  modifies: [config.load_save]
 -
   id: render.piece_colors
   section: Render
   description: 'Each tetromino type maps to an RGBA color: I=(0,255,255,255) cyan, O=(255,255,0,255) yellow, T=(128,0,128,255) purple, S=(0,255,0,255) green, Z=(255,0,0,255) red, J=(0,0,255,255) blue, L=(255,120,0,255) deep orange. Function piece_color(type_index: u32) -> [u8; 4] returns the color.'
-  tags:
-  - render
-  - color
+  tags: [render, color]
   status: implemented
   constants:
     I: 0:255:255:255
@@ -452,57 +315,39 @@
     S: 0:255:0:255
     T: 128:0:128:255
     Z: 255:0:0:255
-  depends_on:
-  - pieces.tetromino_count
+  depends_on: [pieces.tetromino_count]
 -
   id: render.board_layout
   section: Render
   description: Board layout defines pixel geometry for rendering. Cell size is 30x30 pixels. Board origin (top-left of cell 0,0) is at pixel (board_x, board_y). Board pixel dimensions are cell_size*WIDTH x cell_size*HEIGHT = 300x600. Function cell_rect(row, col, board_x, board_y, cell_size) -> (px_x, px_y, px_w, px_h) returns the pixel rectangle for a grid cell.
-  tags:
-  - render
-  - layout
+  tags: [render, layout]
   status: implemented
   constants:
     board_height_px: "600"
     board_width_px: "300"
     cell_size: "30"
-  depends_on:
-  - grid.dimensions
+  depends_on: [grid.dimensions]
 -
   id: render.cell_quads
   section: Render
   description: 'Converts game state to a list of drawable quads. Each quad is (px_x, px_y, px_w, px_h, rgba). Function board_quads(grid, active_piece, board_x, board_y, cell_size) returns: one quad per occupied grid cell colored by its type_index, plus one quad per active piece cell colored by its type. Empty cells are not included. Ghost piece (hard drop preview) included as same color with alpha=80.'
-  tags:
-  - render
-  - draw
+  tags: [render, draw]
   status: implemented
-  depends_on:
-  - render.board_layout
-  - render.piece_colors
-  - game.collision
+  depends_on: [render.board_layout, render.piece_colors, game.collision]
 -
   id: render.next_piece_preview
   section: Render
   description: Renders a preview of the next piece from the bag. Function next_piece_quads(piece_type, preview_x, preview_y, cell_size) returns quads for the 4 cells of the piece in spawn rotation (rotation=0), positioned relative to (preview_x, preview_y). Uses piece_color for coloring.
-  tags:
-  - render
-  - draw
-  - ui
+  tags: [render, draw, ui]
   status: implemented
-  depends_on:
-  - render.piece_colors
-  - game.next_piece
+  depends_on: [render.piece_colors, game.next_piece]
 -
   id: input.key_map
   section: Input
   description: 'Maps keyboard inputs to game actions. Default mapping: Left=MoveLeft, Right=MoveRight, Down=SoftDrop, Up=RotateCW, X=RotateCW, Z=RotateCCW, Space=HardDrop, C=Hold, P=TogglePause, Escape=BackToMenu, Enter=StartGame. Function map_key(key: KeyCode) -> Option<GameAction> returns the action for a key press. GameAction enum gains Hold variant: MoveLeft, MoveRight, SoftDrop, HardDrop, RotateCW, RotateCCW, Hold, TogglePause, BackToMenu, StartGame. KeyCode enum gains X and C variants. X and Up both map to RotateCW.'
-  tags:
-  - input
-  - controls
+  tags: [input, controls]
   status: implemented
-  depends_on:
-  - game.state
-  - game.hold_piece
+  depends_on: [game.state, game.hold_piece]
   fixture_patterns: |
     - KeyCode gains variants: X, C (alongside existing Left, Right, Down, Up, Z, Space, P, Escape, Enter, Other)
     - GameAction gains variant: Hold (alongside existing 9 variants)
@@ -516,28 +361,14 @@
   id: game.tick
   section: Game
   description: 'Orchestrates one game frame. tick(state, dt_secs) advances the gravity timer by dt_secs. When accumulated time exceeds gravity interval, applies move_down. If move_down fails (piece locks), clears lines, updates score/level, spawns next piece. If spawn fails, transitions to GameOver. Returns a TickResult indicating what happened: Nothing, PieceMoved, PieceLocked{lines_cleared}, GameOver. Only runs when GameState is Playing.'
-  tags:
-  - core
-  - game
-  - timing
+  tags: [core, game, timing]
   status: implemented
-  depends_on:
-  - game.gravity
-  - game.move_down
-  - game.lock
-  - game.line_clear
-  - game.next_piece
-  - game.game_over
-  - game.score
-  - game.level
+  depends_on: [game.gravity, game.move_down, game.lock, game.line_clear, game.next_piece, game.game_over, game.score, game.level]
 -
   id: audio.fft
   section: Audio
   description: 'Compute FFT frequency decomposition of audio samples. Takes a window of PCM samples and returns energy in 7 frequency bands. Boundaries are exclusive on the low end, inclusive on the high end (except sub-bass which includes its low bound). Band 0: sub-bass 20-60Hz, Band 1: bass 61-250Hz, Band 2: low-mids 251-500Hz, Band 3: mids 501-2000Hz, Band 4: upper-mids 2001-4000Hz, Band 5: presence 4001-8000Hz, Band 6: brilliance 8001-20000Hz. FFT bins whose center frequency falls below 20Hz or above 20000Hz are excluded. Each band is a normalized 0.0-1.0 value representing relative energy. Function fft_bands(samples: &[f32], sample_rate: u32) -> [f32; 7] returns an array in frequency order. Empty or all-zero input returns [0.0; 7].'
-  tags:
-  - core
-  - audio
-  - analysis
+  tags: [core, audio, analysis]
   status: implemented
   constants:
     band0_high: "60"
@@ -557,8 +388,7 @@
     band_count: "7"
     freq_max: "20000"
     freq_min: "20"
-  depends_on:
-  - audio.amplitude
+  depends_on: [audio.amplitude]
   fixture_patterns: |
     - fft_bands(&samples, sample_rate) -> [f32; 7]
     - Index order: [sub_bass, bass, low_mids, mids, upper_mids, presence, brilliance]
@@ -571,45 +401,28 @@
   id: game.lock_delay
   section: Game
   description: After a piece can no longer move down, a brief lock delay of 500ms begins before the piece locks. Any successful move or rotation resets the timer. Maximum of 15 resets per piece. If the timer expires or resets are exhausted, the piece locks immediately.
-  tags:
-  - core
-  - game
-  - timing
+  tags: [core, game, timing]
   status: implemented
   constants:
     delay_ms: "400"
     max_resets: "15"
-  depends_on:
-  - game.lock
-  - game.move_down
-  - game.tick
-  modifies:
-  - game.tick
+  depends_on: [game.lock, game.move_down, game.tick]
+  modifies: [game.tick]
 -
   id: music.prev_track
   section: Music
   description: Go to the previous track in the playlist. Decrements current_index, wrapping to the last track when at index 0. Returns the new current track path.
-  tags:
-  - core
-  - music
-  - playback
+  tags: [core, music, playback]
   status: implemented
-  depends_on:
-  - music.skip
+  depends_on: [music.skip]
 -
   id: game.hold_piece
   section: Game
   description: Player can hold the current piece, swapping it with the previously held piece. If no piece is held, the current piece is stored and the next piece from the bag spawns. Hold can only be used once per piece placement — after holding, can_hold is set to false and resets to true when any piece locks via tick() returning PieceLocked. The held piece is stored as a TetrominoType (not an ActivePiece). When swapped back in, it spawns at the standard spawn position via try_spawn in rotation 0. If try_spawn fails (board full), the hold is rejected and the game state is unchanged. hold() returns bool — true if the hold succeeded, false if rejected.
-  tags:
-  - core
-  - game
+  tags: [core, game]
   status: implemented
-  depends_on:
-  - game.next_piece
-  - game.state
-  - game.tick
-  modifies:
-  - game.tick
+  depends_on: [game.next_piece, game.state, game.tick]
+  modifies: [game.tick]
   fixture_patterns: |
     - GameSession fields: held_piece: Option<TetrominoType> (None initially), can_hold: bool (true initially)
     - Hold: session.hold() -> bool (true=success, false=rejected)
@@ -621,57 +434,33 @@
   id: game.t_spin
   section: Game
   description: 'T-spin detection. After a T-piece locks via rotation (last move before lock was a rotate), check the 4 corner cells of the T-piece''s bounding box. If 3 or more corners are occupied or out of bounds, it is a T-spin. T-spin line clears award bonus points: T-spin zero=100, single=200, double=600, triple=800, all multiplied by current level. Function detect_t_spin(grid: &Grid, piece: &ActivePiece, last_move_was_rotate: bool) -> bool. Non-T pieces always return false.'
-  tags:
-  - core
-  - game
-  - scoring
+  tags: [core, game, scoring]
   status: implemented
-  depends_on:
-  - game.lock
-  - game.rotate
-  - game.score
-  - game.collision
-  modifies:
-  - game.score
+  depends_on: [game.lock, game.rotate, game.score, game.collision]
+  modifies: [game.score]
 -
   id: game.combo
   section: Game
   description: 'Consecutive line clear combo. GameSession tracks combo_count: u32 (starts at 0). When tick() or hard_drop() returns PieceLocked with lines_cleared > 0, increment combo_count and add 50 * combo_count * level to the score. When PieceLocked with lines_cleared == 0, reset combo_count to 0. combo_count persists across pieces until a piece locks without clearing.'
-  tags:
-  - core
-  - game
-  - scoring
+  tags: [core, game, scoring]
   status: implemented
-  depends_on:
-  - game.score
-  - game.tick
-  - game.level
-  modifies:
-  - game.tick
+  depends_on: [game.score, game.tick, game.level]
+  modifies: [game.tick]
 -
   id: game.stats
   section: Game
   description: 'Per-game statistics tracking on GameSession. Fields: pieces_placed: u32, lines_cleared_total: u32, max_combo: u32, time_played_secs: f64. pieces_placed increments each time a piece locks. max_combo tracks the highest combo_count reached. time_played_secs accumulates dt while state is Playing. All fields initialize to 0 in GameSession::new().'
-  tags:
-  - core
-  - game
+  tags: [core, game]
   status: implemented
-  depends_on:
-  - game.tick
-  - game.combo
-  modifies:
-  - game.tick
+  depends_on: [game.tick, game.combo]
+  modifies: [game.tick]
 -
   id: audio.streaming_decode
   section: Audio
   description: 'Streaming audio decoder that yields PCM chunks incrementally. StreamingDecoder::open(path: &Path) -> Result<StreamingDecoder, AudioError> opens a file and reads the format header. sample_rate() -> u32 and channels() -> u16 return format info available immediately after open. next_chunk() -> Option<Vec<f32>> decodes and returns the next chunk of interleaved PCM samples, or None at end of stream. Chunk size varies by codec packet size (typically 1024-4096 frames). The existing decode_audio function remains unchanged for backward compatibility. StreamingDecoder enables lookahead: the caller can decode ahead of playback and run beat analysis on buffered-but-not-yet-played samples for predictive beat detection.'
-  tags:
-  - core
-  - audio
-  - decode
+  tags: [core, audio, decode]
   status: implemented
-  depends_on:
-  - audio.decode
+  depends_on: [audio.decode]
   fixture_patterns: |
     - StreamingDecoder::open(path: &Path) -> Result<StreamingDecoder, AudioError>
     - sample_rate() -> u32, channels() -> u16 — available immediately after open
@@ -687,13 +476,9 @@
   id: audio.spectral_centroid
   section: Audio
   description: 'Compute the spectral centroid — the weighted mean frequency where energy is concentrated. spectral_centroid(samples: &[f32], sample_rate: u32) -> f32 takes a window of raw PCM samples (same input as fft_bands), computes the FFT internally, and returns the energy-weighted center frequency normalized to 0.0-1.0 where 0.0 means all energy is at 20Hz and 1.0 means all energy is at 20kHz. Computed as sum(frequency_i * magnitude_i) / sum(magnitude_i), then mapped to the 20-20000Hz range. Returns 0.0 for empty or all-zero input.'
-  tags:
-  - core
-  - audio
-  - analysis
+  tags: [core, audio, analysis]
   status: implemented
-  depends_on:
-  - audio.fft
+  depends_on: [audio.fft]
   fixture_patterns: |
     - spectral_centroid(samples: &[f32], sample_rate: u32) -> f32
     - Returns 0.0-1.0 normalized (0.0 = all bass, 1.0 = all highs)
@@ -706,13 +491,9 @@
   id: audio.spectral_flux
   section: Audio
   description: 'Compute the spectral flux between consecutive FFT frames — measures how much the spectrum is changing. SpectralFluxDetector holds the previous frame''s band energies. Method detect(&mut self, bands: &[f32; 7]) -> f32 computes the sum of positive differences between current and previous band energies (half-wave rectified). Returns a value >= 0.0. Higher values indicate transients, note attacks, or song section transitions. SpectralFluxDetector::new() initializes with zeroed previous frame. Returns 0.0 on first call.'
-  tags:
-  - core
-  - audio
-  - analysis
+  tags: [core, audio, analysis]
   status: implemented
-  depends_on:
-  - audio.fft
+  depends_on: [audio.fft]
   fixture_patterns: |
     - SpectralFluxDetector::new() -> Self (zeroed previous frame)
     - detector.detect(bands: &[f32; 7]) -> f32 (method, not free function)
@@ -725,15 +506,9 @@
   id: render.board_state
   section: Render
   description: 'Produces a flat render-ready snapshot of the board. Function board_state(session: &GameSession) -> BoardRenderState returns all visible cells in one pass. BoardRenderState has fields: occupied: Vec<RenderCell>, active: Vec<RenderCell>, ghost: Vec<RenderCell>. RenderCell { row: i32, col: i32, type_index: u32 }. Occupied cells are grid cells with CellState::Occupied(type_index). Active cells are the 4 cells of the current active piece. Ghost cells are the active piece dropped to the lowest valid row (same type_index). All three lists exclude cells with row < 0 (vanish zone above visible board).'
-  tags:
-  - render
-  - state
+  tags: [render, state]
   status: implemented
-  depends_on:
-  - game.tick
-  - game.collision
-  - grid.dimensions
-  - grid.cell_state
+  depends_on: [game.tick, game.collision, grid.dimensions, grid.cell_state]
   fixture_patterns: |
     - board_state(session: &GameSession) -> BoardRenderState
     - BoardRenderState { occupied: Vec<RenderCell>, active: Vec<RenderCell>, ghost: Vec<RenderCell> }
@@ -748,14 +523,9 @@
   id: render.held_piece_state
   section: Render
   description: 'Produces render-ready info for the held piece display. Function held_piece_state(session: &GameSession) -> Option<HeldPieceRender>. Returns None if no piece is held. HeldPieceRender { type_index: u32, cells: [(i32, i32); 4] } where cells are the piece''s rotation-0 cell offsets. Used by GUI to render the held piece preview without accessing game internals.'
-  tags:
-  - render
-  - state
-  - ui
+  tags: [render, state, ui]
   status: implemented
-  depends_on:
-  - game.hold_piece
-  - pieces.tetromino_cells
+  depends_on: [game.hold_piece, pieces.tetromino_cells]
   fixture_patterns: |
     - held_piece_state(session: &GameSession) -> Option<HeldPieceRender>
     - None when session.held_piece is None
@@ -766,19 +536,9 @@
   id: render.game_status
   section: Render
   description: 'Produces render-ready game status. Function game_status(session: &GameSession) -> GameStatusRender. GameStatusRender { score: u32, level: u32, total_lines: u32, combo_count: u32, max_combo: u32, pieces_placed: u32, time_played_secs: f64, state: GameState, can_hold: bool }. Field names match GameSession fields exactly: score, total_lines (not lines), combo_count, etc. GameState is re-exported from the game module. A flat struct the GUI reads for all HUD text without reaching into GameSession fields directly.'
-  tags:
-  - render
-  - state
-  - ui
+  tags: [render, state, ui]
   status: implemented
-  depends_on:
-  - game.tick
-  - game.score
-  - game.level
-  - game.combo
-  - game.stats
-  - game.state
-  - game.hold_piece
+  depends_on: [game.tick, game.score, game.level, game.combo, game.stats, game.state, game.hold_piece]
   fixture_patterns: |
     - game_status(session: &GameSession) -> GameStatusRender
     - GameStatusRender { score: u32, level: u32, total_lines: u32, combo_count: u32, max_combo: u32, pieces_placed: u32, time_played_secs: f64, state: GameState, can_hold: bool }
