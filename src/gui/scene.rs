@@ -162,47 +162,18 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     };
     push_slab_3d(&mut tv, &mut ti, fld.world_x, fld.world_y, fld.world_w, fld.world_h, 0.4, fld_color);
 
-    // FFT bars (lower-left of board)
-    let fft_a = if world.fft_locked { 1.0 } else { hud_a };
-    let fft_x = -4.5;
-    let fft_y = 14.0;
-    let fft_max_h = 5.0;
-    let col_w = 0.12;
-    let col_gap = 0.1;
-    let fft_depth = 0.35;
-    // All 7 bands, gradient blue → cyan → green → yellow → orange → red
-    let band_colors: [[u8; 3]; 7] = [
-        [30, 30, 180],   // sub-bass — deep blue
-        [40, 80, 180],   // bass — blue
-        [40, 160, 160],  // low-mids — cyan
-        [60, 170, 80],   // mids — green
-        [180, 180, 40],  // upper-mids — yellow
-        [200, 100, 40],  // presence — orange
-        [200, 50, 50],   // brilliance — red
-    ];
-    for (i, (val, color)) in world.bands.iter().zip(&band_colors).enumerate() {
-        let color = [color[0], color[1], color[2], (220.0 * fft_a) as u8];
-        let bx = fft_x + i as f32 * (col_w + col_gap);
-        let filled_h = (fft_max_h * val).max(0.05);
-        let bg_color = rgba_to_f32([12, 12, 25, (120.0 * fft_a) as u8]);
-        push_slab_3d(&mut tv, &mut ti, bx, fft_y, col_w, fft_max_h, fft_depth * 0.3, bg_color);
-        let fill_y = fft_y + (fft_max_h - filled_h);
-        push_slab_3d(&mut tv, &mut ti, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(color));
-        let peak_h = (fft_max_h * world.peak_bands[i]).max(0.05);
-        let peak_y = fft_y + (fft_max_h - peak_h);
-        let peak_color = rgba_to_f32([255, 255, 255, (160.0 * fft_a) as u8]);
-        push_slab_3d(&mut tv, &mut ti, bx, peak_y, col_w, 0.1, fft_depth + 0.1, peak_color);
+    // FFT visualizer (effect module)
+    {
+        use super::effects::AudioEffect;
+        let fft_ctx = super::effects::RenderContext {
+            board_width: gw, board_height: gh,
+            win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
+            window_aspect: world.window_aspect,
+            preview_angle: world.preview_angle,
+            hud_opacity: hud_a,
+        };
+        world.fft_vis.render(&mut tv, &mut ti, &fft_ctx);
     }
-    // FFT lock toggle button (below FFT bars, fades with HUD not with bars)
-    let fft_total_w = 7.0 * col_w + 6.0 * col_gap;
-    let lock_color = if world.fft_locked {
-        rgba_to_f32([80, 120, 80, (240.0 * hud_a) as u8])
-    } else if world.btn_hovered(super::world::ButtonId::FftLock) {
-        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut tv, &mut ti, fft_x, fft_y + fft_max_h + 0.2, fft_total_w, 0.3, 0.3, lock_color);
 
     // Per-cell clearing animations (shrinking bright cubes)
     for cell in &world.clearing_cells {
