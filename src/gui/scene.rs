@@ -493,16 +493,31 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
                   &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
     }
 
-    // Music dashboard labels (right side, aligned with 3D elements)
-    let dash_hud_x = w - 140.0;
-    let track_name = if let Ok(audio) = world.audio.try_lock() {
-        audio.track_name.clone()
-    } else {
-        String::new()
-    };
-    if !track_name.is_empty() {
-        let display: String = track_name.chars().take(16).collect();
-        push_text(&mut verts, &mut indices, dash_hud_x, 12.0, &display.to_uppercase(), dim_col, 1.0);
+    // Track queue display — positioned above audio controls
+    // Use VolDown button screen rect as anchor for alignment
+    let vol_rect = world.btn_rect(super::world::ButtonId::VolDown);
+    let track_x = vol_rect[0] * (w / world.window_size[0]);
+    let track_bottom = vol_rect[1] * (h / world.window_size[1]) - 8.0; // 8px above vol buttons
+    if let Ok(audio) = world.audio.try_lock() {
+        let list = &audio.track_list;
+        let idx = audio.current_track_index;
+        let num_shown = 4.min(list.len()); // now playing + next 3
+        if !list.is_empty() {
+            let track_top = track_bottom - num_shown as f32 * 10.0;
+            // Now playing (highlighted)
+            let now: String = list.get(idx).map(|s| s.chars().take(16).collect()).unwrap_or_default();
+            push_text(&mut verts, &mut indices, track_x, track_top, &now.to_uppercase(), text_col, 1.0);
+            // Next tracks
+            for i in 1..num_shown {
+                let next_idx = (idx + i) % list.len();
+                let name: String = list[next_idx].chars().take(16).collect();
+                push_text(&mut verts, &mut indices, track_x, track_top + i as f32 * 10.0,
+                          &name.to_uppercase(), dim_col, 1.0);
+            }
+        } else if !audio.track_name.is_empty() {
+            let display: String = audio.track_name.chars().take(16).collect();
+            push_text(&mut verts, &mut indices, track_x, track_bottom - 10.0, &display.to_uppercase(), dim_col, 1.0);
+        }
     }
     // Projected button labels
     let scale_x = w / world.window_size[0];

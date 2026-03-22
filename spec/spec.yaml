@@ -355,12 +355,12 @@
 -
   id: music.shuffle
   section: Music
-  description: Shuffle mode randomizes the play order of scanned files. Toggle on/off.
+  description: Shuffle mode randomizes the play order of scanned files. Toggle on/off. Playlist exposes pub fn files(&self) -> &[PathBuf] to access the current file list (shuffled or original order). Playlist exposes pub fn is_shuffled(&self) -> bool to check current shuffle state. When shuffle is toggled on, the file list is randomized. When toggled off, the original scan order is restored and current_index resets to 0.
   tags:
   - core
   - music
   - playback
-  status: implemented
+  status: stale
   depends_on:
   - music.scan_folder
 -
