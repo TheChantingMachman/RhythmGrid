@@ -169,8 +169,9 @@ Inspired by Tetris Effect and Geometry Wars — techniques to consider as the vi
 - Sea of particles following a 2D curl noise vector field — natural swirling currents
 - Quiet music = smooth laminar drift, beats inject turbulence that settles back
 - Audio mapping: sub-bass beats → field disruption (scatter), low-mids → eddy scale, centroid → color temp, flux → new eddies on transitions
-- Technique: curl noise — few noise lookups per particle per frame for flow direction. Divergence-free = natural swirls, no convergence points.
-- Hundreds of small persistent particles drifting and swirling — mesmerizing idle visualizer
+- Technique: 3D curl noise — curl of a 3D scalar noise field gives divergence-free flow vectors. Particles swirl around and through the board in all three axes.
+- Particles are persistent (no spawn/despawn, no lifetime) — just position, no velocity. Flow field provides direction each frame. Extremely cheap: N particles × 1 noise lookup per frame.
+- 3D depth: particles behind board occluded by cubes (depth testing), particles in front float over — snow globe / aquarium feel.
 - Could layer with water surface or stand alone as background
 - Pairs with ambient, classical, chillout music
 
