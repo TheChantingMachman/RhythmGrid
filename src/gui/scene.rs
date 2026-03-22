@@ -107,23 +107,23 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let vol_y = 15.5;
     let vol_h = 0.2;
     let vol_bg = rgba_to_f32([15, 15, 30, (160.0 * hud_a) as u8]);
-    push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
+    push_slab_3d(&mut tv, &mut ti, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
     let vol_fill = rgba_to_f32([60, 100, 180, (220.0 * hud_a) as u8]);
-    push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w * vol, vol_h, 0.3, vol_fill);
+    push_slab_3d(&mut tv, &mut ti, vol_bar_x, vol_y + 0.15, vol_bar_w * vol, vol_h, 0.3, vol_fill);
     // Vol down button [-]
     let vd_color = if world.btn_hovered(super::world::ButtonId::VolDown) {
         rgba_to_f32([80, 60, 60, (240.0 * hud_a) as u8])
     } else {
         rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
     };
-    push_slab_3d(&mut sv, &mut si, vol_minus_x, vol_y, vol_btn_w, 0.5, 0.4, vd_color);
+    push_slab_3d(&mut tv, &mut ti, vol_minus_x, vol_y, vol_btn_w, 0.5, 0.4, vd_color);
     // Vol up button [+]
     let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
         rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
     } else {
         rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
     };
-    push_slab_3d(&mut sv, &mut si, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
+    push_slab_3d(&mut tv, &mut ti, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
 
     // Transport buttons: [<<] [>||] [>>] [SH]
     // Transport buttons: [<<] [>||] [>>] [SH]
@@ -146,7 +146,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         } else {
             rgba_to_f32([base_color[0] as u8, base_color[1] as u8, base_color[2] as u8, (180.0 * hud_a) as u8])
         };
-        push_slab_3d(&mut sv, &mut si, btn.world_x, btn.world_y, btn.world_w, btn.world_h, 0.4, color);
+        push_slab_3d(&mut tv, &mut ti, btn.world_x, btn.world_y, btn.world_w, btn.world_h, 0.4, color);
     }
 
     // Folder button (right side, below transport)
@@ -156,7 +156,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     } else {
         rgba_to_f32([30, 40, 70, (180.0 * hud_a) as u8])
     };
-    push_slab_3d(&mut sv, &mut si, fld.world_x, fld.world_y, fld.world_w, fld.world_h, 0.4, fld_color);
+    push_slab_3d(&mut tv, &mut ti, fld.world_x, fld.world_y, fld.world_w, fld.world_h, 0.4, fld_color);
 
     // FFT bars (lower-left of board)
     let fft_a = if world.fft_locked { 1.0 } else { hud_a };
@@ -181,13 +181,13 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let bx = fft_x + i as f32 * (col_w + col_gap);
         let filled_h = (fft_max_h * val).max(0.05);
         let bg_color = rgba_to_f32([12, 12, 25, (120.0 * fft_a) as u8]);
-        push_slab_3d(&mut sv, &mut si, bx, fft_y, col_w, fft_max_h, fft_depth * 0.3, bg_color);
+        push_slab_3d(&mut tv, &mut ti, bx, fft_y, col_w, fft_max_h, fft_depth * 0.3, bg_color);
         let fill_y = fft_y + (fft_max_h - filled_h);
-        push_slab_3d(&mut sv, &mut si, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(color));
+        push_slab_3d(&mut tv, &mut ti, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(color));
         let peak_h = (fft_max_h * world.peak_bands[i]).max(0.05);
         let peak_y = fft_y + (fft_max_h - peak_h);
         let peak_color = rgba_to_f32([255, 255, 255, (160.0 * fft_a) as u8]);
-        push_slab_3d(&mut sv, &mut si, bx, peak_y, col_w, 0.1, fft_depth + 0.1, peak_color);
+        push_slab_3d(&mut tv, &mut ti, bx, peak_y, col_w, 0.1, fft_depth + 0.1, peak_color);
     }
     // FFT lock toggle button (below FFT bars, fades with HUD not with bars)
     let fft_total_w = 7.0 * col_w + 6.0 * col_gap;
@@ -198,7 +198,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     } else {
         rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
     };
-    push_slab_3d(&mut sv, &mut si, fft_x, fft_y + fft_max_h + 0.2, fft_total_w, 0.3, 0.3, lock_color);
+    push_slab_3d(&mut tv, &mut ti, fft_x, fft_y + fft_max_h + 0.2, fft_total_w, 0.3, 0.3, lock_color);
 
     // Per-cell clearing animations (shrinking bright cubes)
     for cell in &world.clearing_cells {
