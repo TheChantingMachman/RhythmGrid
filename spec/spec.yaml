@@ -438,7 +438,7 @@
   constants:
     I: 0:255:255:255
     J: 0:0:255:255
-    L: 255:165:0:255
+    L: 255:120:0:255
     O: 255:255:0:255
     S: 0:255:0:255
     T: 128:0:128:255
@@ -656,9 +656,11 @@
   fixture_patterns: |
     - StreamingDecoder::open(path: &Path) -> Result<StreamingDecoder, AudioError>
     - sample_rate() -> u32, channels() -> u16 — available immediately after open
-    - next_chunk() -> Option<Vec<f32>> — interleaved PCM, None at EOF
+    - next_chunk() -> Option<Vec<f32>> — interleaved PCM, None at EOF, new Vec each call
     - Chunk size varies by codec (~1024-4096 frames per call)
     - Supports MP3, WAV, FLAC, OGG (same formats as decode_audio)
-    - Test: open a file, call next_chunk repeatedly, concat all chunks, compare total sample count with decode_audio output
-    - StreamingDecoder should implement Drop to clean up resources
+    - Error: open nonexistent path returns Err(AudioError::FileNotFound)
+    - Error: open unsupported extension returns Err(AudioError::UnsupportedFormat)
+    - Test WAV fixture: write a minimal WAV file (44-byte header + raw f32 PCM) to a temp dir. WAV header: RIFF chunk, fmt sub-chunk (PCM format=3 for f32, 1 channel, 44100 Hz), data sub-chunk.
+    - Verification: open with StreamingDecoder, collect all next_chunk() results, total sample count should match the written data length
     - Existing decode_audio unchanged (backward compatible)
