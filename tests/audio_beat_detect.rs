@@ -1,8 +1,8 @@
 // @spec-tags: core,audio,analysis
-// @invariants: BeatDetector emits BeatEvent when amplitude > rolling_mean*1.5 and >= 0.3s since last beat; 43-sample rolling window; minimum inter-beat gap enforced; BeatEvent carries correct timestamp
-// @build: 52
+// @invariants: BeatDetector emits BeatEvent when amplitude > rolling_mean*1.5 and >= 0.3s since last beat; 43-sample rolling window; minimum inter-beat gap enforced; BeatEvent carries correct timestamp; MultiBeatDetector holds 7 independent BeatDetectors; BandBeatEvent carries band index and timestamp
+// @build: 78
 
-use rhythm_grid::audio::{BeatDetector, BeatEvent};
+use rhythm_grid::audio::{BeatDetector, BeatEvent, MultiBeatDetector, BandBeatEvent};
 
 // --- Struct derives ---
 
@@ -185,4 +185,281 @@ fn detect_rolling_window_is_43_samples() {
     // Mean is now ~0.0, any amplitude > 0.0 should trigger.
     let result = detector.detect(0.01, ts);
     assert!(result.is_some(), "With near-zero mean, any spike > 0 should trigger");
+}
+
+// ============================================================
+// MultiBeatDetector / BandBeatEvent tests
+// ============================================================
+
+fn warm_up_multi(detector: &mut MultiBeatDetector, bands: &[f32; 7], n: usize, start_ts: f64, step: f64) -> f64 {
+    let mut ts = start_ts;
+    for _ in 0..n {
+        detector.detect_bands(bands, ts);
+        ts += step;
+    }
+    ts
+}
+
+// --- BandBeatEvent struct derives ---
+
+#[test]
+fn band_beat_event_derives_partialeq() {
+    let a = BandBeatEvent { band: 0, timestamp_secs: 1.0 };
+    let b = BandBeatEvent { band: 0, timestamp_secs: 1.0 };
+    assert_eq!(a, b);
+}
+
+#[test]
+fn band_beat_event_derives_clone() {
+    let a = BandBeatEvent { band: 3, timestamp_secs: 2.5 };
+    let b = a.clone();
+    assert_eq!(b.band, 3);
+    assert!((b.timestamp_secs - 2.5).abs() < 1e-9);
+}
+
+#[test]
+fn band_beat_event_derives_debug() {
+    let a = BandBeatEvent { band: 1, timestamp_secs: 0.5 };
+    let s = format!("{:?}", a);
+    assert!(s.contains("BandBeatEvent") || s.contains("band"));
+}
+
+#[test]
+fn band_beat_event_fields_accessible() {
+    let e = BandBeatEvent { band: 6, timestamp_secs: 3.14 };
+    assert_eq!(e.band, 6);
+    assert!((e.timestamp_secs - 3.14).abs() < 1e-9);
+}
+
+// --- MultiBeatDetector construction ---
+
+#[test]
+fn multi_beat_detector_new_creates_instance() {
+    let _d = MultiBeatDetector::new();
+}
+
+// --- detect_bands basic behavior ---
+
+#[test]
+fn detect_bands_no_beats_on_flat_input() {
+    let mut detector = MultiBeatDetector::new();
+    // Warm up 50 frames of 0.4 — mean = 0.4, threshold = 0.6.
+    let mut ts = 0.0_f64;
+    for _ in 0..50 {
+        detector.detect_bands(&[0.4; 7], ts);
+        ts += 0.01;
+    }
+    // 0.5 < 0.4 * 1.5 = 0.6 → no beat.
+    let result = detector.detect_bands(&[0.5; 7], ts);
+    assert!(result.is_empty(), "Expected no beats, got {:?}", result);
+}
+
+#[test]
+fn detect_bands_returns_empty_vec_on_zero_input() {
+    let mut detector = MultiBeatDetector::new();
+    let result = detector.detect_bands(&[0.0; 7], 0.0);
+    assert!(result.is_empty());
+}
+
+// --- Spike detection per band ---
+
+#[test]
+fn detect_bands_spike_in_single_band() {
+    let mut detector = MultiBeatDetector::new();
+    // Warm up 43 frames of 0.4 for all bands. Mean = 0.4, threshold = 0.6.
+    let ts = warm_up_multi(&mut detector, &[0.4; 7], 43, 0.0, 0.01);
+    // Band 3 spikes to 0.7 (> 0.6), others stay at 0.4 (< 0.6).
+    let input = [0.4, 0.4, 0.4, 0.7, 0.4, 0.4, 0.4];
+    let events = detector.detect_bands(&input, ts);
+    assert_eq!(events.len(), 1, "Expected exactly 1 event, got {:?}", events);
+    assert_eq!(events[0].band, 3);
+}
+
+#[test]
+fn detect_bands_spike_in_multiple_bands() {
+    let mut detector = MultiBeatDetector::new();
+    let ts = warm_up_multi(&mut detector, &[0.4; 7], 43, 0.0, 0.01);
+    // Bands 0, 2, 6 spike.
+    let input = [0.7, 0.4, 0.7, 0.4, 0.4, 0.4, 0.7];
+    let events = detector.detect_bands(&input, ts);
+    assert_eq!(events.len(), 3, "Expected 3 events, got {:?}", events);
+    let bands: std::collections::HashSet<usize> = events.iter().map(|e| e.band).collect();
+    assert!(bands.contains(&0));
+    assert!(bands.contains(&2));
+    assert!(bands.contains(&6));
+}
+
+#[test]
+fn detect_bands_all_bands_spike() {
+    let mut detector = MultiBeatDetector::new();
+    let ts = warm_up_multi(&mut detector, &[0.4; 7], 43, 0.0, 0.01);
+    let events = detector.detect_bands(&[0.7; 7], ts);
+    assert_eq!(events.len(), 7, "Expected 7 events, got {:?}", events);
+    for i in 0..7 {
+        assert_eq!(events[i].band, i);
+    }
+}
+
+#[test]
+fn detect_bands_beat_event_has_correct_timestamp() {
+    let mut detector = MultiBeatDetector::new();
+    let _ = warm_up_multi(&mut detector, &[0.4; 7], 43, 0.0, 0.01);
+    let events = detector.detect_bands(&[0.7; 7], 5.0);
+    assert_eq!(events.len(), 7);
+    for e in &events {
+        assert!((e.timestamp_secs - 5.0).abs() < 1e-9, "Expected ts=5.0, got {}", e.timestamp_secs);
+    }
+}
+
+// --- Per-band inter-beat gap (0.3s minimum) ---
+
+#[test]
+fn detect_bands_gap_suppresses_within_0_3s() {
+    let mut detector = MultiBeatDetector::new();
+    // Warm up 43 frames at timestamps 0.0..0.42 (step 0.01).
+    let ts = warm_up_multi(&mut detector, &[0.4; 7], 43, 0.0, 0.01); // ts = 0.43
+    // Spike band 0 at t=0.43.
+    let first = detector.detect_bands(&[0.7, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4], ts);
+    assert!(!first.is_empty() && first.iter().any(|e| e.band == 0), "Band 0 should fire first");
+    // Re-warm 43 frames to restore the mean.
+    warm_up_multi(&mut detector, &[0.4; 7], 43, ts + 0.001, 0.001);
+    // Second spike at t=0.43 + 0.2 = 0.63 — only 0.2s elapsed for band 0 → suppressed.
+    let second = detector.detect_bands(&[0.7, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4], ts + 0.2);
+    assert!(!second.iter().any(|e| e.band == 0), "Band 0 should be suppressed at 0.2s gap");
+}
+
+#[test]
+fn detect_bands_gap_allows_after_0_3s() {
+    let mut detector = MultiBeatDetector::new();
+    let ts = warm_up_multi(&mut detector, &[0.4; 7], 43, 0.0, 0.01); // ts = 0.43
+    let first = detector.detect_bands(&[0.7, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4], ts);
+    assert!(first.iter().any(|e| e.band == 0));
+    warm_up_multi(&mut detector, &[0.4; 7], 43, ts + 0.001, 0.001);
+    // 0.31s > 0.3s → should fire.
+    let second = detector.detect_bands(&[0.7, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4], ts + 0.31);
+    assert!(second.iter().any(|e| e.band == 0), "Band 0 should fire after 0.31s gap");
+}
+
+#[test]
+fn detect_bands_gap_fires_at_exactly_0_3s() {
+    let mut detector = MultiBeatDetector::new();
+    let ts = warm_up_multi(&mut detector, &[0.4; 7], 43, 0.0, 0.01); // ts = 0.43
+    let first = detector.detect_bands(&[0.7, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4], ts);
+    assert!(first.iter().any(|e| e.band == 0));
+    warm_up_multi(&mut detector, &[0.4; 7], 43, ts + 0.001, 0.001);
+    // Exactly 0.3s → should fire (>= 0.3s condition).
+    let second = detector.detect_bands(&[0.7, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4], ts + 0.3);
+    assert!(second.iter().any(|e| e.band == 0), "Band 0 should fire at exactly 0.3s gap");
+}
+
+// --- Band independence ---
+
+#[test]
+fn detect_bands_independent_rolling_means() {
+    let mut detector = MultiBeatDetector::new();
+    // Band 0 warmed with 0.8, bands 1-6 with 0.2.
+    let warmup = [0.8_f32, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2];
+    let ts = warm_up_multi(&mut detector, &warmup, 43, 0.0, 0.01);
+    // Band 0: threshold = 0.8 * 1.5 = 1.2; feed 0.5 → no beat.
+    // Band 1: threshold = 0.2 * 1.5 = 0.3; feed 0.5 → beat.
+    let input = [0.5_f32, 0.5, 0.2, 0.2, 0.2, 0.2, 0.2];
+    let events = detector.detect_bands(&input, ts);
+    assert!(!events.iter().any(|e| e.band == 0), "Band 0 should NOT fire");
+    assert!(events.iter().any(|e| e.band == 1), "Band 1 should fire");
+}
+
+#[test]
+fn detect_bands_independent_gap_timers() {
+    let mut detector = MultiBeatDetector::new();
+    // Warm up 43 frames of 0.4 at 0.01s intervals; last frame at t=0.42, next ts=0.43.
+    let _ = warm_up_multi(&mut detector, &[0.4; 7], 43, 0.0, 0.01);
+
+    // Helper to feed a single band as spike, others at 0.4.
+    let spike_band = |det: &mut MultiBeatDetector, idx: usize, ts: f64| -> Vec<BandBeatEvent> {
+        let mut arr = [0.4_f32; 7];
+        arr[idx] = 0.7;
+        det.detect_bands(&arr, ts)
+    };
+    let flat = |det: &mut MultiBeatDetector, ts: f64| {
+        det.detect_bands(&[0.4; 7], ts);
+    };
+
+    // t=1.0: spike band 0 → fires.
+    let e1 = spike_band(&mut detector, 0, 1.0);
+    assert!(e1.iter().any(|e| e.band == 0), "Band 0 should fire at t=1.0");
+
+    flat(&mut detector, 1.05);
+
+    // t=1.1: spike band 1 → fires (no prior beat for band 1).
+    let e2 = spike_band(&mut detector, 1, 1.1);
+    assert!(e2.iter().any(|e| e.band == 1), "Band 1 should fire at t=1.1");
+
+    flat(&mut detector, 1.15);
+
+    // t=1.2: spike band 0 → suppressed (only 0.2s since t=1.0).
+    let e3 = spike_band(&mut detector, 0, 1.2);
+    assert!(!e3.iter().any(|e| e.band == 0), "Band 0 should be suppressed at t=1.2");
+
+    flat(&mut detector, 1.35);
+    flat(&mut detector, 1.4);
+
+    // t=1.5: spike band 1 → fires (0.4s since t=1.1).
+    let e4 = spike_band(&mut detector, 1, 1.5);
+    assert!(e4.iter().any(|e| e.band == 1), "Band 1 should fire at t=1.5");
+}
+
+#[test]
+fn detect_bands_two_bands_different_times() {
+    let mut detector = MultiBeatDetector::new();
+    let ts = warm_up_multi(&mut detector, &[0.4; 7], 43, 0.0, 0.01);
+
+    // t=1.0: spike band 2 only.
+    let e1 = detector.detect_bands(&[0.4, 0.4, 0.7, 0.4, 0.4, 0.4, 0.4], 1.0);
+    assert_eq!(e1.len(), 1);
+    assert_eq!(e1[0].band, 2);
+    assert!((e1[0].timestamp_secs - 1.0).abs() < 1e-9);
+
+    // feed some flat frames to keep mean stable.
+    warm_up_multi(&mut detector, &[0.4; 7], 5, ts + 0.01, 0.01);
+
+    // t=1.5: spike band 5 only.
+    let e2 = detector.detect_bands(&[0.4, 0.4, 0.4, 0.4, 0.4, 0.7, 0.4], 1.5);
+    assert_eq!(e2.len(), 1);
+    assert_eq!(e2[0].band, 5);
+    assert!((e2[0].timestamp_secs - 1.5).abs() < 1e-9);
+}
+
+// --- Rolling window per band ---
+
+#[test]
+fn detect_bands_43_sample_window_per_band() {
+    let mut detector = MultiBeatDetector::new();
+    // Fill window with 1.0, then replace with 0.0 — mean should approach 0.0.
+    warm_up_multi(&mut detector, &[1.0; 7], 43, 0.0, 0.01);
+    // Feed 43 zeros, spacing > 0.3s to avoid inter-beat suppression.
+    warm_up_multi(&mut detector, &[0.0; 7], 43, 0.43, 0.31);
+    // Mean ~0.0; any value > 0 should be spike.
+    let ts = 0.43 + 43.0 * 0.31;
+    let events = detector.detect_bands(&[0.01; 7], ts);
+    assert_eq!(events.len(), 7, "All 7 bands should spike against near-zero mean, got {:?}", events);
+}
+
+// --- Backward compatibility ---
+
+#[test]
+fn old_api_coexists_with_new_api() {
+    let mut old = BeatDetector::new();
+    let mut new = MultiBeatDetector::new();
+
+    // Warm up both.
+    let ts = warm_up(&mut old, 0.4, 43, 0.0, 0.01);
+    warm_up_multi(&mut new, &[0.4; 7], 43, 0.0, 0.01);
+
+    // Old API fires.
+    let beat = old.detect(0.7, ts);
+    assert!(beat.is_some(), "BeatDetector should return Some(BeatEvent)");
+
+    // New API fires.
+    let events = new.detect_bands(&[0.7; 7], ts);
+    assert_eq!(events.len(), 7, "MultiBeatDetector should return 7 BandBeatEvents");
 }

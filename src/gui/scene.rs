@@ -11,26 +11,30 @@ use super::theme::*;
 use super::world::GameWorld;
 
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)
-pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
-    let amp = world.amplitude;
+/// Returns (opaque_scene, transparent_scene, hud) geometry.
+pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
     let beat = world.beat_intensity;
     let cube_depth = 0.75; // chunkier cubes for more substantial 3D feel
 
-    let mut sv = Vec::new();
+    let mut sv = Vec::new(); // opaque scene
     let mut si = Vec::new();
+    let mut tv = Vec::new(); // transparent scene
+    let mut ti = Vec::new();
 
     let gw = WIDTH as f32;
     let gh = HEIGHT as f32;
 
-    // Background geometry
-    build_background(&mut sv, &mut si, world, gw, gh);
+    // Background geometry (transparent — behind everything)
+    build_background(&mut tv, &mut ti, world, gw, gh);
 
-    // Occupied cells as 3D cubes (bottom-to-top, right-to-left for correct face overlap)
-    for row in (0..HEIGHT).rev() {
-        for col in (0..WIDTH).rev() {
+    // Occupied cells as 3D cubes — depth testing handles occlusion
+    // Each piece type pulses with a different frequency band
+    for row in 0..HEIGHT {
+        for col in 0..WIDTH {
             if let CellState::Occupied(ti) = world.session.grid.cells[row][col] {
                 let color = rgba_to_f32(piece_color(ti));
-                push_cube_3d(&mut sv, &mut si, col as f32, row as f32, cube_depth, color, amp * 2.0);
+                let band_glow = world.bands_norm[(ti as usize) % 7] * 2.0;
+                push_cube_3d(&mut sv, &mut si, col as f32, row as f32, cube_depth, color, band_glow);
             }
         }
     }
@@ -48,29 +52,31 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             let r = ghost_row + dr;
             let c = world.session.active_piece.col + dc;
             if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth * 0.2, ghost_color, 0.0);
+                push_cube_3d(&mut tv, &mut ti, c as f32, r as f32, cube_depth * 0.2, ghost_color, 0.0);
             }
         }
 
-        // Active piece
+        // Active piece — pulses with its frequency band
         let color = rgba_to_f32(piece_color(world.session.active_piece.piece_type as u32));
+        let active_glow = world.bands_norm[(world.session.active_piece.piece_type as usize) % 7] * 2.0;
         for &(dr, dc) in &cells {
             let r = world.session.active_piece.row + dr;
             let c = world.session.active_piece.col + dc;
             if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth, color, amp * 2.0);
+                push_cube_3d(&mut sv, &mut si, c as f32, r as f32, cube_depth, color, active_glow);
             }
         }
     }
 
-    // Grid lines — drawn after cubes so they overlay the top faces
+    // Grid lines — shimmer driven by presence (band 5) + beat
     let line_boost = (beat * 40.0) as u8;
-    let highs_boost = (world.highs * 60.0) as u8;
+    let presence = world.bands_norm[5];
+    let presence_boost = (presence * 80.0) as u8;
     let lc: [u8; 4] = [40, 45, 70, 255];
     let line_color = rgba_to_f32([
-        lc[0].saturating_add(line_boost).saturating_add(highs_boost / 3),
-        lc[1].saturating_add(line_boost).saturating_add(highs_boost / 2),
-        lc[2].saturating_add(line_boost * 2).saturating_add(highs_boost),
+        lc[0].saturating_add(line_boost).saturating_add(presence_boost / 3),
+        lc[1].saturating_add(line_boost).saturating_add(presence_boost / 2),
+        lc[2].saturating_add(line_boost * 2).saturating_add(presence_boost),
         lc[3],
     ]);
     for col in 0..=WIDTH {
@@ -97,13 +103,6 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
     let vol_fill = rgba_to_f32([60, 100, 180, (220.0 * hud_a) as u8]);
     push_slab_3d(&mut sv, &mut si, vol_bar_x, vol_y + 0.15, vol_bar_w * vol, vol_h, 0.3, vol_fill);
-    // Vol up button [+] (draw right-to-left)
-    let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
-        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut sv, &mut si, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
     // Vol down button [-]
     let vd_color = if world.btn_hovered(super::world::ButtonId::VolDown) {
         rgba_to_f32([80, 60, 60, (240.0 * hud_a) as u8])
@@ -111,14 +110,21 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
     };
     push_slab_3d(&mut sv, &mut si, vol_minus_x, vol_y, vol_btn_w, 0.5, 0.4, vd_color);
+    // Vol up button [+]
+    let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
+        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
+    } else {
+        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
+    };
+    push_slab_3d(&mut sv, &mut si, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
 
     // Transport buttons: [<<] [>||] [>>] [SH]
-    // Draw right-to-left so left faces don't overwrite right neighbors
+    // Transport buttons: [<<] [>||] [>>] [SH]
     let transport_ids = [
-        super::world::ButtonId::Shuffle,
-        super::world::ButtonId::Skip,
-        super::world::ButtonId::PlayPause,
         super::world::ButtonId::Back,
+        super::world::ButtonId::PlayPause,
+        super::world::ButtonId::Skip,
+        super::world::ButtonId::Shuffle,
     ];
     let is_paused = if let Ok(audio) = world.audio.try_lock() { audio.paused } else { false };
     for &id in &transport_ids {
@@ -150,29 +156,34 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let fft_x = -4.5;
     let fft_y = 14.0;
     let fft_max_h = 5.0;
-    let col_w = 0.2;
-    let col_gap = 0.25;
+    let col_w = 0.12;
+    let col_gap = 0.1;
     let fft_depth = 0.35;
-    let bands: [(f32, [u8; 4]); 3] = [
-        (world.bass,  [40, 60, 180, (220.0 * fft_a) as u8]),
-        (world.mids,  [60, 160, 100, (220.0 * fft_a) as u8]),
-        (world.highs, [180, 80, 60, (220.0 * fft_a) as u8]),
+    // All 7 bands, gradient blue → cyan → green → yellow → orange → red
+    let band_colors: [[u8; 3]; 7] = [
+        [30, 30, 180],   // sub-bass — deep blue
+        [40, 80, 180],   // bass — blue
+        [40, 160, 160],  // low-mids — cyan
+        [60, 170, 80],   // mids — green
+        [180, 180, 40],  // upper-mids — yellow
+        [200, 100, 40],  // presence — orange
+        [200, 50, 50],   // brilliance — red
     ];
-    let peaks = [world.peak_bass, world.peak_mids, world.peak_highs];
-    for (i, (val, color)) in bands.iter().enumerate() {
+    for (i, (val, color)) in world.bands.iter().zip(&band_colors).enumerate() {
+        let color = [color[0], color[1], color[2], (220.0 * fft_a) as u8];
         let bx = fft_x + i as f32 * (col_w + col_gap);
         let filled_h = (fft_max_h * val).max(0.05);
         let bg_color = rgba_to_f32([12, 12, 25, (120.0 * fft_a) as u8]);
         push_slab_3d(&mut sv, &mut si, bx, fft_y, col_w, fft_max_h, fft_depth * 0.3, bg_color);
         let fill_y = fft_y + (fft_max_h - filled_h);
-        push_slab_3d(&mut sv, &mut si, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(*color));
-        let peak_h = (fft_max_h * peaks[i]).max(0.05);
+        push_slab_3d(&mut sv, &mut si, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(color));
+        let peak_h = (fft_max_h * world.peak_bands[i]).max(0.05);
         let peak_y = fft_y + (fft_max_h - peak_h);
         let peak_color = rgba_to_f32([255, 255, 255, (160.0 * fft_a) as u8]);
         push_slab_3d(&mut sv, &mut si, bx, peak_y, col_w, 0.1, fft_depth + 0.1, peak_color);
     }
     // FFT lock toggle button (below FFT bars, fades with HUD not with bars)
-    let fft_total_w = 3.0 * col_w + 2.0 * col_gap;
+    let fft_total_w = 7.0 * col_w + 6.0 * col_gap;
     let lock_color = if world.fft_locked {
         rgba_to_f32([80, 120, 80, (240.0 * hud_a) as u8])
     } else if world.btn_hovered(super::world::ButtonId::FftLock) {
@@ -204,28 +215,28 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             let n_front = [0.0f32, 0.0, 1.0];
 
             // Just front face + top face for dissolving cells (simpler, faster)
-            let base = sv.len() as u32;
-            sv.push(Vertex { position: [x0, y0, z1], normal: n_front, color: bright_color });
-            sv.push(Vertex { position: [x1, y0, z1], normal: n_front, color: bright_color });
-            sv.push(Vertex { position: [x1, y1, z1], normal: n_front, color: bright_color });
-            sv.push(Vertex { position: [x0, y1, z1], normal: n_front, color: bright_color });
-            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            let base = tv.len() as u32;
+            tv.push(Vertex { position: [x0, y0, z1], normal: n_front, color: bright_color });
+            tv.push(Vertex { position: [x1, y0, z1], normal: n_front, color: bright_color });
+            tv.push(Vertex { position: [x1, y1, z1], normal: n_front, color: bright_color });
+            tv.push(Vertex { position: [x0, y1, z1], normal: n_front, color: bright_color });
+            ti.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 
             let n_top = [0.0f32, 1.0, 0.0];
             let top_color = [1.0, 1.0, 1.0, alpha * 0.8];
-            let base = sv.len() as u32;
-            sv.push(Vertex { position: [x0, y0, z1], normal: n_top, color: top_color });
-            sv.push(Vertex { position: [x0, y0, z0], normal: n_top, color: top_color });
-            sv.push(Vertex { position: [x1, y0, z0], normal: n_top, color: top_color });
-            sv.push(Vertex { position: [x1, y0, z1], normal: n_top, color: top_color });
-            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            let base = tv.len() as u32;
+            tv.push(Vertex { position: [x0, y0, z1], normal: n_top, color: top_color });
+            tv.push(Vertex { position: [x0, y0, z0], normal: n_top, color: top_color });
+            tv.push(Vertex { position: [x1, y0, z0], normal: n_top, color: top_color });
+            tv.push(Vertex { position: [x1, y0, z1], normal: n_top, color: top_color });
+            ti.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
         }
     }
 
     // HUD
     let (hv, hi) = build_hud(world);
 
-    ((sv, si), (hv, hi))
+    ((sv, si), (tv, ti), (hv, hi))
 }
 
 /// Background geometric field: hex grid + connecting web + beat rings
@@ -236,11 +247,13 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
     let geo_z = -2.0;
     let geo_n = [0.0f32, 0.0, 1.0];
     let geo_time = world.preview_angle * (0.3 + d * 0.4);
-    let geo_alpha = 0.03 + world.mids * 0.15 + d * 0.05;
+    let low_mids = world.bands_norm[2];
+    let sub_bass = world.bands_norm[0];
+    let geo_alpha = 0.03 + low_mids * 0.15 + d * 0.05;
 
-    // Hex dot grid
+    // Hex dot grid — size driven by low-mids, color warmth by sub-bass
     let hex_rings = 4;
-    let dot_size = 0.06 + world.mids * 0.24;
+    let dot_size = 0.06 + low_mids * 0.24;
     for ring in 1..=hex_rings {
         let r = ring as f32 * 3.5;
         let points = ring * 6;
@@ -250,7 +263,7 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
             let dy = angle.sin() * r;
             let dist_factor = 1.0 - (ring as f32 / hex_rings as f32) * 0.5;
             let dot_alpha = geo_alpha * dist_factor;
-            let dot_color = [0.15 + d * 0.45, 0.2 - d * 0.08, 0.5 - d * 0.35, dot_alpha];
+            let dot_color = [0.15 + d * 0.45 + sub_bass * 0.2, 0.2 - d * 0.08, 0.5 - d * 0.35 - sub_bass * 0.15, dot_alpha];
 
             let base = sv.len() as u32;
             sv.push(Vertex { position: [geo_cx + dx - dot_size, geo_cy + dy - dot_size, geo_z], normal: geo_n, color: dot_color });
@@ -580,13 +593,21 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     // State overlays
     if world.session.state == GameState::GameOver {
-        push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([180, 0, 0, 60]), 0.08);
-        let go_w = 200.0; let go_h = 50.0;
+        push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([120, 0, 0, 80]), 0.08);
+        let go_w = 200.0; let go_h = 120.0;
         let go_x = (w - go_w) / 2.0;
         let go_y = (h - go_h) / 2.0;
         push_panel(&mut verts, &mut indices, go_x, go_y, go_w, go_h, 0.09);
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 8.0, "GAME OVER", rgba_to_f32([255, 80, 80, 255]), 2.0);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 30.0, "ENTER TO RESTART", dim_col, 1.0);
+        // Final score prominent
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 34.0, "SCORE", dim_col, 1.0);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 46.0,
+                  &format!("{}", world.session.score), text_col, 3.0);
+        // Stats
+        let level = level_for_lines(world.session.total_lines);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 72.0,
+                  &format!("LEVEL {}  LINES {}", level, world.session.total_lines), dim_col, 1.0);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 92.0, "ENTER TO RESTART", dim_col, 1.0);
     }
 
     if world.session.state == GameState::Paused {

@@ -188,6 +188,41 @@ pub fn score_for_lines(lines: u32, level: u32) -> u32 {
     base * level
 }
 
+// --- T-Spin Detection ---
+
+pub const T_SPIN_ZERO: u32 = 100;
+pub const T_SPIN_SINGLE: u32 = 200;
+pub const T_SPIN_DOUBLE: u32 = 600;
+pub const T_SPIN_TRIPLE: u32 = 800;
+
+pub fn detect_t_spin(grid: &Grid, piece: &ActivePiece, last_move_was_rotate: bool) -> bool {
+    if piece.piece_type != TetrominoType::T || !last_move_was_rotate {
+        return false;
+    }
+    let corners = [
+        (piece.row - 1, piece.col - 1),
+        (piece.row - 1, piece.col + 1),
+        (piece.row + 1, piece.col - 1),
+        (piece.row + 1, piece.col + 1),
+    ];
+    let filled = corners.iter().filter(|&&(r, c)| {
+        r < 0 || c < 0 || r as usize >= HEIGHT || c as usize >= WIDTH
+            || grid.cells[r as usize][c as usize] != CellState::Empty
+    }).count();
+    filled >= 3
+}
+
+pub fn t_spin_score(lines: u32, level: u32) -> u32 {
+    let base = match lines {
+        0 => T_SPIN_ZERO,
+        1 => T_SPIN_SINGLE,
+        2 => T_SPIN_DOUBLE,
+        3 => T_SPIN_TRIPLE,
+        _ => return 0,
+    };
+    base * level
+}
+
 // --- Escalation ---
 
 pub const DANGER_THRESHOLD_ROW: usize = 4;
@@ -319,6 +354,12 @@ pub struct GameSession {
     pub lock_delay_resets: u32,
     pub held_piece: Option<TetrominoType>,
     pub can_hold: bool,
+    pub last_move_was_rotate: bool,
+    pub combo_count: u32,
+    pub pieces_placed: u32,
+    pub lines_cleared_total: u32,
+    pub max_combo: u32,
+    pub time_played_secs: f64,
 }
 
 impl GameSession {
@@ -340,10 +381,17 @@ impl GameSession {
             lock_delay_resets: 0,
             held_piece: None,
             can_hold: true,
+            last_move_was_rotate: false,
+            combo_count: 0,
+            pieces_placed: 0,
+            lines_cleared_total: 0,
+            max_combo: 0,
+            time_played_secs: 0.0,
         }
     }
 
     pub fn move_horizontal(&mut self, delta: i32) -> bool {
+        self.last_move_was_rotate = false;
         let result = move_horizontal(&self.grid, &mut self.active_piece, delta);
         if result && self.lock_delay_active && self.lock_delay_resets < MAX_LOCK_RESETS {
             self.lock_delay_accumulator_ms = 0;
@@ -354,22 +402,57 @@ impl GameSession {
 
     pub fn rotate(&mut self, clockwise: bool) -> bool {
         let result = rotate(&self.grid, &mut self.active_piece, clockwise);
-        if result && self.lock_delay_active && self.lock_delay_resets < MAX_LOCK_RESETS {
-            self.lock_delay_accumulator_ms = 0;
-            self.lock_delay_resets += 1;
+        if result {
+            self.last_move_was_rotate = true;
+            if self.lock_delay_active && self.lock_delay_resets < MAX_LOCK_RESETS {
+                self.lock_delay_accumulator_ms = 0;
+                self.lock_delay_resets += 1;
+            }
         }
         result
     }
 
     pub fn hard_drop(&mut self) -> TickResult {
+        // Compute landed position for T-spin detection (before modifying grid)
+        let cells = piece_cells(self.active_piece.piece_type, self.active_piece.rotation);
+        let mut landed_row = self.active_piece.row;
+        loop {
+            let next = landed_row + 1;
+            if is_valid_position(&self.grid, &cells, next, self.active_piece.col) {
+                landed_row = next;
+            } else {
+                break;
+            }
+        }
+        let landed_piece = ActivePiece { row: landed_row, ..self.active_piece };
+        let was_rotate = self.last_move_was_rotate;
+        let is_tspin = detect_t_spin(&self.grid, &landed_piece, was_rotate);
+
         let lines_cleared = hard_drop(&mut self.grid, &self.active_piece);
+        self.last_move_was_rotate = false;
         self.lock_delay_active = false;
         self.lock_delay_accumulator_ms = 0;
         self.lock_delay_resets = 0;
         self.gravity_accumulator_ms = 0;
+        self.pieces_placed += 1;
+        self.lines_cleared_total += lines_cleared;
         self.total_lines += lines_cleared;
         let new_level = level_for_lines(self.total_lines);
         self.score += score_for_lines(lines_cleared, new_level);
+
+        if lines_cleared > 0 {
+            if is_tspin {
+                self.score += t_spin_score(lines_cleared, new_level);
+            }
+            self.combo_count += 1;
+            self.score += 50 * self.combo_count * new_level;
+            if self.combo_count > self.max_combo {
+                self.max_combo = self.combo_count;
+            }
+        } else {
+            self.combo_count = 0;
+        }
+
         let next_type = TETROMINO_TYPES[self.bag.next()];
         match try_spawn(next_type, &self.grid) {
             None => {
@@ -448,6 +531,8 @@ pub fn tick(session: &mut GameSession, dt_secs: f64) -> TickResult {
         return TickResult::Nothing;
     }
 
+    session.time_played_secs += dt_secs;
+
     let dt_ms = (dt_secs * 1000.0) as u64;
 
     if session.lock_delay_active {
@@ -455,11 +540,18 @@ pub fn tick(session: &mut GameSession, dt_secs: f64) -> TickResult {
         if session.lock_delay_accumulator_ms >= LOCK_DELAY_MS
             || session.lock_delay_resets >= MAX_LOCK_RESETS
         {
+            let was_rotate = session.last_move_was_rotate;
+            let piece_at_lock = session.active_piece;
+            let is_tspin = detect_t_spin(&session.grid, &piece_at_lock, was_rotate);
+
             let lines_cleared = lock_piece(&mut session.grid, &session.active_piece);
             let next_type = TETROMINO_TYPES[session.bag.next()];
             session.lock_delay_active = false;
             session.lock_delay_accumulator_ms = 0;
             session.lock_delay_resets = 0;
+            session.last_move_was_rotate = false;
+            session.pieces_placed += 1;
+            session.lines_cleared_total += lines_cleared;
             match try_spawn(next_type, &session.grid) {
                 None => {
                     session.state = GameState::GameOver;
@@ -471,6 +563,20 @@ pub fn tick(session: &mut GameSession, dt_secs: f64) -> TickResult {
                     session.total_lines += lines_cleared;
                     let new_level = level_for_lines(session.total_lines);
                     session.score += score_for_lines(lines_cleared, new_level);
+
+                    if lines_cleared > 0 {
+                        if is_tspin {
+                            session.score += t_spin_score(lines_cleared, new_level);
+                        }
+                        session.combo_count += 1;
+                        session.score += 50 * session.combo_count * new_level;
+                        if session.combo_count > session.max_combo {
+                            session.max_combo = session.combo_count;
+                        }
+                    } else {
+                        session.combo_count = 0;
+                    }
+
                     session.gravity_accumulator_ms = 0;
                     session.can_hold = true;
                     TickResult::PieceLocked { lines_cleared }

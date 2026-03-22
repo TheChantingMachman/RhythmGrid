@@ -191,8 +191,9 @@ pub struct GpuState {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    scene_pipeline: wgpu::RenderPipeline,
-    scene_pipeline_no_depth: wgpu::RenderPipeline, // for HUD overlay
+    scene_pipeline: wgpu::RenderPipeline,         // opaque with depth write
+    scene_pipeline_transparent: wgpu::RenderPipeline, // depth read, no write
+    scene_pipeline_no_depth: wgpu::RenderPipeline, // HUD overlay, no depth
     msaa_texture: wgpu::TextureView,
     scene_texture: wgpu::TextureView,
     depth_texture: wgpu::TextureView,
@@ -300,8 +301,17 @@ impl GpuState {
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None, bind_group_layouts: &[&scene_bind_group_layout], push_constant_ranges: &[],
         });
+        let depth_stencil_state = wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
+
+        // Scene pipeline — opaque geometry with depth write
         let scene_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scene"),
+            label: Some("scene_opaque"),
             layout: Some(&scene_layout),
             vertex: wgpu::VertexState {
                 module: &scene_shader, entry_point: Some("vs_main"),
@@ -315,12 +325,36 @@ impl GpuState {
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-            depth_stencil: None,
+            depth_stencil: Some(depth_stencil_state.clone()),
             multisample: wgpu::MultisampleState::default(),
             multiview: None, cache: None,
         });
 
-        // HUD pipeline (same as scene but separate for future depth config)
+        // Transparent pipeline — depth read but no write (blends correctly over opaque)
+        let scene_pipeline_transparent = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scene_transparent"),
+            layout: Some(&scene_layout),
+            vertex: wgpu::VertexState {
+                module: &scene_shader, entry_point: Some("vs_main"),
+                buffers: &[Vertex::desc()], compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &scene_shader, entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                depth_write_enabled: false,
+                ..depth_stencil_state
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None, cache: None,
+        });
+
+        // HUD pipeline — no depth testing (2D overlay)
         let scene_pipeline_no_depth = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("hud"),
             layout: Some(&scene_layout),
@@ -373,7 +407,7 @@ impl GpuState {
 
         GpuState {
             surface, device, queue, config,
-            scene_pipeline, scene_pipeline_no_depth,
+            scene_pipeline, scene_pipeline_transparent, scene_pipeline_no_depth,
             msaa_texture, scene_texture, depth_texture,
             bloom_pipeline, sampler, bloom_bind_group_layout: bind_group_layout,
             uniform_buffer, scene_bind_group,
@@ -393,7 +427,7 @@ impl GpuState {
         device.create_texture(&wgpu::TextureDescriptor {
             label: Some("depth"),
             size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
-            mip_level_count: 1, sample_count: SAMPLE_COUNT, dimension: wgpu::TextureDimension::D2,
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
@@ -432,10 +466,11 @@ impl GpuState {
         self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[*uniforms]));
     }
 
-    /// Render scene (3D with depth) and HUD (2D overlay without depth).
+    /// Render scene (opaque + transparent 3D) and HUD (2D overlay).
     /// Call update_uniforms with the 3D camera before this.
     pub fn render(&self,
-                  scene_verts: &[Vertex], scene_indices: &[u32],
+                  opaque_verts: &[Vertex], opaque_indices: &[u32],
+                  transparent_verts: &[Vertex], transparent_indices: &[u32],
                   hud_verts: &[Vertex], hud_indices: &[u32]) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
@@ -443,11 +478,17 @@ impl GpuState {
         };
         let surface_view = output.texture.create_view(&Default::default());
 
-        let scene_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(scene_verts), usage: wgpu::BufferUsages::VERTEX,
+        let opaque_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None, contents: bytemuck::cast_slice(opaque_verts), usage: wgpu::BufferUsages::VERTEX,
         });
-        let scene_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(scene_indices), usage: wgpu::BufferUsages::INDEX,
+        let opaque_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None, contents: bytemuck::cast_slice(opaque_indices), usage: wgpu::BufferUsages::INDEX,
+        });
+        let trans_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None, contents: bytemuck::cast_slice(transparent_verts), usage: wgpu::BufferUsages::VERTEX,
+        });
+        let trans_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None, contents: bytemuck::cast_slice(transparent_indices), usage: wgpu::BufferUsages::INDEX,
         });
         let hud_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None, contents: bytemuck::cast_slice(hud_verts), usage: wgpu::BufferUsages::VERTEX,
@@ -456,13 +497,21 @@ impl GpuState {
             label: None, contents: bytemuck::cast_slice(hud_indices), usage: wgpu::BufferUsages::INDEX,
         });
 
+        let depth_attachment = wgpu::RenderPassDepthStencilAttachment {
+            view: &self.depth_texture,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        };
 
-        // Pass 1: 3D scene → scene_texture (with camera uniform)
+        // Pass 1: Opaque 3D scene (depth write ON)
         {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("scene_3d"),
+                    label: Some("scene_opaque"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &self.scene_texture,
                         resolve_target: None,
@@ -471,20 +520,52 @@ impl GpuState {
                             store: wgpu::StoreOp::Store,
                         },
                     })],
-                    depth_stencil_attachment: None,
+                    depth_stencil_attachment: Some(depth_attachment),
                     ..Default::default()
                 });
-                // Full surface — no viewport restriction, background fills to edges
                 pass.set_pipeline(&self.scene_pipeline);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
-                pass.set_vertex_buffer(0, scene_vb.slice(..));
-                pass.set_index_buffer(scene_ib.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..scene_indices.len() as u32, 0, 0..1);
+                pass.set_vertex_buffer(0, opaque_vb.slice(..));
+                pass.set_index_buffer(opaque_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..opaque_indices.len() as u32, 0, 0..1);
             }
             self.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        // Pass 2: HUD → scene_texture (with identity uniform)
+        // Pass 2: Transparent 3D scene (depth read ON, write OFF)
+        if !transparent_indices.is_empty() {
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("scene_transparent"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.scene_texture,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_texture,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.scene_pipeline_transparent);
+                pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                pass.set_vertex_buffer(0, trans_vb.slice(..));
+                pass.set_index_buffer(trans_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..transparent_indices.len() as u32, 0, 0..1);
+            }
+            self.queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        // Pass 3: HUD → scene_texture (with identity uniform, no depth)
         self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[Uniforms::identity()]));
         if !hud_indices.is_empty() {
             let mut encoder = self.device.create_command_encoder(&Default::default());

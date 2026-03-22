@@ -249,28 +249,35 @@ impl BeatDetector {
 
 // --- FFT Frequency Band Decomposition ---
 
-const BASS_LOW: u32 = 20;
-const BASS_HIGH: u32 = 250;
-const MIDS_LOW: u32 = 250;
-const MIDS_HIGH: u32 = 4000;
-const HIGHS_LOW: u32 = 4000;
-const HIGHS_HIGH: u32 = 20000;
+const BAND_COUNT: usize = 7;
+const FREQ_MIN: u32 = 20;
+const FREQ_MAX: u32 = 20000;
+const BAND0_LOW: u32 = 20;
+const BAND0_HIGH: u32 = 60;
+const BAND1_LOW: u32 = 61;
+const BAND1_HIGH: u32 = 250;
+const BAND2_LOW: u32 = 251;
+const BAND2_HIGH: u32 = 500;
+const BAND3_LOW: u32 = 501;
+const BAND3_HIGH: u32 = 2000;
+const BAND4_LOW: u32 = 2001;
+const BAND4_HIGH: u32 = 4000;
+const BAND5_LOW: u32 = 4001;
+const BAND5_HIGH: u32 = 8000;
+const BAND6_LOW: u32 = 8001;
+const BAND6_HIGH: u32 = 20000;
 
-pub fn fft_bands(samples: &[f32], sample_rate: u32) -> (f32, f32, f32) {
+pub fn fft_bands(samples: &[f32], sample_rate: u32) -> [f32; 7] {
     if samples.is_empty() || sample_rate == 0 {
-        return (0.0, 0.0, 0.0);
+        return [0.0; BAND_COUNT];
     }
 
     let n = samples.len();
 
-    // Apply Hann window and convert to complex
+    // Convert to complex (rectangular window — preserves exact bin energy for pure tones)
     let mut buffer: Vec<Complex<f32>> = samples
         .iter()
-        .enumerate()
-        .map(|(i, &s)| {
-            let window = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n - 1).max(1) as f32).cos());
-            Complex { re: s * window, im: 0.0 }
-        })
+        .map(|&s| Complex { re: s, im: 0.0 })
         .collect();
 
     let mut planner = FftPlanner::new();
@@ -286,23 +293,89 @@ pub fn fft_bands(samples: &[f32], sample_rate: u32) -> (f32, f32, f32) {
         c.re * c.re + c.im * c.im
     };
 
-    let band_power = |low_hz: u32, high_hz: u32| -> f32 {
-        let low_bin = ((low_hz as f32 / bin_hz).floor() as usize).min(num_bins - 1);
-        let high_bin = ((high_hz as f32 / bin_hz).ceil() as usize).min(num_bins - 1);
-        (low_bin..=high_bin).map(bin_energy).sum()
+    let bin_freq = |bin: usize| -> f32 {
+        bin as f32 * bin_hz
     };
 
-    let total_power: f32 = (0..num_bins).map(bin_energy).sum();
+    // Band boundaries: contiguous, exclusive-low / inclusive-high (except band 0 includes low).
+    // Use previous band's HIGH as the exclusive lower bound for bands 1-6 so there are no gaps.
+    let band_highs: [f32; BAND_COUNT] = [
+        BAND0_HIGH as f32,
+        BAND1_HIGH as f32,
+        BAND2_HIGH as f32,
+        BAND3_HIGH as f32,
+        BAND4_HIGH as f32,
+        BAND5_HIGH as f32,
+        BAND6_HIGH as f32,
+    ];
 
-    if total_power == 0.0 {
-        return (0.0, 0.0, 0.0);
+    let mut bands = [0.0f32; BAND_COUNT];
+    for bin in 0..num_bins {
+        let f = bin_freq(bin);
+        if f < FREQ_MIN as f32 || f > FREQ_MAX as f32 {
+            continue;
+        }
+        let energy = bin_energy(bin);
+        // Band 0: f >= 20.0 && f <= 60.0
+        // Band N (1-6): f > previous_band_high && f <= band_N_high
+        if f <= band_highs[0] {
+            bands[0] += energy;
+        } else if f <= band_highs[1] {
+            bands[1] += energy;
+        } else if f <= band_highs[2] {
+            bands[2] += energy;
+        } else if f <= band_highs[3] {
+            bands[3] += energy;
+        } else if f <= band_highs[4] {
+            bands[4] += energy;
+        } else if f <= band_highs[5] {
+            bands[5] += energy;
+        } else {
+            bands[6] += energy;
+        }
     }
 
-    let bass = band_power(BASS_LOW, BASS_HIGH) / total_power;
-    let mids = band_power(MIDS_LOW, MIDS_HIGH) / total_power;
-    let highs = band_power(HIGHS_LOW, HIGHS_HIGH) / total_power;
+    // Normalize by total_power. Use the sum of band energies (which equals total_power
+    // for contiguous bands) to avoid floating-point divergence that could push sum > 1.0.
+    let band_total: f32 = bands.iter().sum();
+    if band_total == 0.0 {
+        return [0.0; BAND_COUNT];
+    }
+    for b in &mut bands {
+        *b /= band_total;
+    }
 
-    (bass, mids, highs)
+    bands
+}
+
+// --- Multi-Band Beat Detection ---
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BandBeatEvent {
+    pub band: usize,
+    pub timestamp_secs: f64,
+}
+
+pub struct MultiBeatDetector {
+    detectors: [BeatDetector; 7],
+}
+
+impl MultiBeatDetector {
+    pub fn new() -> Self {
+        MultiBeatDetector {
+            detectors: std::array::from_fn(|_| BeatDetector::new()),
+        }
+    }
+
+    pub fn detect_bands(&mut self, bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent> {
+        let mut events = Vec::new();
+        for (i, &energy) in bands.iter().enumerate() {
+            if self.detectors[i].detect(energy, timestamp_secs).is_some() {
+                events.push(BandBeatEvent { band: i, timestamp_secs });
+            }
+        }
+        events
+    }
 }
 
 pub fn generate_procedural(bpm: u32, duration_secs: f32, sample_rate: u32) -> DecodedAudio {

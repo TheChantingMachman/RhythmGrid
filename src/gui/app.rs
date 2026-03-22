@@ -91,9 +91,9 @@ impl ApplicationHandler for App {
                     self.world.update_button_rects(&uniforms, gpu.aspect_ratio());
                     gpu.update_uniforms(&uniforms);
                 }
-                let ((sv, si), (hv, hi)) = self.world.build_scene_and_hud();
+                let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
                 if let Some(gpu) = &self.gpu {
-                    gpu.render(&sv, &si, &hv, &hi);
+                    gpu.render(&ov, &oi, &tv, &ti, &hv, &hi);
                 }
                 if let Some(w) = &self.window {
                     w.request_redraw();
