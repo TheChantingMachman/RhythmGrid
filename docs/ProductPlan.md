@@ -233,7 +233,8 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 
 **Remaining:**
 - Effects interface: AudioEffect trait defined, 4 audio effects + CameraReactor migrated. Theme struct ready but not wired. See AudioVisualCatalog.md for migration status.
-- Build a second theme to prove the system (different ring style, hex pattern, camera behavior)
+- Build a second theme to prove the system (different ring style, hex pattern, camera behavior) — Water theme params defined, needs piece color overrides
+- Theme piece color overrides: `themed_piece_color()` wrapper that checks theme override before falling back to pipeline `piece_color()`. Touches ~8 render call sites.
 - Spectral centroid wired to grid color temp (done). Spectral flux wired to background brightness (done). More routing possible.
 - Rolling averages + dominant band ranking (infrastructure for dynamic effect routing)
 - Settings persistence (volume, shuffle state survive restart)

@@ -113,7 +113,7 @@ pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
 impl GameWorld {
     pub fn new() -> Self {
-        let theme = themes::default_theme();
+        let theme = themes::default_theme(); // swap to water_theme() for water look
         // Load settings to check for music folder
         let settings_path = config_dir().join("settings.toml");
         let settings = load_settings(&settings_path);
