@@ -33,6 +33,7 @@ pub struct GameWorld {
     pub(super) norm_ceil: [f32; 7],    // fast decay — normalization ceiling
     pub(super) bands_norm: [f32; 7],   // each band normalized to its own ceiling (0-1)
     pub(super) band_beat_intensity: [f32; 7], // per-band beat decay (1.0 on beat, decays)
+    pub(super) t_spin_flash: f32, // 1.0 on t-spin, decays to 0
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
@@ -121,6 +122,7 @@ impl GameWorld {
             norm_ceil: [0.01; 7],
             bands_norm: [0.0; 7],
             band_beat_intensity: [0.0; 7],
+            t_spin_flash: 0.0,
             particles: ParticleSystem::new(),
             prev_beat: false,
             clearing_cells: Vec::new(),
@@ -315,6 +317,9 @@ impl GameWorld {
             self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 4.0).max(0.0);
         }
 
+        // T-spin flash decay
+        self.t_spin_flash = (self.t_spin_flash - dt as f32 * 1.0).max(0.0);
+
         // Shake decay
         self.shake_time += dt as f32 * 30.0;
         self.shake_intensity = (self.shake_intensity - dt as f32 * 1.3).max(0.0);
@@ -343,11 +348,16 @@ impl GameWorld {
         }
         self.last_tick = now;
 
-        // Capture pre-tick piece for visual effects (tick replaces active_piece on lock)
+        // Capture pre-tick state for visual effects
         let pre_piece = self.session.active_piece;
+        let pre_was_rotate = self.session.last_move_was_rotate;
+        let pre_is_t_spin = detect_t_spin(&self.session.grid, &pre_piece, pre_was_rotate);
 
         match tick(&mut self.session, dt) {
             TickResult::PieceLocked { lines_cleared } => {
+                if pre_is_t_spin {
+                    self.t_spin_flash = 1.0;
+                }
                 if lines_cleared > 0 {
                     let cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
                     let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);

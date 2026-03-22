@@ -538,6 +538,13 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, 12.0, stats_y + 76.0, "LINES", dim_col, 1.0);
     push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", world.session.total_lines), text_col, 2.0);
 
+    // T-spin flash
+    if world.t_spin_flash > 0.01 {
+        let ta = (world.t_spin_flash * 255.0) as u8;
+        push_text(&mut verts, &mut indices, w / 2.0 - 40.0, h / 2.0 - 60.0,
+                  "T-SPIN", rgba_to_f32([255, 100, 255, ta]), 3.0);
+    }
+
     // Combo counter (only visible during active combo)
     if world.session.combo_count > 0 {
         let combo_col = rgba_to_f32([255, 200, 60, 255]);
