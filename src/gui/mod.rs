@@ -8,6 +8,7 @@ pub mod world;
 pub mod app;
 pub mod audio_output;
 pub mod particles;
+pub mod effects;
 mod font;
 mod drawing;
 mod input_bridge;
