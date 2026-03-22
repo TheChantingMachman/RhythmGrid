@@ -130,12 +130,31 @@ impl GameWorld {
         }
     }
 
+    fn save_settings(&self) {
+        let vol = if let Ok(audio) = self.audio.try_lock() { audio.volume } else { 0.8 };
+        let theme_names = ["Default", "Water", "Debug"];
+        let settings = rhythm_grid::config::Settings {
+            volume: vol,
+            speed: 1.0,
+            music_folder: None, // TODO: track folder path
+            theme: theme_names.get(self.theme_index).unwrap_or(&"Default").to_string(),
+            shuffle: false, // TODO: track shuffle state
+        };
+        let path = config_dir().join("settings.toml");
+        let _ = save_settings(&settings, &path);
+    }
+
     pub fn new() -> Self {
-        let theme = themes::default_theme();
-        // Load settings to check for music folder
+        // Load settings to restore previous state
         let settings_path = config_dir().join("settings.toml");
         let settings = load_settings(&settings_path);
+        let (theme, theme_index) = match settings.theme.as_str() {
+            "Water" => (themes::water_theme(), 1),
+            "Debug" => (themes::debug_theme(), 2),
+            _ => (themes::default_theme(), 0),
+        };
         let audio = audio_output::start_audio(settings.music_folder.as_deref());
+        if let Ok(mut a) = audio.try_lock() { a.volume = settings.volume; }
         GameWorld {
             session: GameSession::new(),
             last_tick: Instant::now(),
@@ -177,7 +196,7 @@ impl GameWorld {
             render_held: None,
             toast_text: String::new(),
             toast_timer: 0.0,
-            theme_index: 0,
+            theme_index,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -509,6 +528,7 @@ impl GameWorld {
         self.camera = CameraReactor::new(theme.camera);
         self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
         self.toast_timer = 2.0;
+        self.save_settings();
     }
 
     pub fn hold_piece(&mut self) {
@@ -551,6 +571,7 @@ impl GameWorld {
             audio.volume = (audio.volume + delta).clamp(0.0, 1.0);
         }
         self.on_mouse_activity();
+        self.save_settings();
     }
 
     /// Call when mouse moves to reveal HUD
