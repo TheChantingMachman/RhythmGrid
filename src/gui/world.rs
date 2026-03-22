@@ -549,36 +549,39 @@ impl GameWorld {
     }
 
     pub fn toggle_audio_pause(&mut self) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.paused = !audio.paused;
         }
         self.on_mouse_activity();
     }
 
     pub fn prev_track(&mut self) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.back_requested = true;
         }
         self.on_mouse_activity();
     }
 
     pub fn toggle_shuffle(&mut self) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.shuffle_requested = true;
-            audio.shuffled = !audio.shuffled; // immediate visual feedback
+            audio.shuffled = !audio.shuffled;
+            let state = if audio.shuffled { "ON" } else { "OFF" };
+            self.toast_text = format!("SHUFFLE {}", state);
+            self.toast_timer = 1.5;
         }
         self.on_mouse_activity();
     }
 
     pub fn skip_track(&mut self) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.skip_requested = true;
         }
         self.on_mouse_activity();
     }
 
     pub fn adjust_volume(&mut self, delta: f32) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.volume = (audio.volume + delta).clamp(0.0, 1.0);
         }
         self.on_mouse_activity();
