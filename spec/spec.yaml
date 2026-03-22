@@ -719,7 +719,7 @@
   tags:
   - render
   - state
-  status: draft
+  status: implemented
   depends_on:
   - game.tick
   - game.collision
@@ -743,7 +743,7 @@
   - render
   - state
   - ui
-  status: draft
+  status: implemented
   depends_on:
   - game.hold_piece
   - pieces.tetromino_cells
@@ -761,7 +761,7 @@
   - render
   - state
   - ui
-  status: draft
+  status: implemented
   depends_on:
   - game.tick
   - game.score
