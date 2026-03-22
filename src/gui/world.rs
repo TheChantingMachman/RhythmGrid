@@ -731,9 +731,12 @@ impl GameWorld {
         let shake_x = self.shake_intensity * (self.shake_time * 1.3).sin() * 0.4;
         let shake_y = self.shake_intensity * (self.shake_time * 1.7).cos() * 0.25;
 
+        // Bass zoom — camera pushes forward on heavy bass hits
+        let bass_zoom = bass_beat * 0.5;
+
         let cam_x = board_cx + orbit + sway + jitter_x + shake_x;
         let cam_y = board_cy + jitter_y + shake_y;
-        let cam_z = 16.0;
+        let cam_z = 16.0 - bass_zoom;
 
         let eye = [cam_x, cam_y, cam_z];
         let target = [board_cx, board_cy, 0.0];
