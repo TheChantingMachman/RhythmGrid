@@ -17,7 +17,7 @@ pub fn piece_color(type_index: u32) -> [u8; 4] {
         3 => [0, 255, 0, 255],     // S green
         4 => [255, 0, 0, 255],     // Z red
         5 => [0, 0, 255, 255],     // J blue
-        6 => [255, 165, 0, 255],   // L orange
+        6 => [255, 120, 0, 255],   // L deep orange
         _ => unreachable!("type_index must be 0..=6"),
     }
 }
