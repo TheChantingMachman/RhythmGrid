@@ -77,12 +77,16 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let line_boost = (beat * 40.0) as u8;
     let presence = world.bands_norm[5];
     let presence_boost = (presence * 80.0) as u8;
-    let lc: [u8; 4] = [40, 45, 70, 255];
+    // Centroid shifts color temperature: low=warm (red), high=cool (blue)
+    let c = world.centroid;
+    let lc_r = (40.0 + (1.0 - c) * 25.0) as u8;  // warmer when centroid low
+    let lc_g = 45u8;
+    let lc_b = (70.0 + c * 30.0) as u8;            // cooler when centroid high
     let line_color = rgba_to_f32([
-        lc[0].saturating_add(line_boost).saturating_add(presence_boost / 3),
-        lc[1].saturating_add(line_boost).saturating_add(presence_boost / 2),
-        lc[2].saturating_add(line_boost * 2).saturating_add(presence_boost),
-        lc[3],
+        lc_r.saturating_add(line_boost).saturating_add(presence_boost / 3),
+        lc_g.saturating_add(line_boost).saturating_add(presence_boost / 2),
+        lc_b.saturating_add(line_boost * 2).saturating_add(presence_boost),
+        255,
     ]);
     let presence_beat = world.band_beat_intensity[5];
     let line_thickness = 0.02 + presence_beat * 0.03;
@@ -256,7 +260,8 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
     let geo_time = world.preview_angle * (0.3 + d * 0.4);
     let low_mids = world.bands_norm[2];
     let sub_bass = world.bands_norm[0];
-    let geo_alpha = 0.03 + low_mids * 0.15 + d * 0.05;
+    let flux_boost = (world.flux * 0.3).min(0.15); // spectral flux brightens background on transitions
+    let geo_alpha = 0.03 + low_mids * 0.15 + d * 0.05 + flux_boost;
 
     // Hex dot grid — size driven by low-mids, color warmth by sub-bass
     let hex_rings = 4;

@@ -33,6 +33,8 @@ pub struct GameWorld {
     pub(super) norm_ceil: [f32; 7],    // fast decay — normalization ceiling
     pub(super) bands_norm: [f32; 7],   // each band normalized to its own ceiling (0-1)
     pub(super) band_beat_intensity: [f32; 7], // per-band beat decay (1.0 on beat, decays)
+    pub(super) centroid: f32,         // spectral centroid 0-1 (dark↔bright)
+    pub(super) flux: f32,             // spectral flux (rate of spectral change)
     pub(super) t_spin_flash: f32, // 1.0 on t-spin, decays to 0
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
@@ -122,6 +124,8 @@ impl GameWorld {
             norm_ceil: [0.01; 7],
             bands_norm: [0.0; 7],
             band_beat_intensity: [0.0; 7],
+            centroid: 0.0,
+            flux: 0.0,
             t_spin_flash: 0.0,
             particles: ParticleSystem::new(),
             prev_beat: false,
@@ -169,6 +173,8 @@ impl GameWorld {
             self.mids = audio.mids;
             self.highs = audio.highs;
             self.bands = audio.bands;
+            self.centroid = audio.centroid;
+            self.flux = audio.flux;
             for i in 0..7 {
                 if audio.band_beats[i] {
                     self.band_beat_intensity[i] = 1.0;
