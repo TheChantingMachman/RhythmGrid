@@ -119,6 +119,17 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
   - Per-theme block sets: Retro (ghost, invader, heart), Nature (leaf, snowflake), Abstract (spiral, ring)
   - Swappable per-theme — the VisualTheme holds a block set reference
   - Render cost: 8x8 = up to 64 mini-cubes per cell vs 1 cube currently. May need LOD for dense boards — simplify to full cube when many cells occupied.
+- **Rounded-edge cubes:**
+  - Bevel sharp edges with extra vertex strips. ~56-80 verts per cube vs 24 currently.
+  - Smooth normals at bevels create rolling specular highlights — instant polish upgrade.
+  - Existing Blinn-Phong shader picks it up automatically, no shader change needed.
+  - Could be a theme option: sharp cubes (default), beveled cubes (polished), heavily rounded (pill-shaped).
+- **Metallic cubes:**
+  - High specular intensity, tight highlight (high Phong exponent), low diffuse.
+  - Sharp bright spot slides along surface as camera moves — shiny metal look.
+  - Best combined with rounded edges so the highlight rolls across bevels.
+  - Needs per-vertex material attributes (specular intensity + exponent) or shader uniforms per-material.
+  - Theme variants: matte (current), metallic, chrome, brushed steel.
 - **Block material quality** (Tetris Effect style, phased):
   - Semi-transparent cubes with visible back faces (crystalline volume feel)
   - Edge glow / fresnel effect (edges brighter than centers)
