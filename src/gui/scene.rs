@@ -538,6 +538,20 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, 12.0, stats_y + 76.0, "LINES", dim_col, 1.0);
     push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", world.session.total_lines), text_col, 2.0);
 
+    // T-spin flash
+    if world.t_spin_flash > 0.01 {
+        let ta = (world.t_spin_flash * 255.0) as u8;
+        push_text(&mut verts, &mut indices, w / 2.0 - 40.0, h / 2.0 - 60.0,
+                  "T-SPIN", rgba_to_f32([255, 100, 255, ta]), 3.0);
+    }
+
+    // Combo counter (only visible during active combo)
+    if world.session.combo_count > 0 {
+        let combo_col = rgba_to_f32([255, 200, 60, 255]);
+        push_text(&mut verts, &mut indices, 12.0, stats_y + 114.0,
+                  &format!("COMBO {}", world.session.combo_count), combo_col, 2.0);
+    }
+
     // Music dashboard labels (right side, aligned with 3D elements)
     let dash_hud_x = w - 140.0;
     let track_name = if let Ok(audio) = world.audio.try_lock() {
@@ -594,7 +608,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     // State overlays
     if world.session.state == GameState::GameOver {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([120, 0, 0, 80]), 0.08);
-        let go_w = 200.0; let go_h = 120.0;
+        let go_w = 200.0; let go_h = 150.0;
         let go_x = (w - go_w) / 2.0;
         let go_y = (h - go_h) / 2.0;
         push_panel(&mut verts, &mut indices, go_x, go_y, go_w, go_h, 0.09);
@@ -606,8 +620,14 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         // Stats
         let level = level_for_lines(world.session.total_lines);
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 72.0,
-                  &format!("LEVEL {}  LINES {}", level, world.session.total_lines), dim_col, 1.0);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 92.0, "ENTER TO RESTART", dim_col, 1.0);
+                  &format!("LVL {}  LINES {}", level, world.session.total_lines), dim_col, 1.0);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 84.0,
+                  &format!("COMBO {}  PCS {}", world.session.max_combo, world.session.pieces_placed), dim_col, 1.0);
+        let mins = (world.session.time_played_secs / 60.0) as u32;
+        let secs = (world.session.time_played_secs % 60.0) as u32;
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 96.0,
+                  &format!("TIME {}:{:02}", mins, secs), dim_col, 1.0);
+        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 116.0, "ENTER TO RESTART", dim_col, 1.0);
     }
 
     if world.session.state == GameState::Paused {

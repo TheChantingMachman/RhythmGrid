@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rhythm_grid::audio::{decode_audio, fft_bands, generate_procedural, BeatDetector, MultiBeatDetector, DEFAULT_BPM};
+use rhythm_grid::audio::{fft_bands, generate_procedural, BeatDetector, MultiBeatDetector, StreamingDecoder, DEFAULT_BPM};
 use rhythm_grid::music::{scan_folder, Playlist};
 
 /// Shared state between the audio thread and the game loop.
@@ -152,52 +152,56 @@ fn track_name_from_path(path: &PathBuf) -> String {
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
-/// Decode a track and push samples into the shared buffer in chunks.
-/// Returns false if decode failed or skip was requested.
+/// Stream-decode a track, pushing PCM chunks to the buffer as they decode.
+/// Playback starts within ~100ms instead of waiting for full file decode.
 fn stream_decode_track(
     path: &PathBuf,
     target_sample_rate: u32,
     buffer: &Arc<Mutex<SampleBuffer>>,
     state: &Arc<Mutex<AudioState>>,
 ) -> bool {
-    let audio = match decode_audio(path) {
-        Ok(a) => a,
+    let mut decoder = match StreamingDecoder::open(path) {
+        Ok(d) => d,
         Err(e) => {
-            eprintln!("Failed to decode {}: {}", path.display(), e);
+            eprintln!("Failed to open {}: {:?}", path.display(), e);
             return false;
         }
     };
 
-    let samples = if audio.sample_rate == target_sample_rate {
-        audio.samples
-    } else {
-        resample(&audio.samples, audio.sample_rate, target_sample_rate, audio.channels)
-    };
+    let src_rate = decoder.sample_rate();
+    let channels = decoder.channels() as usize;
+    let needs_resample = src_rate != target_sample_rate;
 
-    let channels = audio.channels as usize;
+    if let Ok(mut buf) = buffer.lock() {
+        buf.channels = channels;
+    }
 
-    // Push in chunks to avoid holding the lock too long
-    let chunk_size = 44100 * channels; // ~1 second chunks
-    for chunk in samples.chunks(chunk_size) {
-        // Check for skip before pushing each chunk
-        if let Ok(mut s) = state.try_lock() {
-            if s.skip_requested {
-                s.skip_requested = false;
+    while let Some(chunk) = decoder.next_chunk() {
+        // Check for skip/back
+        if let Ok(s) = state.try_lock() {
+            if s.skip_requested || s.back_requested {
                 return false;
             }
         }
-        // Wait if buffer is too full (back-pressure)
+
+        let out = if needs_resample {
+            resample(&chunk, src_rate, target_sample_rate, channels as u16)
+        } else {
+            chunk
+        };
+
+        // Back-pressure: wait if buffer is too full
         loop {
             if let Ok(buf) = buffer.try_lock() {
-                if buf.samples.len() < 44100 * channels * 20 {
+                if buf.samples.len() < 44100 * channels * 10 {
                     break;
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
+
         if let Ok(mut buf) = buffer.lock() {
-            buf.channels = channels;
-            buf.samples.extend(chunk);
+            buf.samples.extend(&out);
         }
     }
 

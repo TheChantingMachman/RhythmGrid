@@ -430,7 +430,7 @@
 -
   id: render.piece_colors
   section: Render
-  description: 'Each tetromino type maps to an RGBA color: I=(0,255,255,255) cyan, O=(255,255,0,255) yellow, T=(128,0,128,255) purple, S=(0,255,0,255) green, Z=(255,0,0,255) red, J=(0,0,255,255) blue, L=(255,165,0,255) orange. Function piece_color(type_index: u32) -> [u8; 4] returns the color.'
+  description: 'Each tetromino type maps to an RGBA color: I=(0,255,255,255) cyan, O=(255,255,0,255) yellow, T=(128,0,128,255) purple, S=(0,255,0,255) green, Z=(255,0,0,255) red, J=(0,0,255,255) blue, L=(255,120,0,255) deep orange. Function piece_color(type_index: u32) -> [u8; 4] returns the color.'
   tags:
   - render
   - color
@@ -438,7 +438,7 @@
   constants:
     I: 0:255:255:255
     J: 0:0:255:255
-    L: 255:165:0:255
+    L: 255:120:0:255
     O: 255:255:0:255
     S: 0:255:0:255
     T: 128:0:128:255
@@ -642,3 +642,25 @@
   - game.combo
   modifies:
   - game.tick
+-
+  id: audio.streaming_decode
+  section: Audio
+  description: 'Streaming audio decoder that yields PCM chunks incrementally. StreamingDecoder::open(path: &Path) -> Result<StreamingDecoder, AudioError> opens a file and reads the format header. sample_rate() -> u32 and channels() -> u16 return format info available immediately after open. next_chunk() -> Option<Vec<f32>> decodes and returns the next chunk of interleaved PCM samples, or None at end of stream. Chunk size varies by codec packet size (typically 1024-4096 frames). The existing decode_audio function remains unchanged for backward compatibility. StreamingDecoder enables lookahead: the caller can decode ahead of playback and run beat analysis on buffered-but-not-yet-played samples for predictive beat detection.'
+  tags:
+  - core
+  - audio
+  - decode
+  status: implemented
+  depends_on:
+  - audio.decode
+  fixture_patterns: |
+    - StreamingDecoder::open(path: &Path) -> Result<StreamingDecoder, AudioError>
+    - sample_rate() -> u32, channels() -> u16 — available immediately after open
+    - next_chunk() -> Option<Vec<f32>> — interleaved PCM, None at EOF, new Vec each call
+    - Chunk size varies by codec (~1024-4096 frames per call)
+    - Supports MP3, WAV, FLAC, OGG (same formats as decode_audio)
+    - Error: open nonexistent path returns Err(AudioError::FileNotFound)
+    - Error: open unsupported extension returns Err(AudioError::UnsupportedFormat)
+    - Test WAV fixture: write a minimal WAV file (44-byte header + raw f32 PCM) to a temp dir. WAV header: RIFF chunk, fmt sub-chunk (PCM format=3 for f32, 1 channel, 44100 Hz), data sub-chunk.
+    - Verification: open with StreamingDecoder, collect all next_chunk() results, total sample count should match the written data length
+    - Existing decode_audio unchanged (backward compatible)
