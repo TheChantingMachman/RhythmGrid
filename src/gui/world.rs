@@ -221,14 +221,7 @@ impl GameWorld {
             self.bands_norm[i] = (self.bands[i] / self.norm_ceil[i]).min(1.0);
         }
 
-        // Effect modules
-        use super::effects::AudioEffect;
-        self.beat_rings.update(&self.audio_frame);
-        self.hex_background.update(&self.audio_frame);
-        self.fft_vis.locked = self.fft_locked;
-        self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
-        self.fft_vis.update(&self.audio_frame);
-        self.grid_lines.update(&self.audio_frame);
+        // (effect modules updated below after AudioFrame is built)
 
         // Level-up rings still use legacy bg_rings vec
         for ring in &mut self.bg_rings {
@@ -316,15 +309,7 @@ impl GameWorld {
         }
         self.level_up_flash = (self.level_up_flash - dt as f32 * 1.5).max(0.0);
 
-        // Band beat intensity decay
-        for i in 0..7 {
-            self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 4.0).max(0.0);
-        }
-
-        // T-spin flash decay
-        self.t_spin_flash = (self.t_spin_flash - dt as f32 * 1.0).max(0.0);
-
-        // Build AudioFrame and update camera reactor
+        // Build AudioFrame BEFORE decay so effects see fresh beat triggers
         self.audio_frame = AudioFrame {
             bands: self.bands,
             bands_norm: self.bands_norm,
@@ -335,7 +320,24 @@ impl GameWorld {
             danger: self.danger_level,
             dt: dt as f32,
         };
+
+        // Update all effect modules + camera
+        use super::effects::AudioEffect;
+        self.beat_rings.update(&self.audio_frame);
+        self.hex_background.update(&self.audio_frame);
+        self.fft_vis.locked = self.fft_locked;
+        self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
+        self.fft_vis.update(&self.audio_frame);
+        self.grid_lines.update(&self.audio_frame);
         self.camera.update(&self.audio_frame);
+
+        // Decay AFTER effects have consumed the frame
+        for i in 0..7 {
+            self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 4.0).max(0.0);
+        }
+
+        // T-spin flash decay
+        self.t_spin_flash = (self.t_spin_flash - dt as f32 * 1.0).max(0.0);
 
         // Smooth escalation transition
         let target_danger = if escalation_stage(&self.session.grid) == EscalationStage::Danger { 1.0 } else { 0.0 };
