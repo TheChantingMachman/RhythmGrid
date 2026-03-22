@@ -288,11 +288,13 @@
   status: stale
   depends_on: [config.xdg_paths]
   fixture_patterns: |
-    - Settings { volume: f32, speed: f32, music_folder: Option<String>, theme: String, shuffle: bool, window_width: u32, window_height: u32, window_x: Option<i32>, window_y: Option<i32> }
-    - Default: Settings { volume: 0.8, speed: 1.0, music_folder: None, theme: "Default".to_string(), shuffle: false, window_width: 1000, window_height: 800, window_x: None, window_y: None }
-    - New fields use #[serde(default)] — old TOML files load cleanly
-    - window_x/window_y are None when OS should choose placement
+    - Construct with defaults: Settings { volume: 0.3, speed: 1.7, ..Settings::default() }
+    - Settings::default() includes all fields with documented defaults
+    - When testing specific fields, use ..Settings::default() to fill the rest
+    - Avoid listing all fields explicitly — new fields will break struct literals
+    - Default values: volume=0.8, speed=1.0, music_folder=None, theme="Default", shuffle=false, window_width=1000, window_height=800, window_x=None, window_y=None
     - TOML round-trip: save then load produces identical Settings
+    - Old TOML files missing new fields load cleanly via #[serde(default)]
 -
   id: config.music_folder
   section: Config
