@@ -309,7 +309,13 @@ impl GpuState {
             bias: wgpu::DepthBiasState::default(),
         };
 
-        // Scene pipeline — opaque geometry with depth write
+        let msaa_state = wgpu::MultisampleState {
+            count: SAMPLE_COUNT,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        };
+
+        // Scene pipeline — opaque geometry with depth write + MSAA
         let scene_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene_opaque"),
             layout: Some(&scene_layout),
@@ -326,11 +332,11 @@ impl GpuState {
             }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
             depth_stencil: Some(depth_stencil_state.clone()),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: msaa_state,
             multiview: None, cache: None,
         });
 
-        // Transparent pipeline — depth read but no write (blends correctly over opaque)
+        // Transparent pipeline — depth read but no write + MSAA
         let scene_pipeline_transparent = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene_transparent"),
             layout: Some(&scene_layout),
@@ -350,7 +356,7 @@ impl GpuState {
                 depth_write_enabled: false,
                 ..depth_stencil_state
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: msaa_state,
             multiview: None, cache: None,
         });
 
@@ -371,7 +377,7 @@ impl GpuState {
             }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: msaa_state,
             multiview: None, cache: None,
         });
 
@@ -427,7 +433,7 @@ impl GpuState {
         device.create_texture(&wgpu::TextureDescriptor {
             label: Some("depth"),
             size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
-            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            mip_level_count: 1, sample_count: SAMPLE_COUNT, dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
@@ -506,15 +512,15 @@ impl GpuState {
             stencil_ops: None,
         };
 
-        // Pass 1: Opaque 3D scene (depth write ON)
+        // Pass 1: Opaque 3D scene (depth write ON, MSAA → resolve to scene_texture)
         {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("scene_opaque"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.scene_texture,
-                        resolve_target: None,
+                        view: &self.msaa_texture,
+                        resolve_target: Some(&self.scene_texture),
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
                             store: wgpu::StoreOp::Store,
@@ -539,8 +545,8 @@ impl GpuState {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("scene_transparent"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.scene_texture,
-                        resolve_target: None,
+                        view: &self.msaa_texture,
+                        resolve_target: Some(&self.scene_texture),
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
@@ -573,8 +579,8 @@ impl GpuState {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("hud"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.scene_texture,
-                        resolve_target: None,
+                        view: &self.msaa_texture,
+                        resolve_target: Some(&self.scene_texture),
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,

@@ -206,6 +206,13 @@ Inspired by Tetris Effect and Geometry Wars — techniques to consider as the vi
 - Renders as small transparent quads in 3D scene pass — depth tested against board cubes.
 - Slow burn ambient effect — perfect for idle/visualizer mode.
 
+### Rendering Quality (to explore)
+- **MSAA** — 4x multi-sample anti-aliasing (enabled, smooths geometry edges)
+- **Supersampling** — render at 2x resolution, downsample. Smoothest possible but expensive.
+- **Higher geometry detail** — rings 64+ segments, denser grids for smoother curves
+- **Higher-res bloom** — finer bloom kernel at higher resolution for photographic quality
+- **Thinner geometry at high res** — grid lines and cube gaps can be finer when pixels are smaller
+
 ### Dynamic Audio-Visual Mapping (phased)
 Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
 
