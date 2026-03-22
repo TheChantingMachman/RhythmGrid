@@ -715,7 +715,7 @@
 -
   id: render.board_state
   section: Render
-  description: 'Produces a flat render-ready snapshot of the board. Function board_state(session: &GameSession) -> BoardRenderState returns all visible cells in one pass. BoardRenderState has fields: occupied: Vec<RenderCell>, active: Vec<RenderCell>, ghost: Vec<RenderCell>. RenderCell { row: i32, col: i32, type_index: u32 }. Ghost cells computed by dropping the active piece to lowest valid position. Cells above row 0 (vanish zone) are excluded from all three lists. The occupied list excludes cells that overlap with the active piece position.'
+  description: 'Produces a flat render-ready snapshot of the board. Function board_state(session: &GameSession) -> BoardRenderState returns all visible cells in one pass. BoardRenderState has fields: occupied: Vec<RenderCell>, active: Vec<RenderCell>, ghost: Vec<RenderCell>. RenderCell { row: i32, col: i32, type_index: u32 }. Occupied cells are grid cells with CellState::Occupied(type_index). Active cells are the 4 cells of the current active piece. Ghost cells are the active piece dropped to the lowest valid row (same type_index). All three lists exclude cells with row < 0 (vanish zone above visible board).'
   tags:
   - render
   - state
@@ -723,20 +723,18 @@
   depends_on:
   - game.tick
   - game.collision
-  - game.hold_piece
   - grid.dimensions
   - grid.cell_state
-  - render.piece_colors
   fixture_patterns: |
     - board_state(session: &GameSession) -> BoardRenderState
     - BoardRenderState { occupied: Vec<RenderCell>, active: Vec<RenderCell>, ghost: Vec<RenderCell> }
     - RenderCell { row: i32, col: i32, type_index: u32 }
-    - Ghost: same piece type as active, dropped to lowest valid row
-    - Vanish zone: cells with row < 0 excluded from all lists
-    - Occupied list: only grid cells with CellState::Occupied, excluding active piece overlap
-    - Test: create session, place pieces, verify occupied/active/ghost cell counts and positions
-    - Empty board with active piece: occupied=[], active=4 cells, ghost=4 cells
-    - type_index matches piece type (I=0, O=1, T=2, S=3, Z=4, J=5, L=6)
+    - Occupied: iterate grid.cells, emit RenderCell for each Occupied(type_index) where row >= 0
+    - Active: emit 4 RenderCells from session.active_piece position + offsets, where row >= 0
+    - Ghost: drop active piece to lowest valid row, emit 4 RenderCells, where row >= 0
+    - type_index: I=0, O=1, T=2, S=3, Z=4, J=5, L=6
+    - Empty board with active piece at spawn: occupied=[], active=4, ghost=4
+    - Board with locked pieces: occupied=N, active=4, ghost=4
 -
   id: render.held_piece_state
   section: Render
@@ -758,7 +756,7 @@
 -
   id: render.game_status
   section: Render
-  description: 'Produces render-ready game status. Function game_status(session: &GameSession) -> GameStatusRender. GameStatusRender { score: u32, level: u32, lines: u32, combo_count: u32, max_combo: u32, pieces_placed: u32, time_played_secs: f64, state: GameState, can_hold: bool }. A flat struct the GUI reads for all HUD text without reaching into GameSession fields directly.'
+  description: 'Produces render-ready game status. Function game_status(session: &GameSession) -> GameStatusRender. GameStatusRender { score: u32, level: u32, total_lines: u32, combo_count: u32, max_combo: u32, pieces_placed: u32, time_played_secs: f64, state: GameState, can_hold: bool }. Field names match GameSession fields exactly: score, total_lines (not lines), combo_count, etc. GameState is re-exported from the game module. A flat struct the GUI reads for all HUD text without reaching into GameSession fields directly.'
   tags:
   - render
   - state
@@ -774,7 +772,7 @@
   - game.hold_piece
   fixture_patterns: |
     - game_status(session: &GameSession) -> GameStatusRender
-    - GameStatusRender { score: u32, level: u32, lines: u32, combo_count: u32, max_combo: u32, pieces_placed: u32, time_played_secs: f64, state: GameState, can_hold: bool }
-    - All fields read directly from session public fields
-    - state is the GameState enum value (Menu/Playing/Paused/GameOver)
-    - Test: create session, play a few moves, verify all fields match session state
+    - GameStatusRender { score: u32, level: u32, total_lines: u32, combo_count: u32, max_combo: u32, pieces_placed: u32, time_played_secs: f64, state: GameState, can_hold: bool }
+    - Field mapping: score=session.score, level=level_for_lines(session.total_lines), total_lines=session.total_lines, combo_count=session.combo_count, max_combo=session.max_combo, pieces_placed=session.pieces_placed, time_played_secs=session.time_played_secs, state=session.state, can_hold=session.can_hold
+    - GameState imported from rhythm_grid::game::GameState
+    - Test: create session, verify all fields match, play moves, verify updates
