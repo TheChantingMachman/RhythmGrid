@@ -316,7 +316,19 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
         }
     }
 
-    // Beat rings
+    // Beat rings (effect module)
+    let ctx = super::effects::RenderContext {
+        board_width: gw,
+        board_height: gh,
+        win_w: 0.0, win_h: 0.0, // not needed for rings
+        window_aspect: 1.0,
+        preview_angle: world.preview_angle,
+        hud_opacity: world.hud_opacity,
+    };
+    use super::effects::AudioEffect;
+    world.beat_rings.render(sv, si, &ctx);
+
+    // Legacy level-up rings (still inline)
     let ring_cx = gw / 2.0;
     let ring_cy = -gh / 2.0;
     let ring_z = -1.0;

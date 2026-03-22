@@ -2,6 +2,8 @@
 // Each effect declares its render pass, updates from audio state,
 // and emits geometry into vertex/index buffers.
 
+pub mod beat_rings;
+
 use super::drawing::Vertex;
 
 /// Audio state snapshot passed to every effect each frame.

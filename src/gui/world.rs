@@ -13,6 +13,7 @@ use super::audio_output::{self, AudioState};
 use super::camera::CameraReactor;
 use super::drawing::{Vertex, rgba_to_f32};
 use super::effects::AudioFrame;
+use super::effects::beat_rings::BeatRings;
 use super::particles::ParticleSystem;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
 use super::theme::{DEFAULT_CAM_ANGLE, THEME};
@@ -41,7 +42,8 @@ pub struct GameWorld {
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
-    pub(super) bg_rings: Vec<BgRing>,
+    pub(super) bg_rings: Vec<BgRing>, // legacy — kept for level-up rings
+    pub(super) beat_rings: BeatRings,
     pub(super) danger_level: f32,
     pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
     last_level: u32,
@@ -133,6 +135,7 @@ impl GameWorld {
             prev_beat: false,
             clearing_cells: Vec::new(),
             bg_rings: Vec::new(),
+            beat_rings: BeatRings::new(),
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -209,35 +212,11 @@ impl GameWorld {
             self.bands_norm[i] = (self.bands[i] / self.norm_ceil[i]).min(1.0);
         }
 
-        // Per-band beat visual responses
-        let d = self.danger_level;
-        // Sub-bass/bass beats (bands 0-1) → background rings
-        for band in 0..2 {
-            if self.band_beat_intensity[band] > 0.95 {
-                self.bg_rings.push(BgRing {
-                    radius: 0.5,
-                    max_radius: 18.0,
-                    life: 3.0 - d * 1.0,
-                    max_life: 3.0 - d * 1.0,
-                    color: [
-                        0.1 + d * 0.5 + if band == 0 { 0.2 } else { 0.0 },
-                        0.15 - d * 0.05,
-                        0.4 - d * 0.3,
-                        0.3 + d * 0.15 + self.bands_norm[band] * 0.2,
-                    ],
-                });
-            }
-        }
-        // Fallback: also spawn ring on legacy overall beat if no band beats fired
-        if got_beat && !self.prev_beat && self.band_beat_intensity[0..2].iter().all(|&b| b < 0.95) {
-            self.bg_rings.push(BgRing {
-                radius: 0.5, max_radius: 18.0,
-                life: 3.0 - d * 1.0, max_life: 3.0 - d * 1.0,
-                color: [0.1 + d * 0.5, 0.15 - d * 0.05, 0.4 - d * 0.3, 0.3 + d * 0.15],
-            });
-        }
+        // Beat rings (effect module)
+        use super::effects::AudioEffect;
+        self.beat_rings.update(&self.audio_frame);
 
-        // Update rings
+        // Level-up rings still use legacy bg_rings vec
         for ring in &mut self.bg_rings {
             let progress = 1.0 - ring.life / ring.max_life;
             ring.radius = 0.5 + progress * ring.max_radius;
