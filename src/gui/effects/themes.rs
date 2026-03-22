@@ -117,9 +117,9 @@ pub fn water_theme() -> VisualTheme {
             ],
         },
         camera: CameraParams {
-            sway_base: 0.2, sway_danger_add: 0.08,
-            jitter_x: 0.015, jitter_y: 0.01,
-            zoom_amount: 0.15,
+            sway_base: 0.4, sway_danger_add: 0.15,
+            jitter_x: 0.03, jitter_y: 0.02,
+            zoom_amount: 0.3,
             shake_decay: 0.8,
         },
         hex_enabled: false,
