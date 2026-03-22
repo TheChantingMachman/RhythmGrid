@@ -81,13 +81,22 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 
 ### Audio Engine
 - Load and decode local audio files (MP3, WAV, FLAC, OGG)
-- Real-time beat detection and BPM estimation
-- Frequency band decomposition (bass, mids, highs)
+- Streaming decode for near-instant track transitions
+- 7-band FFT decomposition (sub-bass through brilliance)
+- Multi-band beat detection (7 independent detectors, one per band)
+- Per-band normalization (equal visual weight regardless of absolute energy)
+- Peak hold tracking per band
+- Spectral centroid and flux analysis (pipeline, pending delivery)
 - Energy/amplitude tracking per frame
 
 ### Tetris Core
 - Standard Tetris mechanics: tetrominoes, rotation (SRS), line clearing, gravity
 - Increasing speed / level progression
+- Hold piece (C/Shift) with 3D rotating preview
+- Lock delay (400ms, 15 resets max)
+- T-spin detection with bonus scoring + visual flash
+- Combo system (consecutive line clear multiplier + counter display)
+- Per-game statistics (pieces placed, max combo, time played)
 - **Audio does NOT affect difficulty** — music is purely visual/atmospheric, gameplay speed is independent
 - **2-stage panic escalation** (NES Tetris style):
   - Normal — standard playback, baseline particle effects and beat pulse
@@ -97,23 +106,20 @@ Board-centered, clean minimalistic 3D (Tetris Effect style):
 - **No music configured:** Procedurally generated audio for out-of-box experience and first-time players. Zero licensing issues at any release tier, deterministic output for pipeline testing.
 - **Basic (V1):** Point at a folder via path field or filesystem browser. Play files sequentially or shuffled. Seamless auto-advance between tracks.
 
-**Known issues:**
-- Track transitions are slow — full decode before playback starts. Need chunked streaming so playback begins within ~100ms of track change.
-- Silence gap during transition feels like the app is broken. Need visual feedback (loading indicator or immediate track name update).
-- Transport button clicks sometimes miss on first press — hover detection may lag one frame behind click event.
-
 **Future:** Playlist support, queue management, metadata-driven theming
 
 ### Visual Layer
-- **3D rendering** — volumetric blocks, basic lighting/shading, camera in 3D space
-- **Block appearance** — V1: plain cubes. Future: small pixel art tiles (8x8, 16x16, or 32x32) that define block faces, projections, or extruded shapes. Blocks should not be architecturally locked to "plain cube" — the rendering should support swappable block visuals.
-- **Camera:** Fixed perspective for V1. Future: reactive camera movement on beats/escalation, player-controlled orbit/zoom
-- **Screen shake** — triggered on line clears and hard drops
-- **Momentum/inertia** — board slightly overshoots and settles back on impacts (delayed spring effect)
-- **Particle effects** — primary visual expression, 3D particles in the scene, scales with audio intensity
-- **Beat pulse effect** — grid/elements pulse on detected beats
-- **Escalation:** all effects intensify as stack height enters danger zone
-- Future: color palette shifts, multiple visual themes
+- **3D rendering** — volumetric blocks, Blinn-Phong lighting, bloom post-processing, proper depth testing with opaque + transparent passes
+- **Block appearance** — V1: plain cubes with per-piece-type frequency band glow. Future: pixel art tiles, swappable block visuals.
+- **Board pulse** — cube depth modulated by per-band beat intensity, board is a full-spectrum visualizer
+- **Camera:** Fixed perspective with beat-driven bass sway, hi-freq jitter, and impact shake
+- **Particle effects** — small dense particles. Line clear spray (120 particles), beat burst from board edges, level-up radial burst. Per-band beat triggers: bass → rings, upper-mids → particles.
+- **Background** — rotating hex dot grid (breathes with low-mids, warms with sub-bass), connecting lines, expanding beat rings
+- **Grid** — transparent wireframe overlaid on cubes, shimmer driven by presence band + beats
+- **FFT visualizer** — 7-band spectral display with peak hold indicators, spectral color gradient, lockable visibility
+- **HUD** — auto-fading, core game controls don't wake HUD, secondary controls do
+- **Escalation:** all effects intensify with danger level (ring speed, sway amplitude, hex rotation)
+- Future: color palette shifts, visual themes as effect module bundles, spectral centroid-driven color temperature
 
 ### Dynamic Audio-Visual Mapping (phased)
 Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
@@ -203,23 +209,36 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Future: 3D in-game filesystem browser replaces native dialog
 
 ### Phase 3 — Polish & Ship
-- Idle/visualizer/demo mode
-- Visual themes and palette system
+
+**Done:**
+- Idle/visualizer/demo mode (auto-play after 15s, auto-restart on game over)
+- HUD fade refinements (1.5s timer, core controls don't wake)
+- 7-band FFT with spectral color gradient + peak hold
+- Multi-band beat detection (7 independent detectors)
+- Per-band visual routing (bass→rings, upper-mids→particles, presence→grid shimmer)
+- Per-piece-type band glow + board pulse (cubes are full-spectrum visualizer)
+- Per-band normalization for equal visual weight
+- Hold piece with 3D preview
+- T-spin detection + combo system with visual feedback
+- Game over screen with stats (score, combo, pieces, time)
+- Streaming decode for instant track transitions
+- Proper depth testing (opaque + transparent passes)
+- Camera bass sway + hi-freq jitter
+- Guideline key bindings spec (pipeline, pending delivery)
+
+**Remaining:**
+- Visual themes and palette system (→ effects interface, see AudioVisualCatalog.md)
 - Settings (audio sensitivity, visual intensity, controls)
-- Align key bindings to Tetris Guideline (X=RotateCW, C/Shift=Hold) — requires `game.hold_piece` first, then update `input.key_map` spec
-- Decrease HUD fade timer. Core game controls (move, rotate, drop) should NOT de-fade the HUD; non-core mapped keys (audio controls, hold, pause) should reveal HUD
+- Spectral centroid + flux (pipeline, pending delivery → color temperature, transition detection)
+- 3D elements replacing 2D HUD overlays:
+  - Shaped transport buttons (play triangle, pause bars, skip arrows)
+  - Button press animation (depth halve on click)
+  - Game over / pause as 3D elements
+  - Score/level/lines as 3D floating text
+- Responsive layout: side assemblies track window edges
 - XDG-compliant config and data paths
 - Linux packaging (Flatpak, Snap, AUR)
-- Expand FFT from 3 bands to 7 (sub-bass, bass, low-mids, mids, upper-mids, presence, brilliance) — `audio.fft` spec updated, pipeline rebuild + GUI visualizer update pending
-- 3D elements replacing 2D HUD overlays:
-  - Shaped transport buttons (play triangle, pause bars, skip arrows) — remove text labels once shapes are self-explanatory
-  - Button press animation: halve depth on click to simulate depression
-  - Game over screen: 3D score display, restart prompt as 3D element
-  - Pause screen: 3D control hints panel
-  - Score/level/lines as 3D floating text or counters
-- Responsive layout: side assemblies track window edges rather than fixed world-space positions
-- Proper depth testing in scene pipeline (replaces draw-order hacks)
-- Future: user-remappable key bindings (settings UI + persisted config)
+- Future: user-remappable key bindings, 3D in-game filesystem browser
 
 ---
 
