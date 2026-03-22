@@ -232,12 +232,12 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Bass zoom (camera Z push on bass beats)
 
 **Remaining:**
-- Effects interface: AudioEffect trait defined, 4 audio effects + CameraReactor migrated. Theme struct ready but not wired. See AudioVisualCatalog.md for migration status.
-- Build a second theme to prove the system (different ring style, hex pattern, camera behavior) — Water theme params defined, needs piece color overrides
-- Theme piece color overrides: `themed_piece_color()` wrapper that checks theme override before falling back to pipeline `piece_color()`. Touches ~8 render call sites.
-- Spectral centroid wired to grid color temp (done). Spectral flux wired to background brightness (done). More routing possible.
+- Effects interface complete: 5 AudioEffect modules (BeatRings, HexBackground, FftVisualizer, GridLines, Fireworks) + CameraReactor. VisualTheme params + toggle flags working. Two themes: Default (hex dots) and Water (fireworks, blue-green, smooth camera).
+- Theme piece color overrides: `themed_piece_color()` wrapper for per-theme piece palettes (e.g. blue gradient for water). Touches ~8 render call sites.
+- Theme switching UI — button or keyboard shortcut to swap themes at runtime
+- More themes: fire, neon, minimal, etc.
 - Rolling averages + dominant band ranking (infrastructure for dynamic effect routing)
-- Settings persistence (volume, shuffle state survive restart)
+- Settings persistence (volume, shuffle state, selected theme survive restart)
 - 3D elements replacing 2D HUD overlays:
   - Shaped transport buttons (play triangle, pause bars, skip arrows)
   - Button press animation (depth halve on click)
