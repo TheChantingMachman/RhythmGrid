@@ -1,17 +1,25 @@
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
+fn default_theme() -> String {
+    "Default".to_string()
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub volume: f32,
     pub speed: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub music_folder: Option<String>,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default)]
+    pub shuffle: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { volume: 0.8, speed: 1.0, music_folder: None }
+        Settings { volume: 0.8, speed: 1.0, music_folder: None, theme: "Default".to_string(), shuffle: false }
     }
 }
 
