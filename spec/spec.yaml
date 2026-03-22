@@ -360,7 +360,7 @@
   - core
   - music
   - playback
-  status: stale
+  status: implemented
   depends_on:
   - music.scan_folder
 -
