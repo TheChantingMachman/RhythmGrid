@@ -490,7 +490,7 @@
   tags:
   - input
   - controls
-  status: stale
+  status: implemented
   depends_on:
   - game.state
   - game.hold_piece
