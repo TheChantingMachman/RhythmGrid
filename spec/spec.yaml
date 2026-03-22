@@ -682,7 +682,7 @@
   - core
   - audio
   - analysis
-  status: draft
+  status: implemented
   depends_on:
   - audio.fft
   fixture_patterns: |
@@ -701,7 +701,7 @@
   - core
   - audio
   - analysis
-  status: draft
+  status: implemented
   depends_on:
   - audio.fft
   fixture_patterns: |
