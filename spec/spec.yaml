@@ -486,7 +486,7 @@
 -
   id: input.key_map
   section: Input
-  description: 'Maps keyboard inputs to game actions. Default mapping: Left=MoveLeft, Right=MoveRight, Down=SoftDrop, Up=RotateCW, X=RotateCW, Z=RotateCCW, Space=HardDrop, C=Hold, P=TogglePause, Escape=BackToMenu, Enter=StartGame. Function map_key(key: KeyCode) -> Option<GameAction> returns the action for a key press. GameAction is an enum: MoveLeft, MoveRight, SoftDrop, HardDrop, RotateCW, RotateCCW, Hold, TogglePause, BackToMenu, StartGame. KeyCode gains a C variant.'
+  description: 'Maps keyboard inputs to game actions. Default mapping: Left=MoveLeft, Right=MoveRight, Down=SoftDrop, Up=RotateCW, X=RotateCW, Z=RotateCCW, Space=HardDrop, C=Hold, P=TogglePause, Escape=BackToMenu, Enter=StartGame. Function map_key(key: KeyCode) -> Option<GameAction> returns the action for a key press. GameAction enum gains Hold variant: MoveLeft, MoveRight, SoftDrop, HardDrop, RotateCW, RotateCCW, Hold, TogglePause, BackToMenu, StartGame. KeyCode enum gains X and C variants. X and Up both map to RotateCW.'
   tags:
   - input
   - controls
@@ -494,6 +494,15 @@
   depends_on:
   - game.state
   - game.hold_piece
+  fixture_patterns: |
+    - KeyCode gains variants: X, C (alongside existing Left, Right, Down, Up, Z, Space, P, Escape, Enter, Other)
+    - GameAction gains variant: Hold (alongside existing 9 variants)
+    - map_key(KeyCode::X) -> Some(GameAction::RotateCW)
+    - map_key(KeyCode::C) -> Some(GameAction::Hold)
+    - map_key(KeyCode::Up) -> Some(GameAction::RotateCW) (unchanged)
+    - map_key(KeyCode::Space) -> Some(GameAction::HardDrop) (X no longer maps to HardDrop)
+    - Existing mappings unchanged except X
+    - GameAction::Hold derives same traits as other variants (Debug, Clone, Copy, PartialEq, Eq)
 -
   id: game.tick
   section: Game
@@ -668,7 +677,7 @@
 -
   id: audio.spectral_centroid
   section: Audio
-  description: 'Compute the spectral centroid of an FFT frame — the weighted mean frequency where energy is concentrated. spectral_centroid(samples: &[f32], sample_rate: u32) -> f32 returns a value normalized to 0.0-1.0 where 0.0 means all energy is at 20Hz and 1.0 means all energy is at 20kHz. Computed as sum(frequency_i * magnitude_i) / sum(magnitude_i), then normalized to the 20-20000Hz range. Returns 0.0 for empty or all-zero input.'
+  description: 'Compute the spectral centroid — the weighted mean frequency where energy is concentrated. spectral_centroid(samples: &[f32], sample_rate: u32) -> f32 takes a window of raw PCM samples (same input as fft_bands), computes the FFT internally, and returns the energy-weighted center frequency normalized to 0.0-1.0 where 0.0 means all energy is at 20Hz and 1.0 means all energy is at 20kHz. Computed as sum(frequency_i * magnitude_i) / sum(magnitude_i), then mapped to the 20-20000Hz range. Returns 0.0 for empty or all-zero input.'
   tags:
   - core
   - audio
@@ -687,7 +696,7 @@
 -
   id: audio.spectral_flux
   section: Audio
-  description: 'Compute the spectral flux between consecutive FFT frames — measures how much the spectrum is changing. SpectralFluxDetector holds the previous frame''s band energies. spectral_flux(detector: &mut SpectralFluxDetector, bands: &[f32; 7]) -> f32 computes the sum of positive differences between current and previous band energies (half-wave rectified). Returns a value >= 0.0. Higher values indicate transients, note attacks, or song section transitions. SpectralFluxDetector::new() initializes with zeroed previous frame. Returns 0.0 on first call.'
+  description: 'Compute the spectral flux between consecutive FFT frames — measures how much the spectrum is changing. SpectralFluxDetector holds the previous frame''s band energies. Method detect(&mut self, bands: &[f32; 7]) -> f32 computes the sum of positive differences between current and previous band energies (half-wave rectified). Returns a value >= 0.0. Higher values indicate transients, note attacks, or song section transitions. SpectralFluxDetector::new() initializes with zeroed previous frame. Returns 0.0 on first call.'
   tags:
   - core
   - audio
@@ -697,7 +706,7 @@
   - audio.fft
   fixture_patterns: |
     - SpectralFluxDetector::new() -> Self (zeroed previous frame)
-    - spectral_flux(&mut self, bands: &[f32; 7]) -> f32
+    - detector.detect(bands: &[f32; 7]) -> f32 (method, not free function)
     - Returns sum of max(0, current[i] - previous[i]) for i in 0..7
     - First call returns 0.0 (no previous frame to diff against)
     - Identical consecutive frames return 0.0 (no change)
