@@ -13,7 +13,6 @@ use super::world::GameWorld;
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)
 /// Returns (opaque_scene, transparent_scene, hud) geometry.
 pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
-    let beat = world.beat_intensity;
     let cube_depth = 0.75; // chunkier cubes for more substantial 3D feel
 
     let mut sv = Vec::new(); // opaque scene
@@ -26,6 +25,21 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 
     // Background geometry (transparent — behind everything)
     build_background(&mut tv, &mut ti, world, gw, gh);
+
+    // Fireworks (transparent, behind board)
+    {
+        use super::effects::AudioEffect;
+        let fx_ctx = super::effects::RenderContext {
+            board_width: gw, board_height: gh,
+            win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
+            window_aspect: world.window_aspect,
+            preview_angle: world.preview_angle,
+            hud_opacity: world.hud_opacity,
+        };
+        if world.fireworks_enabled {
+            world.fireworks.render(&mut tv, &mut ti, &fx_ctx);
+        }
+    }
 
     // Occupied cells as 3D cubes — depth testing handles occlusion
     // Each piece type pulses depth and glow with its frequency band
@@ -73,28 +87,17 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Grid lines — shimmer driven by presence (band 5) + beat
-    let line_boost = (beat * 40.0) as u8;
-    let presence = world.bands_norm[5];
-    let presence_boost = (presence * 80.0) as u8;
-    // Centroid shifts color temperature: low=warm (red), high=cool (blue)
-    let c = world.centroid;
-    let lc_r = (40.0 + (1.0 - c) * 25.0) as u8;  // warmer when centroid low
-    let lc_g = 45u8;
-    let lc_b = (70.0 + c * 30.0) as u8;            // cooler when centroid high
-    let line_color = rgba_to_f32([
-        lc_r.saturating_add(line_boost).saturating_add(presence_boost / 3),
-        lc_g.saturating_add(line_boost).saturating_add(presence_boost / 2),
-        lc_b.saturating_add(line_boost * 2).saturating_add(presence_boost),
-        255,
-    ]);
-    let presence_beat = world.band_beat_intensity[5];
-    let line_thickness = 0.02 + presence_beat * 0.03;
-    for col in 0..=WIDTH {
-        push_grid_line_v(&mut sv, &mut si, col as f32, gh, line_color, line_thickness);
-    }
-    for row in 0..=HEIGHT {
-        push_grid_line_h(&mut sv, &mut si, -(row as f32), gw, line_color, line_thickness);
+    // Grid lines (effect module)
+    {
+        use super::effects::AudioEffect;
+        let grid_ctx = super::effects::RenderContext {
+            board_width: gw, board_height: gh,
+            win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
+            window_aspect: world.window_aspect,
+            preview_angle: world.preview_angle,
+            hud_opacity: world.hud_opacity,
+        };
+        world.grid_lines.render(&mut sv, &mut si, &grid_ctx);
     }
 
     // --- 3D Music Dashboard ---
@@ -162,47 +165,18 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     };
     push_slab_3d(&mut tv, &mut ti, fld.world_x, fld.world_y, fld.world_w, fld.world_h, 0.4, fld_color);
 
-    // FFT bars (lower-left of board)
-    let fft_a = if world.fft_locked { 1.0 } else { hud_a };
-    let fft_x = -4.5;
-    let fft_y = 14.0;
-    let fft_max_h = 5.0;
-    let col_w = 0.12;
-    let col_gap = 0.1;
-    let fft_depth = 0.35;
-    // All 7 bands, gradient blue → cyan → green → yellow → orange → red
-    let band_colors: [[u8; 3]; 7] = [
-        [30, 30, 180],   // sub-bass — deep blue
-        [40, 80, 180],   // bass — blue
-        [40, 160, 160],  // low-mids — cyan
-        [60, 170, 80],   // mids — green
-        [180, 180, 40],  // upper-mids — yellow
-        [200, 100, 40],  // presence — orange
-        [200, 50, 50],   // brilliance — red
-    ];
-    for (i, (val, color)) in world.bands.iter().zip(&band_colors).enumerate() {
-        let color = [color[0], color[1], color[2], (220.0 * fft_a) as u8];
-        let bx = fft_x + i as f32 * (col_w + col_gap);
-        let filled_h = (fft_max_h * val).max(0.05);
-        let bg_color = rgba_to_f32([12, 12, 25, (120.0 * fft_a) as u8]);
-        push_slab_3d(&mut tv, &mut ti, bx, fft_y, col_w, fft_max_h, fft_depth * 0.3, bg_color);
-        let fill_y = fft_y + (fft_max_h - filled_h);
-        push_slab_3d(&mut tv, &mut ti, bx, fill_y, col_w, filled_h, fft_depth, rgba_to_f32(color));
-        let peak_h = (fft_max_h * world.peak_bands[i]).max(0.05);
-        let peak_y = fft_y + (fft_max_h - peak_h);
-        let peak_color = rgba_to_f32([255, 255, 255, (160.0 * fft_a) as u8]);
-        push_slab_3d(&mut tv, &mut ti, bx, peak_y, col_w, 0.1, fft_depth + 0.1, peak_color);
+    // FFT visualizer (effect module)
+    {
+        use super::effects::AudioEffect;
+        let fft_ctx = super::effects::RenderContext {
+            board_width: gw, board_height: gh,
+            win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
+            window_aspect: world.window_aspect,
+            preview_angle: world.preview_angle,
+            hud_opacity: hud_a,
+        };
+        world.fft_vis.render(&mut tv, &mut ti, &fft_ctx);
     }
-    // FFT lock toggle button (below FFT bars, fades with HUD not with bars)
-    let fft_total_w = 7.0 * col_w + 6.0 * col_gap;
-    let lock_color = if world.fft_locked {
-        rgba_to_f32([80, 120, 80, (240.0 * hud_a) as u8])
-    } else if world.btn_hovered(super::world::ButtonId::FftLock) {
-        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut tv, &mut ti, fft_x, fft_y + fft_max_h + 0.2, fft_total_w, 0.3, 0.3, lock_color);
 
     // Per-cell clearing animations (shrinking bright cubes)
     for cell in &world.clearing_cells {
@@ -252,71 +226,25 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 
 /// Background geometric field: hex grid + connecting web + beat rings
 fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, gw: f32, gh: f32) {
-    let d = world.danger_level;
-    let geo_cx = gw / 2.0;
-    let geo_cy = -gh / 2.0;
-    let geo_z = -2.0;
-    let geo_n = [0.0f32, 0.0, 1.0];
-    let geo_time = world.preview_angle * (0.3 + d * 0.4);
-    let low_mids = world.bands_norm[2];
-    let sub_bass = world.bands_norm[0];
-    let flux_boost = (world.flux * 0.3).min(0.15); // spectral flux brightens background on transitions
-    let geo_alpha = 0.03 + low_mids * 0.15 + d * 0.05 + flux_boost;
+    let ctx = super::effects::RenderContext {
+        board_width: gw,
+        board_height: gh,
+        win_w: 0.0, win_h: 0.0,
+        window_aspect: 1.0,
+        preview_angle: world.preview_angle,
+        hud_opacity: world.hud_opacity,
+    };
+    use super::effects::AudioEffect;
 
-    // Hex dot grid — size driven by low-mids, color warmth by sub-bass
-    let hex_rings = 4;
-    let dot_size = 0.06 + low_mids * 0.24;
-    for ring in 1..=hex_rings {
-        let r = ring as f32 * 3.5;
-        let points = ring * 6;
-        for i in 0..points {
-            let angle = (i as f32 / points as f32) * std::f32::consts::TAU + geo_time;
-            let dx = angle.cos() * r;
-            let dy = angle.sin() * r;
-            let dist_factor = 1.0 - (ring as f32 / hex_rings as f32) * 0.5;
-            let dot_alpha = geo_alpha * dist_factor;
-            let dot_color = [0.15 + d * 0.45 + sub_bass * 0.2, 0.2 - d * 0.08, 0.5 - d * 0.35 - sub_bass * 0.15, dot_alpha];
-
-            let base = sv.len() as u32;
-            sv.push(Vertex { position: [geo_cx + dx - dot_size, geo_cy + dy - dot_size, geo_z], normal: geo_n, color: dot_color });
-            sv.push(Vertex { position: [geo_cx + dx + dot_size, geo_cy + dy - dot_size, geo_z], normal: geo_n, color: dot_color });
-            sv.push(Vertex { position: [geo_cx + dx + dot_size, geo_cy + dy + dot_size, geo_z], normal: geo_n, color: dot_color });
-            sv.push(Vertex { position: [geo_cx + dx - dot_size, geo_cy + dy + dot_size, geo_z], normal: geo_n, color: dot_color });
-            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-        }
+    // Hex background (effect module)
+    if world.hex_enabled {
+        world.hex_background.render(sv, si, &ctx);
     }
 
-    // Connecting lines
-    for ring in 1..=hex_rings {
-        let r = ring as f32 * 3.5;
-        let points = ring * 6;
-        let line_alpha = geo_alpha * 0.4;
-        let line_color = [0.1 + d * 0.35, 0.15 - d * 0.05, 0.35 - d * 0.25, line_alpha];
-        let line_w = 0.03;
-        for i in 0..points {
-            let a0 = (i as f32 / points as f32) * std::f32::consts::TAU + geo_time;
-            let a1 = ((i + 1) as f32 / points as f32) * std::f32::consts::TAU + geo_time;
-            let x0 = geo_cx + a0.cos() * r;
-            let y0 = geo_cy + a0.sin() * r;
-            let x1 = geo_cx + a1.cos() * r;
-            let y1 = geo_cy + a1.sin() * r;
-            let dx = x1 - x0;
-            let dy = y1 - y0;
-            let len = (dx * dx + dy * dy).sqrt();
-            if len < 0.001 { continue; }
-            let nx = -dy / len * line_w;
-            let ny = dx / len * line_w;
+    // Beat rings (effect module)
+    world.beat_rings.render(sv, si, &ctx);
 
-            let base = sv.len() as u32;
-            sv.push(Vertex { position: [x0 + nx, y0 + ny, geo_z], normal: geo_n, color: line_color });
-            sv.push(Vertex { position: [x1 + nx, y1 + ny, geo_z], normal: geo_n, color: line_color });
-            sv.push(Vertex { position: [x1 - nx, y1 - ny, geo_z], normal: geo_n, color: line_color });
-            sv.push(Vertex { position: [x0 - nx, y0 - ny, geo_z], normal: geo_n, color: line_color });
-            si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-        }
-    }
-
-    // Beat rings
+    // Legacy level-up rings (still inline)
     let ring_cx = gw / 2.0;
     let ring_cy = -gh / 2.0;
     let ring_z = -1.0;

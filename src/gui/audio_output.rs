@@ -111,8 +111,8 @@ impl AudioState {
 
     pub fn tick(&mut self, dt: f32) {
         self.beat_intensity = (self.beat_intensity - dt * 4.0).max(0.0);
-        self.band_beats = [false; 7]; // clear per-frame
         self.beat = false;
+        // Note: band_beats cleared by game loop after reading, not here
     }
 
     fn reset_for_new_track(&mut self, name: &str) {
