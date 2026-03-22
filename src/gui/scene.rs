@@ -4,7 +4,7 @@
 use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::pieces::*;
-use rhythm_grid::render::*;
+
 
 use super::drawing::*;
 use super::theme::*;
@@ -41,50 +41,30 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Occupied cells as 3D cubes — depth testing handles occlusion
-    // Each piece type pulses depth and glow with its frequency band
-    for row in 0..HEIGHT {
-        for col in 0..WIDTH {
-            if let CellState::Occupied(ti) = world.session.grid.cells[row][col] {
-                let band = (ti as usize) % 7;
-                let color = rgba_to_f32(world.themed_piece_color(ti));
-                let band_glow = world.bands_norm[band] * 2.0;
-                let beat_pulse = world.band_beat_intensity[band];
-                let depth = cube_depth + beat_pulse * 0.3;
-                push_cube_3d(&mut sv, &mut si, col as f32, row as f32, depth, color, band_glow);
-            }
-        }
+    // Occupied cells as 3D cubes via render state
+    for cell in &world.render_board.occupied {
+        let band = (cell.type_index as usize) % 7;
+        let color = rgba_to_f32(world.themed_piece_color(cell.type_index));
+        let band_glow = world.bands_norm[band] * 2.0;
+        let beat_pulse = world.band_beat_intensity[band];
+        let depth = cube_depth + beat_pulse * 0.3;
+        push_cube_3d(&mut sv, &mut si, cell.col as f32, cell.row as f32, depth, color, band_glow);
     }
 
-    // Ghost piece
-    if world.session.state == GameState::Playing {
-        let cells = piece_cells(world.session.active_piece.piece_type, world.session.active_piece.rotation);
-        let mut ghost_row = world.session.active_piece.row;
-        while is_valid_position(&world.session.grid, &cells, ghost_row + 1, world.session.active_piece.col) {
-            ghost_row += 1;
-        }
-        let base_color = world.themed_piece_color(world.session.active_piece.piece_type as u32);
+    // Ghost piece via render state
+    for cell in &world.render_board.ghost {
+        let base_color = world.themed_piece_color(cell.type_index);
         let ghost_color = rgba_to_f32([base_color[0], base_color[1], base_color[2], 40]);
-        for &(dr, dc) in &cells {
-            let r = ghost_row + dr;
-            let c = world.session.active_piece.col + dc;
-            if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                push_cube_3d(&mut tv, &mut ti, c as f32, r as f32, cube_depth * 0.2, ghost_color, 0.0);
-            }
-        }
+        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0);
+    }
 
-        // Active piece — pulses depth and glow with its frequency band
-        let active_band = (world.session.active_piece.piece_type as usize) % 7;
-        let color = rgba_to_f32(world.themed_piece_color(world.session.active_piece.piece_type as u32));
-        let active_glow = world.bands_norm[active_band] * 2.0;
-        let active_depth = cube_depth + world.band_beat_intensity[active_band] * 0.3;
-        for &(dr, dc) in &cells {
-            let r = world.session.active_piece.row + dr;
-            let c = world.session.active_piece.col + dc;
-            if r >= 0 && c >= 0 && (r as usize) < HEIGHT && (c as usize) < WIDTH {
-                push_cube_3d(&mut sv, &mut si, c as f32, r as f32, active_depth, color, active_glow);
-            }
-        }
+    // Active piece via render state — pulses depth and glow with its frequency band
+    for cell in &world.render_board.active {
+        let band = (cell.type_index as usize) % 7;
+        let color = rgba_to_f32(world.themed_piece_color(cell.type_index));
+        let active_glow = world.bands_norm[band] * 2.0;
+        let active_depth = cube_depth + world.band_beat_intensity[band] * 0.3;
+        push_cube_3d(&mut sv, &mut si, cell.col as f32, cell.row as f32, active_depth, color, active_glow);
     }
 
     // Grid lines (effect module)
@@ -385,9 +365,9 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     // Held piece preview (top-left, mirrors next piece position)
-    if let Some(held_type) = world.session.held_piece {
-        let held_cells = piece_cells(held_type, 0);
-        let held_color = rgba_to_f32(world.themed_piece_color(held_type as u32));
+    if let Some(ref held) = world.render_held {
+        let held_cells = held.cells;
+        let held_color = rgba_to_f32(world.themed_piece_color(held.type_index));
         let held_cx = 66.0;
         let held_cy = np_y + 52.0;
         let held_scale = 18.0;
@@ -469,14 +449,14 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     // Score / Level / Lines (left side, below held piece area)
     let stats_y = 110.0;
     push_text(&mut verts, &mut indices, 12.0, stats_y, "SCORE", dim_col, 1.0);
-    push_text(&mut verts, &mut indices, 12.0, stats_y + 12.0, &format!("{}", world.session.score), text_col, 2.0);
+    let rs = &world.render_status;
+    push_text(&mut verts, &mut indices, 12.0, stats_y + 12.0, &format!("{}", rs.score), text_col, 2.0);
 
-    let level = level_for_lines(world.session.total_lines);
     push_text(&mut verts, &mut indices, 12.0, stats_y + 38.0, "LEVEL", dim_col, 1.0);
-    push_text(&mut verts, &mut indices, 12.0, stats_y + 50.0, &format!("{}", level), text_col, 2.0);
+    push_text(&mut verts, &mut indices, 12.0, stats_y + 50.0, &format!("{}", rs.level), text_col, 2.0);
 
     push_text(&mut verts, &mut indices, 12.0, stats_y + 76.0, "LINES", dim_col, 1.0);
-    push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", world.session.total_lines), text_col, 2.0);
+    push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", rs.total_lines), text_col, 2.0);
 
     // T-spin flash
     if world.t_spin_flash > 0.01 {
@@ -486,10 +466,10 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     // Combo counter (only visible during active combo)
-    if world.session.combo_count > 0 {
+    if rs.combo_count > 0 {
         let combo_col = rgba_to_f32([255, 200, 60, 255]);
         push_text(&mut verts, &mut indices, 12.0, stats_y + 114.0,
-                  &format!("COMBO {}", world.session.combo_count), combo_col, 2.0);
+                  &format!("COMBO {}", rs.combo_count), combo_col, 2.0);
     }
 
     // Music dashboard labels (right side, aligned with 3D elements)
@@ -546,31 +526,28 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, ll_x - 4.0, ll_y, "LOCK", lock_col, 1.0);
 
     // State overlays
-    if world.session.state == GameState::GameOver {
+    if rs.state == GameState::GameOver {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([120, 0, 0, 80]), 0.08);
         let go_w = 200.0; let go_h = 150.0;
         let go_x = (w - go_w) / 2.0;
         let go_y = (h - go_h) / 2.0;
         push_panel(&mut verts, &mut indices, go_x, go_y, go_w, go_h, 0.09);
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 8.0, "GAME OVER", rgba_to_f32([255, 80, 80, 255]), 2.0);
-        // Final score prominent
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 34.0, "SCORE", dim_col, 1.0);
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 46.0,
-                  &format!("{}", world.session.score), text_col, 3.0);
-        // Stats
-        let level = level_for_lines(world.session.total_lines);
+                  &format!("{}", rs.score), text_col, 3.0);
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 72.0,
-                  &format!("LVL {}  LINES {}", level, world.session.total_lines), dim_col, 1.0);
+                  &format!("LVL {}  LINES {}", rs.level, rs.total_lines), dim_col, 1.0);
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 84.0,
-                  &format!("COMBO {}  PCS {}", world.session.max_combo, world.session.pieces_placed), dim_col, 1.0);
-        let mins = (world.session.time_played_secs / 60.0) as u32;
-        let secs = (world.session.time_played_secs % 60.0) as u32;
+                  &format!("COMBO {}  PCS {}", rs.max_combo, rs.pieces_placed), dim_col, 1.0);
+        let mins = (rs.time_played_secs / 60.0) as u32;
+        let secs = (rs.time_played_secs % 60.0) as u32;
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 96.0,
                   &format!("TIME {}:{:02}", mins, secs), dim_col, 1.0);
         push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 116.0, "ENTER TO RESTART", dim_col, 1.0);
     }
 
-    if world.session.state == GameState::Paused {
+    if rs.state == GameState::Paused {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, 60]), 0.08);
         let pa_w = 110.0; let pa_h = 160.0;
         let pa_x = (w - pa_w) / 2.0;
