@@ -1,6 +1,6 @@
 // @spec-tags: render,color,layout
 // @invariants: piece_color maps type_index 0-6 to correct RGBA values and panics for >=7; cell_rect returns correct pixel rectangle; constants CELL_SIZE/BOARD_WIDTH_PX/BOARD_HEIGHT_PX have correct values
-// @build: 49
+// @build: 80
 
 use rhythm_grid::render::{cell_rect, piece_color, BOARD_HEIGHT_PX, BOARD_WIDTH_PX, CELL_SIZE};
 
@@ -65,7 +65,7 @@ fn piece_color_j_blue() {
 
 #[test]
 fn piece_color_l_orange() {
-    assert_eq!(piece_color(6), [255, 165, 0, 255]);
+    assert_eq!(piece_color(6), [255, 120, 0, 255]);
 }
 
 #[test]

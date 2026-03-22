@@ -434,7 +434,7 @@
   tags:
   - render
   - color
-  status: stale
+  status: implemented
   constants:
     I: 0:255:255:255
     J: 0:0:255:255
