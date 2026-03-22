@@ -2,27 +2,27 @@
 // Breathes with low-mids, warms with sub-bass, brightens on flux.
 
 use super::{AudioEffect, AudioFrame, RenderContext, RenderPass};
+use super::themes::HexParams;
 use crate::gui::drawing::Vertex;
 
 pub struct HexBackground {
     time: f32,
-    // Cached from last update for render
     danger: f32,
-    low_mids: f32,
     sub_bass: f32,
     geo_alpha: f32,
     dot_size: f32,
+    params: HexParams,
 }
 
 impl HexBackground {
-    pub fn new() -> Self {
+    pub fn new(params: HexParams) -> Self {
         HexBackground {
             time: 0.0,
             danger: 0.0,
-            low_mids: 0.0,
             sub_bass: 0.0,
-            geo_alpha: 0.03,
-            dot_size: 0.06,
+            geo_alpha: params.base_alpha,
+            dot_size: params.dot_min_size,
+            params,
         }
     }
 }
@@ -33,13 +33,14 @@ impl AudioEffect for HexBackground {
     }
 
     fn update(&mut self, audio: &AudioFrame) {
-        self.time += audio.dt * (0.3 + audio.danger * 0.4);
+        let p = &self.params;
+        self.time += audio.dt * (p.base_speed + audio.danger * p.danger_speed_mult);
         self.danger = audio.danger;
-        self.low_mids = audio.bands_norm[2];
         self.sub_bass = audio.bands_norm[0];
+        let low_mids = audio.bands_norm[2];
         let flux_boost = (audio.flux * 0.3).min(0.15);
-        self.geo_alpha = 0.03 + self.low_mids * 0.15 + audio.danger * 0.05 + flux_boost;
-        self.dot_size = 0.06 + self.low_mids * 0.24;
+        self.geo_alpha = p.base_alpha + low_mids * 0.15 + audio.danger * 0.05 + flux_boost;
+        self.dot_size = p.dot_min_size + low_mids * (p.dot_max_size - p.dot_min_size);
     }
 
     fn render(&self, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, ctx: &RenderContext) {
@@ -48,10 +49,11 @@ impl AudioEffect for HexBackground {
         let geo_z = -2.0;
         let geo_n = [0.0f32, 0.0, 1.0];
         let d = self.danger;
+        let p = &self.params;
 
-        let hex_rings = 4;
+        let hex_rings = p.hex_rings;
         for ring in 1..=hex_rings {
-            let r = ring as f32 * 3.5;
+            let r = ring as f32 * p.ring_spacing;
             let points = ring * 6;
             for i in 0..points {
                 let angle = (i as f32 / points as f32) * std::f32::consts::TAU + self.time;
@@ -60,9 +62,9 @@ impl AudioEffect for HexBackground {
                 let dist_factor = 1.0 - (ring as f32 / hex_rings as f32) * 0.5;
                 let dot_alpha = self.geo_alpha * dist_factor;
                 let dot_color = [
-                    0.15 + d * 0.45 + self.sub_bass * 0.2,
-                    0.2 - d * 0.08,
-                    0.5 - d * 0.35 - self.sub_bass * 0.15,
+                    p.base_r + d * 0.45 + self.sub_bass * 0.2,
+                    p.base_g - d * 0.08,
+                    p.base_b - d * 0.35 - self.sub_bass * 0.15,
                     dot_alpha,
                 ];
 
@@ -77,10 +79,10 @@ impl AudioEffect for HexBackground {
 
         // Connecting lines
         for ring in 1..=hex_rings {
-            let r = ring as f32 * 3.5;
+            let r = ring as f32 * p.ring_spacing;
             let points = ring * 6;
             let line_alpha = self.geo_alpha * 0.4;
-            let line_color = [0.1 + d * 0.35, 0.15 - d * 0.05, 0.35 - d * 0.25, line_alpha];
+            let line_color = [p.base_r * 0.7 + d * 0.35, p.base_g * 0.75 - d * 0.05, p.base_b * 0.7 - d * 0.25, line_alpha];
             let line_w = 0.03;
             for i in 0..points {
                 let a0 = (i as f32 / points as f32) * std::f32::consts::TAU + self.time;

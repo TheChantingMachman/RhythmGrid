@@ -1,6 +1,7 @@
 // Beat rings — expanding concentric rings spawned on bass/sub-bass beats.
 
 use super::{AudioEffect, AudioFrame, RenderContext, RenderPass};
+use super::themes::RingParams;
 use crate::gui::drawing::Vertex;
 
 pub struct BgRing {
@@ -13,14 +14,16 @@ pub struct BgRing {
 
 pub struct BeatRings {
     rings: Vec<BgRing>,
-    prev_bass_beat: [bool; 2], // edge detection for bands 0,1
+    prev_bass_beat: [bool; 2],
+    params: RingParams,
 }
 
 impl BeatRings {
-    pub fn new() -> Self {
+    pub fn new(params: RingParams) -> Self {
         BeatRings {
             rings: Vec::new(),
             prev_bass_beat: [false; 2],
+            params,
         }
     }
 }
@@ -32,21 +35,23 @@ impl AudioEffect for BeatRings {
 
     fn update(&mut self, audio: &AudioFrame) {
         let d = audio.danger;
+        let p = &self.params;
 
         // Spawn rings on bass/sub-bass beats (edge-triggered)
         for band in 0..2 {
             let is_beat = audio.band_beats[band] > 0.95;
             if is_beat && !self.prev_bass_beat[band] {
+                let life = p.base_life - d * 1.0;
                 self.rings.push(BgRing {
                     radius: 0.5,
-                    max_radius: 18.0,
-                    life: 3.0 - d * 1.0,
-                    max_life: 3.0 - d * 1.0,
+                    max_radius: p.max_radius,
+                    life,
+                    max_life: life,
                     color: [
-                        0.1 + d * 0.5 + if band == 0 { 0.2 } else { 0.0 },
-                        0.15 - d * 0.05,
-                        0.4 - d * 0.3,
-                        0.3 + d * 0.15 + audio.bands_norm[band] * 0.2,
+                        p.color_r + d * 0.5 + if band == 0 { 0.2 } else { 0.0 },
+                        p.color_g - d * 0.05,
+                        p.color_b - d * 0.3,
+                        p.base_alpha + d * 0.15 + audio.bands_norm[band] * 0.2,
                     ],
                 });
             }

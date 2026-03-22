@@ -1,6 +1,7 @@
 // FFT visualizer — 7-band spectral display with peak hold and lock toggle.
 
 use super::{AudioEffect, AudioFrame, RenderContext, RenderPass};
+use super::themes::FftParams;
 use crate::gui::drawing::{Vertex, rgba_to_f32, push_slab_3d};
 
 const FFT_X: f32 = -4.5;
@@ -10,30 +11,22 @@ const COL_W: f32 = 0.12;
 const COL_GAP: f32 = 0.1;
 const FFT_DEPTH: f32 = 0.35;
 
-const BAND_COLORS: [[u8; 3]; 7] = [
-    [30, 30, 180],   // sub-bass — deep blue
-    [40, 80, 180],   // bass — blue
-    [40, 160, 160],  // low-mids — cyan
-    [60, 170, 80],   // mids — green
-    [180, 180, 40],  // upper-mids — yellow
-    [200, 100, 40],  // presence — orange
-    [200, 50, 50],   // brilliance — red
-];
-
 pub struct FftVisualizer {
     bands: [f32; 7],
     peaks: [f32; 7],
     pub locked: bool,
     pub lock_hovered: bool,
+    params: FftParams,
 }
 
 impl FftVisualizer {
-    pub fn new() -> Self {
+    pub fn new(params: FftParams) -> Self {
         FftVisualizer {
             bands: [0.0; 7],
             peaks: [0.0; 7],
             locked: false,
             lock_hovered: false,
+            params,
         }
     }
 }
@@ -51,7 +44,7 @@ impl AudioEffect for FftVisualizer {
     fn render(&self, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, ctx: &RenderContext) {
         let fft_a = if self.locked { 1.0 } else { ctx.hud_opacity };
 
-        for (i, (val, color)) in self.bands.iter().zip(&BAND_COLORS).enumerate() {
+        for (i, (val, color)) in self.bands.iter().zip(&self.params.band_colors).enumerate() {
             let color = [color[0], color[1], color[2], (220.0 * fft_a) as u8];
             let bx = FFT_X + i as f32 * (COL_W + COL_GAP);
             let filled_h = (FFT_MAX_H * val).max(0.05);

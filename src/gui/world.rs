@@ -17,6 +17,7 @@ use super::effects::beat_rings::BeatRings;
 use super::effects::hex_background::HexBackground;
 use super::effects::fft_visualizer::FftVisualizer;
 use super::effects::grid_lines::GridLines;
+use super::effects::themes;
 use super::particles::ParticleSystem;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
 use super::theme::{DEFAULT_CAM_ANGLE, THEME};
@@ -112,6 +113,7 @@ pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
 impl GameWorld {
     pub fn new() -> Self {
+        let theme = themes::default_theme();
         // Load settings to check for music folder
         let settings_path = config_dir().join("settings.toml");
         let settings = load_settings(&settings_path);
@@ -141,17 +143,17 @@ impl GameWorld {
             prev_beat: false,
             clearing_cells: Vec::new(),
             bg_rings: Vec::new(),
-            beat_rings: BeatRings::new(),
-            hex_background: HexBackground::new(),
-            fft_vis: FftVisualizer::new(),
-            grid_lines: GridLines::new(),
+            beat_rings: BeatRings::new(theme.rings),
+            hex_background: HexBackground::new(theme.hex),
+            fft_vis: FftVisualizer::new(theme.fft),
+            grid_lines: GridLines::new(theme.grid),
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
             window_aspect: THEME.win_w as f32 / THEME.win_h as f32,
             hud_opacity: 1.0,
             hud_fade_timer: 1.5,
-            camera: CameraReactor::new(),
+            camera: CameraReactor::new(theme.camera),
             audio_frame: AudioFrame {
                 bands: [0.0; 7], bands_norm: [0.0; 7], peak_bands: [0.0; 7],
                 band_beats: [0.0; 7], centroid: 0.0, flux: 0.0, danger: 0.0, dt: 0.0,
