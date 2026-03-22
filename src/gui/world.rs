@@ -70,6 +70,9 @@ pub struct GameWorld {
     pub(super) render_board: BoardRenderState,
     pub(super) render_status: GameStatusRender,
     pub(super) render_held: Option<HeldPieceRender>,
+    pub(super) toast_text: String,
+    pub(super) toast_timer: f32,
+    theme_index: usize,
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -172,6 +175,9 @@ impl GameWorld {
                 state: GameState::Menu, can_hold: true,
             },
             render_held: None,
+            toast_text: String::new(),
+            toast_timer: 0.0,
+            theme_index: 0,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -371,6 +377,7 @@ impl GameWorld {
 
         // T-spin flash decay
         self.t_spin_flash = (self.t_spin_flash - dt as f32 * 1.0).max(0.0);
+        self.toast_timer = (self.toast_timer - dt as f32).max(0.0);
 
         // Smooth escalation transition
         let target_danger = if escalation_stage(&self.session.grid) == EscalationStage::Danger { 1.0 } else { 0.0 };
@@ -483,6 +490,25 @@ impl GameWorld {
         self.render_board = board_state(&self.session);
         self.render_status = game_status(&self.session);
         self.render_held = held_piece_state(&self.session);
+    }
+
+    pub fn cycle_theme(&mut self) {
+        let theme_fns: &[fn() -> themes::VisualTheme] = &[
+            themes::default_theme,
+            themes::water_theme,
+            themes::debug_theme,
+        ];
+        self.theme_index = (self.theme_index + 1) % theme_fns.len();
+        let theme = theme_fns[self.theme_index]();
+        self.effect_flags = theme.effects.clone();
+        self.piece_colors = theme.piece_colors;
+        self.beat_rings = BeatRings::new(theme.rings);
+        self.hex_background = HexBackground::new(theme.hex);
+        self.fft_vis = FftVisualizer::new(theme.fft);
+        self.grid_lines = GridLines::new(theme.grid);
+        self.camera = CameraReactor::new(theme.camera);
+        self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
+        self.toast_timer = 2.0;
     }
 
     pub fn hold_piece(&mut self) {

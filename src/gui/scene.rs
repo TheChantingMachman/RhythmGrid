@@ -486,6 +486,13 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
                   &format!("COMBO {}", rs.combo_count), combo_col, 2.0);
     }
 
+    // Toast message (theme switch notification)
+    if world.toast_timer > 0.0 {
+        let ta = (world.toast_timer.min(1.0) * 255.0) as u8;
+        push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
+                  &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
+    }
+
     // Music dashboard labels (right side, aligned with 3D elements)
     let dash_hud_x = w - 140.0;
     let track_name = if let Ok(audio) = world.audio.try_lock() {
