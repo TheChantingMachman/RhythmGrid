@@ -197,6 +197,7 @@ impl GameWorld {
                     self.band_beat_intensity[i] = 1.0;
                 }
             }
+            audio.band_beats = [false; 7]; // clear after reading
             got_beat = audio.beat_intensity > 0.9; // fresh beat
         }
 
