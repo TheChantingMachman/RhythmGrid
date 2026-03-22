@@ -41,14 +41,15 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Occupied cells as 3D cubes via render state
+    // Occupied cells as translucent 3D cubes — back faces visible through front
     for cell in &world.render_board.occupied {
         let band = (cell.type_index as usize) % 7;
-        let color = rgba_to_f32(world.themed_piece_color(cell.type_index));
+        let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
+        color[3] = 0.75; // translucent — see through to back faces
         let band_glow = world.bands_norm[band] * 2.0;
         let beat_pulse = world.band_beat_intensity[band];
         let depth = cube_depth + beat_pulse * 0.3;
-        push_cube_3d(&mut sv, &mut si, cell.col as f32, cell.row as f32, depth, color, band_glow);
+        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow);
     }
 
     // Ghost piece via render state
@@ -58,13 +59,14 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0);
     }
 
-    // Active piece via render state — pulses depth and glow with its frequency band
+    // Active piece — slightly more opaque than locked pieces
     for cell in &world.render_board.active {
         let band = (cell.type_index as usize) % 7;
-        let color = rgba_to_f32(world.themed_piece_color(cell.type_index));
+        let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
+        color[3] = 0.85; // active piece slightly more solid
         let active_glow = world.bands_norm[band] * 2.0;
         let active_depth = cube_depth + world.band_beat_intensity[band] * 0.3;
-        push_cube_3d(&mut sv, &mut si, cell.col as f32, cell.row as f32, active_depth, color, active_glow);
+        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, active_depth, color, active_glow);
     }
 
     // Grid lines (effect module)
