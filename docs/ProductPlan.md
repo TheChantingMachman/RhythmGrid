@@ -186,6 +186,18 @@ Inspired by Tetris Effect and Geometry Wars — techniques to consider as the vi
 - Could coexist with quick-burst fireworks (current) — shells are the rare dramatic moments, bursts are the frequent punctuation.
 - Variation: different shell types (palm, willow, chrysanthemum) as theme options
 
+**Particle cloud shapes (dissolve + reform):**
+- A 3D shape (sphere, torus, icosahedron) defined as a point cloud — surface made of particles, not polygons. Spins on 3 axes in the background void.
+- Particles drift loosely around their target positions (noise offset) — shape breathes, never perfectly solid.
+- On musical trigger (flux spike, rare beat): shape dissolves — particles scatter with wind/gravity force. Slow, dramatic.
+- After dissolve: new shape forms at a random position. Particles attracted toward new target positions. Slow coalescence from scattered cloud into recognizable form.
+- Full lifecycle: formed (30-60s) → dissolve (3-5s) → scattered drift (5-10s) → reform into new shape (5-10s).
+- Audio mapping: rotation speed = mids, drift amount = low-mids (tight when quiet, loose when loud), dissolve trigger = flux spike, reform speed = centroid (bright = fast crystallize, dark = slow coalesce).
+- Shape vocabulary: sphere, torus, icosahedron, cube, double helix — rotates through shapes on each reform.
+- Technique: per-particle target position + current position. Lerp toward target + noise. On dissolve: apply explosion force. On reform: assign new targets. Simple, no physics engine.
+- Renders as small transparent quads in 3D scene pass — depth tested against board cubes.
+- Slow burn ambient effect — perfect for idle/visualizer mode.
+
 ### Dynamic Audio-Visual Mapping (phased)
 Real-time song fingerprinting to make visuals respond to what's musically interesting, not just loud.
 
