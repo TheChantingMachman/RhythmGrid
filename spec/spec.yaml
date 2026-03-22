@@ -557,24 +557,28 @@
   fixture_patterns: |
     - next_piece_state(session: &GameSession) -> NextPieceRender
     - NextPieceRender { type_index: u32, cells: [(i32, i32); 4] }
-    - type_index = TETROMINO_TYPES[session.bag.peek()] as u32
-    - cells = PIECE_CELLS[type_index as usize][0] (rotation 0)
-    - Test: create session, verify type_index matches bag.peek(), cells match piece data
+    - type_index = session.bag.peek() as u32 (bag index equals TetrominoType discriminant)
+    - cells = PIECE_CELLS[type_index as usize][0] (rotation 0 offsets)
+    - Test: create GameSession, verify type_index matches bag.peek()
+    - Test: verify cells match PIECE_CELLS lookup
 -
   id: audio.rolling_energy
   section: Audio
-  description: 'Track rolling average energy per frequency band over a configurable window. RollingEnergy::new(window_secs: f32, sample_rate_hz: f32) creates a tracker. update(&mut self, bands: &[f32; 7]) feeds one frame of band energy. averages(&self) -> [f32; 7] returns the rolling average per band. dominant_bands(&self, count: usize) -> Vec<usize> returns the indices of the N bands with highest rolling average, sorted descending by energy. Used for dynamic audio-visual mapping — identify which frequency bands are most active in the current song section.'
+  description: 'Track rolling average energy per frequency band over a configurable window. RollingEnergy::new(window_secs: f32, frames_per_sec: f32) creates a tracker. window_secs is the averaging duration (e.g. 5.0 for 5 seconds). frames_per_sec is how often update() will be called (e.g. 60.0 for a 60fps game loop — NOT the audio sample rate). update(&mut self, bands: &[f32; 7]) feeds one frame of band energy. averages(&self) -> [f32; 7] returns the rolling average per band. dominant_bands(&self, count: usize) -> Vec<usize> returns the indices of the N bands with highest rolling average, sorted descending by energy. Used for dynamic audio-visual mapping.'
   tags: [core, audio, analysis]
   status: draft
   depends_on: [audio.fft]
   fixture_patterns: |
-    - RollingEnergy::new(window_secs: f32, sample_rate_hz: f32) -> Self
-    - update(&mut self, bands: &[f32; 7]) — call once per audio frame
+    - RollingEnergy::new(window_secs: f32, frames_per_sec: f32) -> Self
+    - window_secs: averaging duration (e.g. 5.0 for 5 seconds)
+    - frames_per_sec: how often update() is called (e.g. 60.0 for 60fps game loop, NOT audio sample rate)
+    - update(&mut self, bands: &[f32; 7]) — call once per game frame
     - averages(&self) -> [f32; 7] — rolling average per band
-    - dominant_bands(&self, count: usize) -> Vec<usize> — top N band indices by average energy
-    - Window: maintains a circular buffer of frames covering window_secs
-    - sample_rate_hz: how many update() calls per second (e.g. 60.0 for 60fps)
-    - Test: feed constant energy to one band, verify it dominates; feed spike then silence, verify average decays
+    - dominant_bands(&self, count: usize) -> Vec<usize> — top N band indices sorted by average energy descending
+    - Internal: circular buffer of window_secs * frames_per_sec frames
+    - Empty/new tracker: averages returns [0.0; 7], dominant_bands returns first N indices
+    - Test: feed constant [1,0,0,0,0,0,0] for 100 frames — band 0 dominates
+    - Test: feed spike then zeros — average decays over window_secs
 -
   id: audio.beat_confidence
   section: Audio
@@ -587,9 +591,10 @@
     - update(&mut self, band_beats: &[bool; 7], timestamp_secs: f64)
     - confidence(&self) -> [f32; 7] — 0.0 (random) to 1.0 (perfectly regular)
     - Tracks last 16 inter-beat intervals per band
-    - Confidence = 1.0 - coefficient_of_variation(intervals) clamped to 0.0-1.0
-    - coefficient_of_variation = std_dev / mean
-    - Band with no beats returns 0.0
-    - Band with < 2 intervals returns 0.0 (not enough data)
-    - Test: feed beats at exact 0.5s intervals to one band — confidence near 1.0
-    - Test: feed beats at random intervals — confidence near 0.0
+    - Confidence = (1.0 - coefficient_of_variation).clamp(0.0, 1.0)
+    - coefficient_of_variation = std_dev / mean (of inter-beat intervals)
+    - Band with no beats or < 2 intervals: returns 0.0
+    - Test: feed beats at exactly 0.5s intervals for 16+ beats to band 0 — confidence[0] == 1.0 (CV is 0.0 with identical intervals)
+    - Test: feed beats to band 0 only — other bands confidence == 0.0
+    - Test: band_beats is [bool; 7] — true means beat occurred this frame, false means no beat
+    - update should be called every frame, not just on beats — timestamp advances continuously
