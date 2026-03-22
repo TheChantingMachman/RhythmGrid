@@ -49,7 +49,7 @@ impl AudioEffect for Fireworks {
             let is_beat = audio.band_beats[band] > 0.95;
             if is_beat && !self.prev_beat[band] {
                 // Only spawn for stronger bands — skip if energy is low
-                if audio.bands_norm[band] > 0.3 {
+                if audio.bands_norm[band] > 0.6 {
                     let cx = self.rand() * 22.0 - 6.0;  // full visible width
                     let cy = -(self.rand().abs() * 24.0); // full visible height
                     let spark_count = 20 + (audio.bands_norm[band] * 20.0) as usize;
@@ -67,7 +67,7 @@ impl AudioEffect for Fireworks {
                     for _ in 0..spark_count {
                         let angle = self.rand() * std::f32::consts::TAU;
                         let speed = 2.0 + self.rand().abs() * 6.0;
-                        let life = 0.5 + self.rand().abs() * 1.0;
+                        let life = 1.5 + self.rand().abs() * 3.0;
                         sparks.push(Spark {
                             x: cx,
                             y: cy,
@@ -104,7 +104,7 @@ impl AudioEffect for Fireworks {
 
         for burst in &self.bursts {
             for spark in &burst.sparks {
-                let alpha = (spark.life / spark.max_life).powi(2);
+                let alpha = (spark.life / spark.max_life).powf(0.7);
                 let color = [
                     spark.color[0],
                     spark.color[1],
