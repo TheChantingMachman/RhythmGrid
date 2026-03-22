@@ -140,6 +140,7 @@ impl GameWorld {
             music_folder: self.music_folder.clone(),
             theme: theme_names.get(self.theme_index).unwrap_or(&"Default").to_string(),
             shuffle: false, // TODO: track shuffle state
+            ..rhythm_grid::config::Settings::default()
         };
         let path = config_dir().join("settings.toml");
         let _ = save_settings(&settings, &path);

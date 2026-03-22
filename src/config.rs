@@ -5,6 +5,14 @@ fn default_theme() -> String {
     "Default".to_string()
 }
 
+fn default_window_width() -> u32 {
+    1000
+}
+
+fn default_window_height() -> u32 {
+    800
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub volume: f32,
@@ -15,11 +23,29 @@ pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub shuffle: bool,
+    #[serde(default = "default_window_width")]
+    pub window_width: u32,
+    #[serde(default = "default_window_height")]
+    pub window_height: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_x: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_y: Option<i32>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { volume: 0.8, speed: 1.0, music_folder: None, theme: "Default".to_string(), shuffle: false }
+        Settings {
+            volume: 0.8,
+            speed: 1.0,
+            music_folder: None,
+            theme: "Default".to_string(),
+            shuffle: false,
+            window_width: 1000,
+            window_height: 800,
+            window_x: None,
+            window_y: None,
+        }
     }
 }
 
