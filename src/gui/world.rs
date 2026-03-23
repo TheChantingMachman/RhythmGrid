@@ -75,6 +75,7 @@ pub struct GameWorld {
     pub(super) toast_text: String,
     pub(super) toast_timer: f32,
     pub(super) theme_index: usize,
+    pub color_grade: [f32; 3],
     pub(super) music_folder: Option<String>,
     pub saved_window_width: u32,
     pub saved_window_height: u32,
@@ -232,6 +233,7 @@ impl GameWorld {
             toast_text: String::new(),
             toast_timer: 0.0,
             theme_index,
+            color_grade: theme.color_grade,
             music_folder: settings.music_folder.clone(),
             saved_window_width: settings.window_width,
             saved_window_height: settings.window_height,
@@ -651,6 +653,7 @@ impl GameWorld {
         let theme = theme_fns[self.theme_index]();
         self.effect_flags = theme.effects.clone();
         self.bindings = theme.bindings.clone();
+        self.color_grade = theme.color_grade;
         self.piece_colors = theme.piece_colors;
         self.beat_rings = BeatRings::new(theme.rings);
         self.hex_background = HexBackground::new(theme.hex);
