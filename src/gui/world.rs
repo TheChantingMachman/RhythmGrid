@@ -85,7 +85,7 @@ pub struct GameWorld {
     beat_confidence: BeatConfidence,
     pub(super) bindings: themes::EffectBindings,
     pub(super) resolved_ranks: [usize; 3],  // band indices for rank 1, 2, 3
-    track_time: f64,                         // seconds into current track
+    pub(super) track_time: f64,               // seconds into current track
     ranks_locked: bool,                      // true after analysis window
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
@@ -307,35 +307,54 @@ impl GameWorld {
             ], self.track_time);
         }
 
-        // Track time + rank resolution (30s warmup, 15s analysis, then lock)
-        let prev_time = self.track_time;
+        // Track time + two-phase rank resolution
+        // Phase 1: sample 0-7s, lock at 7s (catches songs that start strong)
+        // Phase 2: sample 30-45s, reapply at 45s (catches slow ramp-ups)
         self.track_time += dt;
+        let band_names = ["SUB", "BASS", "LMID", "MID", "UMID", "PRES", "BRIL"];
 
-        // Phase label (persistent, changes with analysis state)
-        if self.track_time < 30.0 {
-            self.toast_text = format!("WARMUP {:.0}S", 30.0 - self.track_time);
-            self.toast_timer = 2.0; // keep visible
-        } else if !self.ranks_locked {
-            self.toast_text = format!("ANALYZING {:.0}S", 45.0 - self.track_time);
-            self.toast_timer = 2.0;
-        }
-
-        if !self.ranks_locked && self.track_time > 45.0 {
-            let dominant = self.rolling_energy.dominant_bands(3);
-            let confidence = self.beat_confidence.confidence();
-            let band_names = ["SUB", "BASS", "LMID", "MID", "UMID", "PRES", "BRIL"];
-            // Pick the most confident band among the top 3 energy bands as rank 1
+        // Resolve ranks from current analysis state
+        let resolve = |energy: &RollingEnergy, conf: &BeatConfidence| -> [usize; 3] {
+            let dominant = energy.dominant_bands(3);
+            let confidence = conf.confidence();
             let rank1 = *dominant.iter()
                 .max_by(|&&a, &&b| confidence[a].partial_cmp(&confidence[b]).unwrap())
                 .unwrap_or(&0);
             let others: Vec<usize> = dominant.iter().filter(|&&b| b != rank1).copied().collect();
             let rank2 = others.first().copied().unwrap_or(1);
             let rank3 = others.get(1).copied().unwrap_or(2);
-            self.resolved_ranks = [rank1, rank2, rank3];
+            [rank1, rank2, rank3]
+        };
+
+        // Phase labels
+        if self.track_time < 7.0 {
+            self.toast_text = format!("SAMPLING {:.0}S", 7.0 - self.track_time);
+            self.toast_timer = 2.0;
+        } else if self.track_time >= 30.0 && self.track_time < 45.0 {
+            self.toast_text = format!("RESAMPLING {:.0}S", 45.0 - self.track_time);
+            self.toast_timer = 2.0;
+        }
+
+        // Phase 1: first lock at 7s
+        if !self.ranks_locked && self.track_time > 7.0 {
+            self.resolved_ranks = resolve(&self.rolling_energy, &self.beat_confidence);
             self.ranks_locked = true;
-            self.toast_text = format!("LOCKED: {} {} {}",
-                band_names[rank1], band_names[rank2], band_names[rank3]);
-            self.toast_timer = 4.0;
+            let [r1, r2, r3] = self.resolved_ranks;
+            self.toast_text = format!("MAPPED: {} {} {}",
+                band_names[r1], band_names[r2], band_names[r3]);
+            self.toast_timer = 3.0;
+        }
+
+        // Phase 2: reapply at 45s after 15s of fresh sampling
+        if self.track_time > 45.0 && self.track_time - dt <= 45.0 {
+            let new_ranks = resolve(&self.rolling_energy, &self.beat_confidence);
+            if new_ranks != self.resolved_ranks {
+                self.resolved_ranks = new_ranks;
+                let [r1, r2, r3] = self.resolved_ranks;
+                self.toast_text = format!("REMAPPED: {} {} {}",
+                    band_names[r1], band_names[r2], band_names[r3]);
+                self.toast_timer = 3.0;
+            }
         }
 
         // Peak hold (slow decay — for visual indicator on FFT bars)
@@ -486,7 +505,7 @@ impl GameWorld {
 
         // Decay AFTER effects have consumed the frame
         for i in 0..7 {
-            self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 4.0).max(0.0);
+            self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 8.0).max(0.0);
         }
 
         // T-spin flash decay

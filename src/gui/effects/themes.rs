@@ -242,6 +242,7 @@ pub fn debug_theme() -> VisualTheme {
     theme.effects = EffectFlags::all_off();
     // Base visibility + dynamic mapping test effects
     theme.effects.grid_lines = true;
+    theme.effects.fft_visualizer = true;
     theme.effects.cube_glow = true;
     theme.effects.ghost_piece = true;
     theme.effects.active_piece_pulse = true;
