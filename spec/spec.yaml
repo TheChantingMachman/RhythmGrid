@@ -602,5 +602,5 @@
   section: Music
   description: 'Jump to a specific track index in the playlist. Playlist::jump_to(&mut self, index: usize) sets current_index to index, clamped to 0..files.len()-1. Returns the track at the new position via current(). Used by GUI to let users click a track in the queue to play it immediately.'
   tags: [core, music, playback]
-  status: draft
+  status: implemented
   depends_on: [music.skip, music.prev_track]
