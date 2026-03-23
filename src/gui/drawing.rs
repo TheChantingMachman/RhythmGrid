@@ -162,6 +162,53 @@ pub fn push_slab_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     }
 }
 
+/// Extrude a 2D polygon into a 3D shape with depth. Points are in world-space XY
+/// (y-down convention: y is negated internally). z0=back, z1=front.
+pub fn push_extruded_shape(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+                           points: &[[f32; 2]], z0: f32, z1: f32, color: [f32; 4]) {
+    let n = points.len();
+    if n < 3 { return; }
+
+    // Front face (z1) — fan triangulation
+    let front_n = [0.0f32, 0.0, 1.0];
+    let base = verts.len() as u32;
+    for &[x, y] in points {
+        verts.push(Vertex { position: [x, -y, z1], normal: front_n, color });
+    }
+    for i in 1..n as u32 - 1 {
+        indices.extend_from_slice(&[base, base + i, base + i + 1]);
+    }
+
+    // Back face (z0) — reversed winding
+    let back_n = [0.0f32, 0.0, -1.0];
+    let base = verts.len() as u32;
+    for &[x, y] in points {
+        verts.push(Vertex { position: [x, -y, z0], normal: back_n, color });
+    }
+    for i in 1..n as u32 - 1 {
+        indices.extend_from_slice(&[base, base + i + 1, base + i]);
+    }
+
+    // Side faces — quads connecting front and back edges
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let [x0, y0] = points[i];
+        let [x1, y1] = points[j];
+        // Edge normal (perpendicular to edge, pointing outward)
+        let dx = x1 - x0;
+        let dy = -(y1 - y0); // negate because y is flipped
+        let len = (dx * dx + dy * dy).sqrt().max(0.001);
+        let side_n = [dy / len, dx / len, 0.0]; // perpendicular in XY
+
+        let base = verts.len() as u32;
+        verts.push(Vertex { position: [x0, -y0, z1], normal: side_n, color });
+        verts.push(Vertex { position: [x1, -y1, z1], normal: side_n, color });
+        verts.push(Vertex { position: [x1, -y1, z0], normal: side_n, color });
+        verts.push(Vertex { position: [x0, -y0, z0], normal: side_n, color });
+        indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+    }
+}
+
 pub fn push_grid_line_v(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                         x: f32, height: f32, color: [f32; 4], thickness: f32) {
     let w = thickness;
