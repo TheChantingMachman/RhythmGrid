@@ -89,7 +89,7 @@ impl AudioState {
         // Accumulate samples for FFT
         self.fft_sample_rate = sample_rate;
         self.fft_buffer.extend_from_slice(samples);
-        const FFT_WINDOW: usize = 2048;
+        const FFT_WINDOW: usize = 1024; // ~23ms at 44.1kHz — faster beat response
         if self.fft_buffer.len() >= FFT_WINDOW {
             let window: Vec<f32> = self.fft_buffer.drain(..FFT_WINDOW).collect();
             let raw = fft_bands(&window, sample_rate);
@@ -140,7 +140,7 @@ struct SampleBuffer {
 impl SampleBuffer {
     fn new(channels: usize) -> Self {
         SampleBuffer {
-            samples: VecDeque::with_capacity(44100 * 2 * 10), // ~10s buffer
+            samples: VecDeque::with_capacity(44100 * 2 * 2), // ~2s buffer
             channels,
             finished: false,
         }
@@ -210,7 +210,7 @@ fn stream_decode_track(
         // Back-pressure: wait if buffer is too full
         loop {
             if let Ok(buf) = buffer.try_lock() {
-                if buf.samples.len() < 44100 * channels * 10 {
+                if buf.samples.len() < 44100 * channels * 2 { // ~2s back-pressure cap
                     break;
                 }
             }
