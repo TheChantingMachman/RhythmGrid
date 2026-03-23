@@ -14,7 +14,8 @@ pub struct BgRing {
 
 pub struct BeatRings {
     rings: Vec<BgRing>,
-    prev_bass_beat: [bool; 2],
+    prev_beat: bool,
+    pub trigger_band: usize, // which band triggers ring spawns (set by GameWorld)
     params: RingParams,
 }
 
@@ -22,7 +23,8 @@ impl BeatRings {
     pub fn new(params: RingParams) -> Self {
         BeatRings {
             rings: Vec::new(),
-            prev_bass_beat: [false; 2],
+            prev_beat: false,
+            trigger_band: 0, // default sub-bass
             params,
         }
     }
@@ -37,26 +39,25 @@ impl AudioEffect for BeatRings {
         let d = audio.danger;
         let p = &self.params;
 
-        // Spawn rings on bass/sub-bass beats (edge-triggered)
-        for band in 0..2 {
-            let is_beat = audio.band_beats[band] > 0.95;
-            if is_beat && !self.prev_bass_beat[band] {
-                let life = p.base_life - d * 1.0;
-                self.rings.push(BgRing {
-                    radius: 0.5,
-                    max_radius: p.max_radius,
-                    life,
-                    max_life: life,
-                    color: [
-                        p.color_r + d * 0.5 + if band == 0 { 0.2 } else { 0.0 },
-                        p.color_g - d * 0.05,
-                        p.color_b - d * 0.3,
-                        p.base_alpha + d * 0.15 + audio.bands_norm[band] * 0.2,
-                    ],
-                });
-            }
-            self.prev_bass_beat[band] = is_beat;
+        // Spawn rings on trigger band beat (edge-triggered)
+        let band = self.trigger_band;
+        let is_beat = audio.band_beats[band] > 0.95;
+        if is_beat && !self.prev_beat {
+            let life = p.base_life - d * 1.0;
+            self.rings.push(BgRing {
+                radius: 0.5,
+                max_radius: p.max_radius,
+                life,
+                max_life: life,
+                color: [
+                    p.color_r + d * 0.5,
+                    p.color_g - d * 0.05,
+                    p.color_b - d * 0.3,
+                    p.base_alpha + d * 0.15 + audio.bands_norm[band] * 0.2,
+                ],
+            });
         }
+        self.prev_beat = is_beat;
 
         // Update rings
         for ring in &mut self.rings {

@@ -217,22 +217,21 @@
 -
   id: audio.beat_detect
   section: Audio
-  description: 'Detect beats per frequency band. MultiBeatDetector holds 7 independent detectors, one per FFT band. detect_bands(bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent> runs spike detection on each band independently. A spike occurs when a band''s energy exceeds its 43-sample rolling mean by 1.5x and at least 0.3s have passed since that band''s last beat. BandBeatEvent { band: usize, timestamp_secs: f64 }. The existing single-band BeatDetector and BeatEvent remain unchanged for backward compatibility.'
+  description: 'Detect beats per frequency band. MultiBeatDetector holds 7 independent detectors, one per FFT band. MultiBeatDetector::new() creates with default min_gap of 0.15s. MultiBeatDetector::with_min_gap(min_gap_secs: f64) creates with custom minimum inter-beat gap. detect_bands(bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent> runs spike detection on each band independently. A spike occurs when a band''s energy exceeds its 43-sample rolling mean by 1.5x and at least min_gap_secs have passed since that band''s last beat. BandBeatEvent { band: usize, timestamp_secs: f64 }. The existing single-band BeatDetector and BeatEvent remain unchanged for backward compatibility. Default min_gap reduced from 0.3s to 0.15s to catch beats at tempos up to 400 BPM.'
   tags: [core, audio, analysis]
-  status: implemented
+  status: stale
   depends_on: [audio.amplitude, audio.fft]
   fixture_patterns: |
-    - MultiBeatDetector::new() -> Self (7 internal detectors, all zeroed)
+    - MultiBeatDetector::new() -> Self (7 internal detectors, min_gap = 0.15s)
+    - MultiBeatDetector::with_min_gap(min_gap_secs: f64) -> Self (custom gap)
     - detect_bands(&mut self, bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent>
     - BandBeatEvent { band: usize, timestamp_secs: f64 } — derives Debug, Clone, PartialEq
     - Each band has independent 43-sample rolling mean and last_beat_secs
     - Spike threshold: band energy > rolling_mean * 1.5
-    - Min inter-beat gap per band: 0.3s
-    - Input values are per-band FFT energy (0.0-1.0 range, same as fft_bands output)
-    - Existing BeatDetector::new(), BeatDetector::detect(), BeatEvent must remain functional and unchanged
-    - Test old API: BeatDetector::new().detect(0.5, 1.0) still works as before
-    - Test new API: feed spiky data to one band, flat to others — only spiked band emits events
-    - Test independence: two bands spiking at different times emit separate events
+    - Min inter-beat gap per band: configurable, default 0.15s (was 0.3s)
+    - Existing BeatDetector::new(), BeatDetector::detect(), BeatEvent unchanged
+    - Test: with_min_gap(0.1) allows beats 0.1s apart
+    - Test: new() uses 0.15s gap — beats 0.2s apart both detected
 -
   id: audio.procedural
   section: Audio

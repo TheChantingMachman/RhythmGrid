@@ -41,14 +41,16 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Occupied cells as translucent 3D cubes
+    // Occupied cells — glow per piece type, pulse from dynamic rank analysis
     let ef = &world.effect_flags;
+    let pulse_band = world.resolve_rank(world.bindings.board_pulse);
+    let glow_band = world.resolve_rank(world.bindings.cube_glow);
     for cell in &world.render_board.occupied {
-        let band = (cell.type_index as usize) % 7;
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.75;
         let (band_glow, depth) = if ef.cube_glow {
-            (world.bands_norm[band] * 2.0, cube_depth + world.band_beat_intensity[band] * 0.3)
+            (world.bands_norm[glow_band] * 2.0,
+             cube_depth + world.band_beat_intensity[pulse_band] * 0.3)
         } else {
             (0.0, cube_depth)
         };

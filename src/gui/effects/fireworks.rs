@@ -21,6 +21,7 @@ pub struct Fireworks {
     bursts: Vec<Burst>,
     rng: u64,
     prev_beat: [bool; 7],
+    pub trigger_band: Option<usize>, // None = any band (legacy), Some(n) = only band n
 }
 
 impl Fireworks {
@@ -29,6 +30,7 @@ impl Fireworks {
             bursts: Vec::new(),
             rng: 0xCAFEBABE42,
             prev_beat: [false; 7],
+            trigger_band: None,
         }
     }
 
@@ -44,8 +46,12 @@ impl AudioEffect for Fireworks {
     }
 
     fn update(&mut self, audio: &AudioFrame) {
-        // Spawn burst on any strong band beat (edge-triggered)
-        for band in 0..7 {
+        // Spawn burst on band beat (edge-triggered)
+        let band_range: Vec<usize> = match self.trigger_band {
+            Some(b) => vec![b],
+            None => (0..7).collect(),
+        };
+        for band in band_range {
             let is_beat = audio.band_beats[band] > 0.95;
             if is_beat && !self.prev_beat[band] {
                 // Only spawn for stronger bands — skip if energy is low

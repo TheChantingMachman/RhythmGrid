@@ -8,6 +8,7 @@ use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
+use rhythm_grid::audio::{RollingEnergy, BeatConfidence};
 use rhythm_grid::render::{piece_color, board_state, held_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender};
 use super::audio_output::{self, AudioState};
 use super::camera::CameraReactor;
@@ -79,6 +80,13 @@ pub struct GameWorld {
     pub saved_window_x: Option<i32>,
     pub saved_window_y: Option<i32>,
     pub logical_window_size: [u32; 2],
+    // Dynamic audio-visual mapping
+    rolling_energy: RollingEnergy,
+    beat_confidence: BeatConfidence,
+    pub(super) bindings: themes::EffectBindings,
+    pub(super) resolved_ranks: [usize; 3],  // band indices for rank 1, 2, 3
+    track_time: f64,                         // seconds into current track
+    ranks_locked: bool,                      // true after analysis window
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -128,6 +136,16 @@ pub(super) struct ClearingCell {
 pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
 impl GameWorld {
+    /// Resolve a SignalRank to an actual band index using analysis results.
+    pub fn resolve_rank(&self, rank: themes::SignalRank) -> usize {
+        match rank {
+            themes::SignalRank::First => self.resolved_ranks[0],
+            themes::SignalRank::Second => self.resolved_ranks[1],
+            themes::SignalRank::Third => self.resolved_ranks[2],
+            themes::SignalRank::Fixed(band) => band.min(6),
+        }
+    }
+
     pub fn themed_piece_color(&self, type_index: u32) -> [u8; 4] {
         if let Some(colors) = &self.piece_colors {
             colors[type_index as usize]
@@ -215,6 +233,12 @@ impl GameWorld {
             saved_window_x: settings.window_x,
             saved_window_y: settings.window_y,
             logical_window_size: [settings.window_width, settings.window_height],
+            rolling_energy: RollingEnergy::new(10.0, 60.0),  // 10s window, ~60fps
+            beat_confidence: BeatConfidence::new(),
+            bindings: theme.bindings.clone(),
+            resolved_ranks: [0, 1, 2],  // default: sub-bass, bass, low-mids
+            track_time: 0.0,
+            ranks_locked: false,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -269,6 +293,49 @@ impl GameWorld {
             }
             audio.band_beats = [false; 7]; // clear after reading
             got_beat = audio.beat_intensity > 0.9; // fresh beat
+
+            // Feed analysis trackers
+            self.rolling_energy.update(&self.bands);
+            self.beat_confidence.update(&[
+                self.band_beat_intensity[0] > 0.95,
+                self.band_beat_intensity[1] > 0.95,
+                self.band_beat_intensity[2] > 0.95,
+                self.band_beat_intensity[3] > 0.95,
+                self.band_beat_intensity[4] > 0.95,
+                self.band_beat_intensity[5] > 0.95,
+                self.band_beat_intensity[6] > 0.95,
+            ], self.track_time);
+        }
+
+        // Track time + rank resolution (30s warmup, 15s analysis, then lock)
+        let prev_time = self.track_time;
+        self.track_time += dt;
+
+        // Phase label (persistent, changes with analysis state)
+        if self.track_time < 30.0 {
+            self.toast_text = format!("WARMUP {:.0}S", 30.0 - self.track_time);
+            self.toast_timer = 2.0; // keep visible
+        } else if !self.ranks_locked {
+            self.toast_text = format!("ANALYZING {:.0}S", 45.0 - self.track_time);
+            self.toast_timer = 2.0;
+        }
+
+        if !self.ranks_locked && self.track_time > 45.0 {
+            let dominant = self.rolling_energy.dominant_bands(3);
+            let confidence = self.beat_confidence.confidence();
+            let band_names = ["SUB", "BASS", "LMID", "MID", "UMID", "PRES", "BRIL"];
+            // Pick the most confident band among the top 3 energy bands as rank 1
+            let rank1 = *dominant.iter()
+                .max_by(|&&a, &&b| confidence[a].partial_cmp(&confidence[b]).unwrap())
+                .unwrap_or(&0);
+            let others: Vec<usize> = dominant.iter().filter(|&&b| b != rank1).copied().collect();
+            let rank2 = others.first().copied().unwrap_or(1);
+            let rank3 = others.get(1).copied().unwrap_or(2);
+            self.resolved_ranks = [rank1, rank2, rank3];
+            self.ranks_locked = true;
+            self.toast_text = format!("LOCKED: {} {} {}",
+                band_names[rank1], band_names[rank2], band_names[rank3]);
+            self.toast_timer = 4.0;
         }
 
         // Peak hold (slow decay — for visual indicator on FFT bars)
@@ -398,7 +465,11 @@ impl GameWorld {
         // Update all effect modules + camera (guarded by effect_flags)
         use super::effects::AudioEffect;
         let ef = &self.effect_flags;
-        if ef.beat_rings { self.beat_rings.update(&self.audio_frame); }
+        // Set resolved band indices on effects before update
+        if ef.beat_rings {
+            self.beat_rings.trigger_band = self.resolve_rank(self.bindings.beat_rings);
+            self.beat_rings.update(&self.audio_frame);
+        }
         if ef.hex_background { self.hex_background.update(&self.audio_frame); }
         self.fft_vis.locked = self.fft_locked;
         self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
@@ -407,7 +478,10 @@ impl GameWorld {
             self.grid_lines.distortion_enabled = ef.grid_distortion;
             self.grid_lines.update(&self.audio_frame);
         }
-        if ef.fireworks { self.fireworks.update(&self.audio_frame); }
+        if ef.fireworks {
+            self.fireworks.trigger_band = Some(self.resolve_rank(self.bindings.fireworks));
+            self.fireworks.update(&self.audio_frame);
+        }
         if ef.camera_sway { self.camera.update(&self.audio_frame); }
 
         // Decay AFTER effects have consumed the frame
@@ -546,6 +620,7 @@ impl GameWorld {
         self.theme_index = (self.theme_index + 1) % theme_fns.len();
         let theme = theme_fns[self.theme_index]();
         self.effect_flags = theme.effects.clone();
+        self.bindings = theme.bindings.clone();
         self.piece_colors = theme.piece_colors;
         self.beat_rings = BeatRings::new(theme.rings);
         self.hex_background = HexBackground::new(theme.hex);
