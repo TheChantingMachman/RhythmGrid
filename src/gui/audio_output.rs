@@ -398,7 +398,7 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
         let config = cpal::StreamConfig {
             channels: out_channels as u16,
             sample_rate: cpal::SampleRate(sample_rate),
-            buffer_size: cpal::BufferSize::Default,
+            buffer_size: cpal::BufferSize::Fixed(512), // ~12ms — lower latency for beat sync
         };
 
         let is_procedural = use_procedural;
