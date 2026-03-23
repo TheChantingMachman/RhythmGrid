@@ -543,6 +543,119 @@ impl SpectralFluxDetector {
     }
 }
 
+// --- Rolling Energy Tracker ---
+
+#[derive(Debug)]
+pub struct RollingEnergy {
+    buffer: Vec<[f32; 7]>,
+    capacity: usize,
+    head: usize,
+    count: usize,
+}
+
+impl RollingEnergy {
+    pub fn new(window_secs: f32, frames_per_sec: f32) -> Self {
+        let capacity = ((window_secs * frames_per_sec) as usize).max(1);
+        RollingEnergy {
+            buffer: vec![[0.0f32; 7]; capacity],
+            capacity,
+            head: 0,
+            count: 0,
+        }
+    }
+
+    pub fn update(&mut self, bands: &[f32; 7]) {
+        self.buffer[self.head] = *bands;
+        self.head = (self.head + 1) % self.capacity;
+        if self.count < self.capacity {
+            self.count += 1;
+        }
+    }
+
+    pub fn averages(&self) -> [f32; 7] {
+        if self.count == 0 {
+            return [0.0f32; 7];
+        }
+        let mut sums = [0.0f32; 7];
+        for i in 0..self.count {
+            for b in 0..7 {
+                sums[b] += self.buffer[i][b];
+            }
+        }
+        let n = self.count as f32;
+        [sums[0]/n, sums[1]/n, sums[2]/n, sums[3]/n, sums[4]/n, sums[5]/n, sums[6]/n]
+    }
+
+    pub fn dominant_bands(&self, count: usize) -> Vec<usize> {
+        let avgs = self.averages();
+        let cap = count.min(7);
+        let mut indices: Vec<usize> = (0..7).collect();
+        indices.sort_by(|&a, &b| avgs[b].partial_cmp(&avgs[a]).unwrap_or(std::cmp::Ordering::Equal));
+        indices.truncate(cap);
+        indices
+    }
+}
+
+// --- Beat Confidence Analyzer ---
+
+#[derive(Debug)]
+pub struct BeatConfidence {
+    intervals: [[f64; 16]; 7],
+    interval_pos: [usize; 7],
+    interval_count: [usize; 7],
+    last_beat_ts: [Option<f64>; 7],
+}
+
+impl BeatConfidence {
+    pub fn new() -> Self {
+        BeatConfidence {
+            intervals: [[0.0f64; 16]; 7],
+            interval_pos: [0usize; 7],
+            interval_count: [0usize; 7],
+            last_beat_ts: [None; 7],
+        }
+    }
+
+    pub fn update(&mut self, band_beats: &[bool; 7], timestamp_secs: f64) {
+        for band in 0..7 {
+            if band_beats[band] {
+                if let Some(last_ts) = self.last_beat_ts[band] {
+                    let interval = timestamp_secs - last_ts;
+                    let pos = self.interval_pos[band];
+                    self.intervals[band][pos] = interval;
+                    self.interval_pos[band] = (pos + 1) % 16;
+                    if self.interval_count[band] < 16 {
+                        self.interval_count[band] += 1;
+                    }
+                }
+                self.last_beat_ts[band] = Some(timestamp_secs);
+            }
+        }
+    }
+
+    pub fn confidence(&self) -> [f32; 7] {
+        let mut result = [0.0f32; 7];
+        for band in 0..7 {
+            let count = self.interval_count[band];
+            if count < 2 {
+                result[band] = 0.0;
+                continue;
+            }
+            let vals = &self.intervals[band][..count];
+            let mean = vals.iter().sum::<f64>() / count as f64;
+            if mean == 0.0 {
+                result[band] = 0.0;
+                continue;
+            }
+            let variance = vals.iter().map(|&x| (x - mean) * (x - mean)).sum::<f64>() / count as f64;
+            let std_dev = variance.sqrt();
+            let cv = (std_dev / mean) as f32;
+            result[band] = (1.0_f32 - cv).clamp(0.0, 1.0);
+        }
+        result
+    }
+}
+
 pub fn generate_procedural(bpm: u32, duration_secs: f32, sample_rate: u32) -> DecodedAudio {
     let num_samples = (sample_rate as f32 * duration_secs) as usize;
     let beat_period = 60.0 / bpm as f32; // seconds per beat

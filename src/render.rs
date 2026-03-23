@@ -3,7 +3,7 @@
 
 use crate::game::{is_valid_position, level_for_lines, ActivePiece, GameSession};
 use crate::grid::{CellState, Grid};
-use crate::pieces::{piece_cells, PIECE_CELLS};
+use crate::pieces::{piece_cells, PIECE_CELLS, TETROMINO_TYPES};
 
 pub use crate::game::GameState;
 
@@ -40,6 +40,14 @@ pub struct GameStatusRender {
     pub time_played_secs: f64,
     pub state: GameState,
     pub can_hold: bool,
+}
+
+// --- Next Piece Render ---
+
+#[derive(Debug, PartialEq)]
+pub struct NextPieceRender {
+    pub type_index: u32,
+    pub cells: [(i32, i32); 4],
 }
 
 // --- Render State Functions ---
@@ -103,6 +111,12 @@ pub fn held_piece_state(session: &GameSession) -> Option<HeldPieceRender> {
     let type_index = held_type as u32;
     let cells = PIECE_CELLS[type_index as usize][0];
     Some(HeldPieceRender { type_index, cells })
+}
+
+pub fn next_piece_state(session: &GameSession) -> NextPieceRender {
+    let type_index = TETROMINO_TYPES[session.bag.peek()] as u32;
+    let cells = PIECE_CELLS[type_index as usize][0];
+    NextPieceRender { type_index, cells }
 }
 
 pub fn game_status(session: &GameSession) -> GameStatusRender {

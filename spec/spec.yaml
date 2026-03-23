@@ -552,7 +552,7 @@
   section: Render
   description: 'Produces render-ready info for the next piece preview. Function next_piece_state(session: &GameSession) -> NextPieceRender. NextPieceRender { type_index: u32, cells: [(i32, i32); 4] } where cells are the piece''s rotation-0 cell offsets from PIECE_CELLS. type_index is the bag''s peeked value mapped through TETROMINO_TYPES.'
   tags: [render, state, ui]
-  status: draft
+  status: implemented
   depends_on: [game.next_piece, pieces.tetromino_cells]
   fixture_patterns: |
     - next_piece_state(session: &GameSession) -> NextPieceRender
@@ -566,7 +566,7 @@
   section: Audio
   description: 'Track rolling average energy per frequency band over a configurable window. RollingEnergy::new(window_secs: f32, frames_per_sec: f32) creates a tracker. window_secs is the averaging duration (e.g. 5.0 for 5 seconds). frames_per_sec is how often update() will be called (e.g. 60.0 for a 60fps game loop — NOT the audio sample rate). update(&mut self, bands: &[f32; 7]) feeds one frame of band energy. averages(&self) -> [f32; 7] returns the rolling average per band. dominant_bands(&self, count: usize) -> Vec<usize> returns the indices of the N bands with highest rolling average, sorted descending by energy. Used for dynamic audio-visual mapping.'
   tags: [core, audio, analysis]
-  status: draft
+  status: implemented
   depends_on: [audio.fft]
   fixture_patterns: |
     - RollingEnergy::new(window_secs: f32, frames_per_sec: f32) -> Self
@@ -584,7 +584,7 @@
   section: Audio
   description: 'Measure rhythmic regularity per frequency band. BeatConfidence::new() creates a tracker. update(&mut self, band_beats: &[bool; 7], timestamp_secs: f64) records beat events per band. confidence(&self) -> [f32; 7] returns 0.0-1.0 per band where 1.0 means beats occur at perfectly regular intervals and 0.0 means random/no beats. Regularity measured by coefficient of variation of inter-beat intervals over a rolling window of the last 16 beats per band. The band with highest confidence is likely carrying the song''s rhythmic pulse.'
   tags: [core, audio, analysis]
-  status: draft
+  status: implemented
   depends_on: [audio.beat_detect]
   fixture_patterns: |
     - BeatConfidence::new() -> Self
