@@ -396,6 +396,38 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Linux packaging (Flatpak, Snap, AUR)
 - Future: user-remappable key bindings, 3D in-game filesystem browser, multi-band beat tuning per-band thresholds
 
+### Rendering Techniques Reference
+
+**Currently using:**
+
+| Technique | Status |
+|---|---|
+| Blinn-Phong lighting | Implemented |
+| Per-face vertex color gradient | Implemented |
+| Translucency (alpha blending) | Implemented |
+| Per-band glow modulation | Implemented |
+| Beat depth pulse | Implemented |
+| Bloom post-processing | Implemented |
+| MSAA 4x | Implemented |
+
+**Tetris Effect techniques to consider (prioritized):**
+
+| Technique | Impact | Effort | Notes |
+|---|---|---|---|
+| Schlick fresnel | Very high | Low | ~5 shader lines, `dot(normal, viewDir)`. Single biggest visual upgrade. |
+| Rounded cube geometry | High | Moderate | Beveled edges catch specular highlights. Combined with fresnel = gem look. |
+| Color grading / LUT | High | Low | Post-process color curve per theme. Instant cinematic feel. |
+| HDR + tonemap | High | Moderate | Float color space, brighter highlights without wash-out. |
+| Fake subsurface scattering | Medium | Low | Tint back faces with transmitted front color. Cheap inner glow. |
+| Emissive per-pixel | Medium | Moderate | Different surface areas glow differently. Patterns, center vs edge. |
+| Normal mapping | Medium | Moderate | Fake surface detail. Needs UV coords + texture. |
+| SSAO | Medium | Hard | Darkens creases where cubes meet. Depth and grounding. |
+| Environment mapping | Medium | Hard | Cubes reflect surroundings (cubemap or SSR). |
+| Soft particles | Low | Moderate | Particles fade near surfaces instead of hard-clip. |
+| Depth of field | Low | Hard | Background blur, focus on play area. |
+| Motion blur | Low | Hard | Fast pieces leave streaks. |
+| Volumetric lighting | Low | Hard | God rays, light shafts. |
+
 ---
 
 *This plan will be refined as open questions are resolved and architecture takes shape.*
