@@ -131,14 +131,22 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                 [_, y, _] if y.abs() > 0.5 => (dx + dz) * 0.5,
                 _                           => (dy + dz) * 0.5,
             };
-            // Simple edge highlight — candy color base, brighter at edges
+            // Edge highlight + fake subsurface on back face
             let highlight = edge_factor * 0.08;
-            let vc = [
-                (color[0] + highlight).min(1.0),
-                (color[1] + highlight).min(1.0),
-                (color[2] + highlight).min(1.0),
-                color[3],
-            ];
+            let is_back = normal[2] < -0.5;
+            let (r, g, b, a) = if is_back {
+                // Subsurface: brighter, shifted toward white — light passing through
+                ((color[0] * 1.4 + 0.15).min(1.0),
+                 (color[1] * 1.4 + 0.15).min(1.0),
+                 (color[2] * 1.4 + 0.15).min(1.0),
+                 color[3])
+            } else {
+                ((color[0] + highlight).min(1.0),
+                 (color[1] + highlight).min(1.0),
+                 (color[2] + highlight).min(1.0),
+                 color[3])
+            };
+            let vc = [r, g, b, a];
             verts.push(Vertex { position: pos, normal: *normal, color: vc });
         }
         indices.extend_from_slice(&[base_idx, base_idx+1, base_idx+2, base_idx, base_idx+2, base_idx+3]);
