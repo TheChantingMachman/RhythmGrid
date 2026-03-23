@@ -295,7 +295,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     // Correct preview scale for window aspect ratio
     let theme_aspect = w / h;
     let aspect_corr = theme_aspect / world.window_aspect;
-    let preview_scale = 18.0;
+    let preview_scale = 36.0;
     let cube_half = 0.42;
     let preview_cx = np_x + 54.0;
     let preview_cy = np_y + 52.0;
@@ -384,7 +384,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         let held_color = rgba_to_f32(world.themed_piece_color(held.type_index));
         let held_cx = 66.0;
         let held_cy = np_y + 52.0;
-        let held_scale = 18.0;
+        let held_scale = 36.0;
 
         let mut held_center = [0.0f32; 3];
         for &(dr, dc) in &held_cells {

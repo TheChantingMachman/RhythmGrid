@@ -359,7 +359,14 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
   - Multiple gentle ripple points that interfere with each other
   - Warp intensity driven by band energy (gentle ambient undulation vs beat-driven pulses)
   - Currently on debug theme only — needs tuning before promoting to default/water
-- Settings persistence (volume, shuffle state, selected theme survive restart)
+- Settings persistence (volume, shuffle state, selected theme survive restart) ✓
+- **Cube material workshop** — needs interactive tuning, not recompile cycles:
+  - Build a debug slider panel (separate window or overlay) for real-time adjustment of:
+    - Front face alpha (tested 0.4), back face brightness (tested 0.25-0.5)
+    - Fresnel per-face boost values, edge highlight intensity
+    - Glow multiplier (tested 2.0-4.0), saturation/brightness curves
+  - Jumping-off values from testing: front alpha=0.4, back dim=0.25-0.5, edge=0.08-0.15, fresnel sides=0.08-0.10
+  - Currently reverted to candy colors (flat + subtle edge highlight) pending debug tooling
 - 3D elements replacing 2D HUD overlays:
   - Shaped transport buttons (play triangle, pause bars, skip arrows)
   - Button press animation (depth halve on click)

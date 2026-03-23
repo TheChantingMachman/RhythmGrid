@@ -120,13 +120,12 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                 [_, y, _] if y.abs() > 0.5 => (dx + dz) * 0.5,
                 _                           => (dy + dz) * 0.5,
             };
-            // edge_factor 0.0 = face center, 1.0 = cube edge
-            // Center: darken by 15%. Edge: original color + 10% white highlight.
-            let dim = 0.85 + edge_factor * 0.25; // 0.85 at center, 1.10 at edge
+            // Simple edge highlight — candy color base, brighter at edges
+            let highlight = edge_factor * 0.08;
             let vc = [
-                (color[0] * dim).min(1.0),
-                (color[1] * dim).min(1.0),
-                (color[2] * dim).min(1.0),
+                (color[0] + highlight).min(1.0),
+                (color[1] + highlight).min(1.0),
+                (color[2] + highlight).min(1.0),
                 color[3],
             ];
             verts.push(Vertex { position: pos, normal: *normal, color: vc });
