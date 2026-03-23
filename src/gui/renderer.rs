@@ -44,10 +44,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Per-pixel view direction from camera position
     let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
     let half_dir = normalize(light_dir + view_dir);
-    let spec = pow(max(dot(n, half_dir), 0.0), 32.0) * 0.4;
+    let spec = pow(max(dot(n, half_dir), 0.0), 32.0) * 0.6; // HDR: can exceed 1.0
 
     // Fresnel (Schlick approximation) — edges facing away from camera glow
-    let fresnel = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0) * 0.3;
+    let fresnel = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0) * 0.4; // HDR: brighter edges
 
     let brightness = ambient + diffuse + spec + fresnel;
     return vec4<f32>(in.color.rgb * brightness, in.color.a);
@@ -187,11 +187,16 @@ fn fs_bloom_composite(in: VsOut) -> @location(0) vec4<f32> {
     let composited = scene.rgb + bloom * bloom_strength;
     // Color grading — per-theme color temperature
     let graded = composited * bloom_u.color_grade.rgb;
-    return vec4<f32>(graded, scene.a);
+    // ACES tonemap — compress HDR to displayable range
+    let a = graded * (graded * 2.51 + vec3<f32>(0.03));
+    let b = graded * (graded * 2.43 + vec3<f32>(0.59)) + vec3<f32>(0.14);
+    let tonemapped = a / b;
+    return vec4<f32>(tonemapped, scene.a);
 }
 "#;
 
 const SAMPLE_COUNT: u32 = 4;
+const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 pub struct GpuState {
     surface: wgpu::Surface<'static>,
@@ -343,7 +348,7 @@ impl GpuState {
             fragment: Some(wgpu::FragmentState {
                 module: &scene_shader, entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
+                    format: HDR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
             }),
@@ -364,7 +369,7 @@ impl GpuState {
             fragment: Some(wgpu::FragmentState {
                 module: &scene_shader, entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
+                    format: HDR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
             }),
@@ -388,7 +393,7 @@ impl GpuState {
             fragment: Some(wgpu::FragmentState {
                 module: &scene_shader, entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
+                    format: HDR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
             }),
@@ -448,7 +453,7 @@ impl GpuState {
             label: Some("msaa"),
             size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
             mip_level_count: 1, sample_count: SAMPLE_COUNT, dimension: wgpu::TextureDimension::D2,
-            format: config.format, usage: wgpu::TextureUsages::RENDER_ATTACHMENT, view_formats: &[],
+            format: HDR_FORMAT, usage: wgpu::TextureUsages::RENDER_ATTACHMENT, view_formats: &[],
         }).create_view(&Default::default())
     }
 
@@ -468,7 +473,7 @@ impl GpuState {
             label: Some("scene_rt"),
             size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
             mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
-            format: config.format,
+            format: HDR_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         }).create_view(&Default::default())
