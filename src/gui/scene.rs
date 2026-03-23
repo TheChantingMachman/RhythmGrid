@@ -640,11 +640,21 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         }
     }
 
-    // Analysis phase label (always visible, not affected by HUD fade)
-    if world.toast_timer > 0.0 && (world.fft_locked || world.track_time < 45.0) {
-        let ta = (world.toast_timer.min(1.0) * 200.0) as u8;
-        push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
-                  &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
+    // Toast (always visible, not affected by HUD fade)
+    // Analysis labels (SAMPLING/MAPPED/etc) only on debug theme
+    // Theme switch toasts show on all themes
+    if world.toast_timer > 0.0 {
+        let is_analysis = world.toast_text.starts_with("SAMPLING")
+            || world.toast_text.starts_with("MAPPED")
+            || world.toast_text.starts_with("RESAMPLING")
+            || world.toast_text.starts_with("REMAPPED")
+            || world.toast_text.starts_with("ANALYZING");
+        let show = if is_analysis { world.theme_index == 2 } else { true }; // 2 = debug
+        if show {
+            let ta = (world.toast_timer.min(1.0) * 200.0) as u8;
+            push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
+                      &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
+        }
     }
 
     (verts, indices)
