@@ -91,6 +91,7 @@ pub struct GameWorld {
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
     demo_rng: u64,
+    pub(super) track_queue_rects: Vec<([f32; 4], usize)>, // (x,y,w,h), track_index
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -267,6 +268,7 @@ impl GameWorld {
             demo_idle_timer: 0.0,
             demo_action_timer: 0.0,
             demo_rng: 0xDEADBEEF42,
+            track_queue_rects: Vec::new(),
         }
     }
 
@@ -886,6 +888,27 @@ impl GameWorld {
         }
     }
 
+    pub fn update_track_queue_rects(&mut self) {
+        self.track_queue_rects.clear();
+        let vol_rect = self.btn_rect(ButtonId::VolDown);
+        let scale_x = self.window_size[0] / self.window_size[0]; // 1.0 — rects already in screen space
+        let track_x = vol_rect[0];
+        let track_bottom = vol_rect[1] - 8.0;
+        if let Ok(audio) = self.audio.try_lock() {
+            let list = &audio.track_list;
+            let idx = audio.current_track_index;
+            let num_shown = 4.min(list.len());
+            if !list.is_empty() {
+                let track_top = track_bottom - num_shown as f32 * 10.0;
+                for i in 0..num_shown {
+                    let track_idx = (idx + i) % list.len();
+                    let y = track_top + i as f32 * 10.0;
+                    self.track_queue_rects.push(([track_x, y, 120.0, 10.0], track_idx));
+                }
+            }
+        }
+    }
+
     pub(super) fn btn_hovered(&self, id: ButtonId) -> bool {
         self.buttons.iter().any(|b| b.id == id && b.hovered)
     }
@@ -905,7 +928,24 @@ impl GameWorld {
             Some(ButtonId::Back) => self.prev_track(),
             Some(ButtonId::Skip) => self.skip_track(),
             Some(ButtonId::Shuffle) => self.toggle_shuffle(),
-            None => {}
+            None => {
+                // Check track queue clicks
+                let [mx, my] = self.cursor_pos;
+                let mut jump_idx = None;
+                for &(rect, track_idx) in &self.track_queue_rects {
+                    if mx >= rect[0] && mx <= rect[0] + rect[2]
+                        && my >= rect[1] && my <= rect[1] + rect[3] {
+                        jump_idx = Some(track_idx);
+                        break;
+                    }
+                }
+                if let Some(idx) = jump_idx {
+                    if let Ok(mut audio) = self.audio.lock() {
+                        audio.jump_to_requested = Some(idx);
+                    }
+                    self.on_mouse_activity();
+                }
+            }
         }
     }
 

@@ -115,6 +115,7 @@ impl ApplicationHandler for App {
                     self.world.window_size = [sw, sh];
                     let uniforms = self.world.compute_uniforms(gpu.aspect_ratio());
                     self.world.update_button_rects(&uniforms, gpu.aspect_ratio());
+                    self.world.update_track_queue_rects();
                     gpu.update_uniforms(&uniforms);
                 }
                 let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
