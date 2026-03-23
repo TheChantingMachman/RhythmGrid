@@ -93,14 +93,25 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
         color[3],
     ];
 
+    // Rounded cube: main faces inset, multi-strip bevel for smooth edges
+    let b = 0.05; // total bevel size
+    let steps = 3u32; // bevel subdivisions for smoothness
+
+    // Inner bounds (inset by bevel)
+    let ix0 = x0 + b;
+    let ix1 = x1 - b;
+    let iy0 = y0 - b;
+    let iy1 = y1 + b;
+    let iz1 = z1 - b;
+
+    // Main faces (inset)
     let faces: &[([f32; 3], [[f32; 3]; 4])] = &[
-        // (normal, [corners])
-        ([0.0, 0.0, 1.0],  [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]),  // Front
-        ([0.0, 0.0, -1.0], [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]]),  // Back
-        ([0.0, 1.0, 0.0],  [[x0, y0, z1], [x0, y0, z0], [x1, y0, z0], [x1, y0, z1]]),  // Top
-        ([0.0, -1.0, 0.0], [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]]),  // Bottom
-        ([1.0, 0.0, 0.0],  [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]]),  // Right
-        ([-1.0, 0.0, 0.0], [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]]),  // Left
+        ([0.0, 0.0, 1.0],  [[ix0, iy0, z1], [ix1, iy0, z1], [ix1, iy1, z1], [ix0, iy1, z1]]),  // Front
+        ([0.0, 0.0, -1.0], [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]]),          // Back
+        ([0.0, 1.0, 0.0],  [[ix0, y0, iz1], [ix0, y0, z0], [ix1, y0, z0], [ix1, y0, iz1]]),     // Top
+        ([0.0, -1.0, 0.0], [[ix0, y1, z0], [ix0, y1, iz1], [ix1, y1, iz1], [ix1, y1, z0]]),     // Bottom
+        ([1.0, 0.0, 0.0],  [[x1, iy0, iz1], [x1, iy0, z0], [x1, iy1, z0], [x1, iy1, iz1]]),    // Right
+        ([-1.0, 0.0, 0.0], [[x0, iy0, z0], [x0, iy0, iz1], [x0, iy1, iz1], [x0, iy1, z0]]),    // Left
     ];
 
     // Per-vertex edge glow: edges bright (original color + white),
@@ -131,6 +142,66 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
             verts.push(Vertex { position: pos, normal: *normal, color: vc });
         }
         indices.extend_from_slice(&[base_idx, base_idx+1, base_idx+2, base_idx, base_idx+2, base_idx+3]);
+    }
+
+    // Multi-strip bevels along front edges — smooth normal transition
+    // Helper: emit a bevel strip quad with interpolated normal
+    let emit_bevel = |verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+                      p0: [f32; 3], p1: [f32; 3], p2: [f32; 3], p3: [f32; 3],
+                      n: [f32; 3]| {
+        let base_idx = verts.len() as u32;
+        verts.push(Vertex { position: p0, normal: n, color });
+        verts.push(Vertex { position: p1, normal: n, color });
+        verts.push(Vertex { position: p2, normal: n, color });
+        verts.push(Vertex { position: p3, normal: n, color });
+        indices.extend_from_slice(&[base_idx, base_idx+1, base_idx+2, base_idx, base_idx+2, base_idx+3]);
+    };
+
+    // Generate bevel strips for front edges
+    let pi_half = std::f32::consts::FRAC_PI_2;
+    for s in 0..steps {
+        let t0 = s as f32 / steps as f32;
+        let t1 = (s + 1) as f32 / steps as f32;
+        let a0 = t0 * pi_half;
+        let a1 = t1 * pi_half;
+        // Position interpolation along the bevel curve
+        let (sin0, cos0) = (a0.sin(), a0.cos());
+        let (sin1, cos1) = (a1.sin(), a1.cos());
+        // Normal at midpoint of this strip
+        let am = (a0 + a1) * 0.5;
+        let (sinm, cosm) = (am.sin(), am.cos());
+
+        // Front-top bevel: normal transitions from (0,0,1) to (0,1,0)
+        let ftz0 = z1 - b + b * sin0;
+        let ftz1 = z1 - b + b * sin1;
+        let fty0 = y0 - b + b * cos0;
+        let fty1 = y0 - b + b * cos1;
+        emit_bevel(verts, indices,
+            [ix0, fty0, ftz0], [ix1, fty0, ftz0], [ix1, fty1, ftz1], [ix0, fty1, ftz1],
+            [0.0, cosm, sinm]);
+
+        // Front-bottom bevel: normal transitions from (0,0,1) to (0,-1,0)
+        let fby0 = y1 + b - b * cos0;
+        let fby1 = y1 + b - b * cos1;
+        emit_bevel(verts, indices,
+            [ix0, fby1, ftz1], [ix1, fby1, ftz1], [ix1, fby0, ftz0], [ix0, fby0, ftz0],
+            [0.0, -cosm, sinm]);
+
+        // Front-right bevel: normal transitions from (0,0,1) to (1,0,0)
+        let frx0 = x1 - b + b * sin0;
+        let frx1 = x1 - b + b * sin1;
+        let frz0 = z1 - b + b * cos0;  // note: cos for z here
+        let frz1 = z1 - b + b * cos1;
+        emit_bevel(verts, indices,
+            [frx0, iy0, frz0], [frx1, iy0, frz1], [frx1, iy1, frz1], [frx0, iy1, frz0],
+            [sinm, 0.0, cosm]);
+
+        // Front-left bevel
+        let flx0 = x0 + b - b * sin0;
+        let flx1 = x0 + b - b * sin1;
+        emit_bevel(verts, indices,
+            [flx1, iy0, frz1], [flx0, iy0, frz0], [flx0, iy1, frz0], [flx1, iy1, frz1],
+            [-sinm, 0.0, cosm]);
     }
 }
 
