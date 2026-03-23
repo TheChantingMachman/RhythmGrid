@@ -74,6 +74,11 @@ pub struct GameWorld {
     pub(super) toast_timer: f32,
     pub(super) theme_index: usize,
     pub(super) music_folder: Option<String>,
+    pub saved_window_width: u32,
+    pub saved_window_height: u32,
+    pub saved_window_x: Option<i32>,
+    pub saved_window_y: Option<i32>,
+    pub logical_window_size: [u32; 2],
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -131,15 +136,20 @@ impl GameWorld {
         }
     }
 
-    fn save_settings(&self) {
-        let vol = if let Ok(audio) = self.audio.try_lock() { audio.volume } else { 0.8 };
+    pub fn save_settings(&self) {
+        let vol = if let Ok(audio) = self.audio.lock() { audio.volume } else { 0.8 };
+        let shuffled = if let Ok(audio) = self.audio.lock() { audio.shuffled } else { false };
         let theme_names = ["Default", "Water", "Debug"];
         let settings = rhythm_grid::config::Settings {
             volume: vol,
             speed: 1.0,
             music_folder: self.music_folder.clone(),
             theme: theme_names.get(self.theme_index).unwrap_or(&"Default").to_string(),
-            shuffle: false, // TODO: track shuffle state
+            shuffle: shuffled,
+            window_width: self.logical_window_size[0],
+            window_height: self.logical_window_size[1],
+            window_x: self.saved_window_x,
+            window_y: self.saved_window_y,
             ..rhythm_grid::config::Settings::default()
         };
         let path = config_dir().join("settings.toml");
@@ -200,6 +210,11 @@ impl GameWorld {
             toast_timer: 0.0,
             theme_index,
             music_folder: settings.music_folder.clone(),
+            saved_window_width: settings.window_width,
+            saved_window_height: settings.window_height,
+            saved_window_x: settings.window_x,
+            saved_window_y: settings.window_y,
+            logical_window_size: [settings.window_width, settings.window_height],
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
