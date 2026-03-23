@@ -779,5 +779,76 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             &format!("COMBO {}", rs.combo_count), combo_col, scale.min(6.0));
     }
 
+    // Debug analysis dashboard (debug theme only, always visible)
+    if world.theme_index == 2 {
+        let band_names = ["SB", "BA", "LM", "MI", "UM", "PR", "BR"];
+        let dx = 12.0;
+        let dy = 210.0;
+        let bar_w = 6.0;   // each sub-bar width
+        let pair_w = bar_w * 2.0 + 2.0; // two bars + inner gap
+        let pair_gap = 4.0; // gap between band pairs
+        let max_h = 55.0;
+        let rank_col = rgba_to_f32([255, 220, 80, 255]);
+        let live_col = rgba_to_f32([80, 200, 80, 160]); // green for real-time level
+
+        // Energy averages row (blue) + real-time level (green)
+        push_text(&mut verts, &mut indices, dx, dy, "ENERGY", rgba_to_f32([120, 160, 200, 200]), 1.2);
+        for i in 0..7 {
+            let px = dx + i as f32 * (pair_w + pair_gap);
+            let by = dy + 16.0;
+
+            // Background for both bars
+            push_quad(&mut verts, &mut indices, px, by, pair_w, max_h, rgba_to_f32([20, 20, 40, 150]), 0.01);
+
+            // Left bar: rolling energy average (blue/gold)
+            let avg_val = world.energy_averages[i].min(1.0);
+            let avg_h = avg_val * max_h;
+            let avg_col = if world.resolved_ranks.contains(&i) { rank_col } else {
+                rgba_to_f32([40, 80, 160, 220])
+            };
+            push_quad(&mut verts, &mut indices, px, by + max_h - avg_h, bar_w, avg_h, avg_col, 0.02);
+
+            // Right bar: real-time band level (green)
+            let live_val = world.bands[i].min(1.0);
+            let live_h = live_val * max_h;
+            push_quad(&mut verts, &mut indices, px + bar_w + 2.0, by + max_h - live_h, bar_w, live_h, live_col, 0.02);
+
+            // Band label
+            push_text(&mut verts, &mut indices, px, by + max_h + 3.0, band_names[i], rgba_to_f32([150, 150, 180, 180]), 0.9);
+        }
+
+        // Confidence row (orange) + real-time beat intensity (green)
+        let cy = dy + max_h + 36.0;
+        push_text(&mut verts, &mut indices, dx, cy, "CONFIDENCE", rgba_to_f32([200, 160, 120, 200]), 1.2);
+        for i in 0..7 {
+            let px = dx + i as f32 * (pair_w + pair_gap);
+            let by = cy + 16.0;
+
+            push_quad(&mut verts, &mut indices, px, by, pair_w, max_h, rgba_to_f32([20, 20, 40, 150]), 0.01);
+
+            // Left bar: confidence (orange/gold)
+            let conf_val = world.confidence_values[i].min(1.0);
+            let conf_h = conf_val * max_h;
+            let conf_col = if world.resolved_ranks[0] == i { rank_col } else {
+                rgba_to_f32([160, 80, 40, 220])
+            };
+            push_quad(&mut verts, &mut indices, px, by + max_h - conf_h, bar_w, conf_h, conf_col, 0.02);
+
+            // Right bar: real-time beat intensity (green)
+            let beat_val = world.band_beat_intensity[i].min(1.0);
+            let beat_h = beat_val * max_h;
+            push_quad(&mut verts, &mut indices, px + bar_w + 2.0, by + max_h - beat_h, bar_w, beat_h, live_col, 0.02);
+
+            push_text(&mut verts, &mut indices, px, by + max_h + 3.0, band_names[i], rgba_to_f32([150, 150, 180, 180]), 0.9);
+        }
+
+        // Resolved ranks display
+        let ry = cy + max_h + 36.0;
+        let [r1, r2, r3] = world.resolved_ranks;
+        push_text(&mut verts, &mut indices, dx, ry,
+            &format!("R1:{} R2:{} R3:{}", band_names[r1], band_names[r2], band_names[r3]),
+            rank_col, 1.5);
+    }
+
     (verts, indices)
 }

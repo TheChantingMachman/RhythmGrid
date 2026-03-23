@@ -85,6 +85,8 @@ pub struct GameWorld {
     beat_confidence: BeatConfidence,
     pub(super) bindings: themes::EffectBindings,
     pub(super) resolved_ranks: [usize; 3],  // band indices for rank 1, 2, 3
+    pub(super) energy_averages: [f32; 7],   // cached for debug dashboard
+    pub(super) confidence_values: [f32; 7], // cached for debug dashboard
     pub(super) track_time: f64,               // seconds into current track
     ranks_locked: bool,                      // true after analysis window
     pub(super) demo_mode: bool,
@@ -238,6 +240,8 @@ impl GameWorld {
             beat_confidence: BeatConfidence::new(),
             bindings: theme.bindings.clone(),
             resolved_ranks: [0, 1, 2],  // default: sub-bass, bass, low-mids
+            energy_averages: [0.0; 7],
+            confidence_values: [0.0; 7],
             track_time: 0.0,
             ranks_locked: false,
             danger_level: 0.0,
@@ -307,6 +311,8 @@ impl GameWorld {
                 self.band_beat_intensity[5] > 0.95,
                 self.band_beat_intensity[6] > 0.95,
             ], self.track_time);
+            self.energy_averages = self.rolling_energy.averages();
+            self.confidence_values = self.beat_confidence.confidence();
         }
 
         // Track time + two-phase rank resolution

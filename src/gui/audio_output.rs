@@ -342,21 +342,8 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                         }
                         if let Some(target) = s.jump_to_requested.take() {
                             if let Some(p) = playlist_decode.lock().unwrap().as_mut() {
-                                // Advance until we reach the target index
-                                let len = p.files().len();
-                                for _ in 0..len {
-                                    if s.track_list.get(s.current_track_index).map(|n| {
-                                        p.current().map(|path| track_name_from_path(path) == *n).unwrap_or(false)
-                                    }).unwrap_or(false) && s.current_track_index == target {
-                                        break;
-                                    }
-                                    p.advance();
-                                    let name = p.current().map(|path| track_name_from_path(path)).unwrap_or_default();
-                                    if let Some(idx) = s.track_list.iter().position(|n| *n == name) {
-                                        s.current_track_index = idx;
-                                        if idx == target { break; }
-                                    }
-                                }
+                                p.jump_to(target);
+                                s.current_track_index = target;
                             }
                             if let Ok(mut buf) = buffer_decode.lock() {
                                 buf.samples.clear();
