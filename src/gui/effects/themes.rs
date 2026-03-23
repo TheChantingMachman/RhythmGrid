@@ -194,7 +194,7 @@ pub fn default_theme() -> VisualTheme {
 pub fn water_theme() -> VisualTheme {
     VisualTheme {
         name: "Water",
-        color_grade: [0.85, 0.95, 1.15], // cool blue
+        color_grade: [0.92, 0.97, 1.08], // subtle cool blue
         rings: RingParams {
             max_radius: 24.0, base_life: 4.5, // slower, wider ripples
             color_r: 0.05, color_g: 0.25, color_b: 0.5, base_alpha: 0.2,

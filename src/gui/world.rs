@@ -641,6 +641,7 @@ impl GameWorld {
         self.render_board = board_state(&self.session);
         self.render_status = game_status(&self.session);
         self.render_held = held_piece_state(&self.session);
+        self.render_next = next_piece_state(&self.session);
     }
 
     pub fn cycle_theme(&mut self) {

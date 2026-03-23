@@ -135,10 +135,13 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
             let highlight = edge_factor * 0.08;
             let is_back = normal[2] < -0.5;
             let (r, g, b, a) = if is_back {
-                // Subsurface: brighter, shifted toward white — light passing through
-                ((color[0] * 1.4 + 0.15).min(1.0),
-                 (color[1] * 1.4 + 0.15).min(1.0),
-                 (color[2] * 1.4 + 0.15).min(1.0),
+                // Subsurface: slightly brighter — scales with darkness of color
+                let lum = color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722;
+                let boost = 1.15 + (1.0 - lum) * 0.2; // darker colors get more boost
+                let white = (1.0 - lum) * 0.08; // less white shift for bright colors
+                ((color[0] * boost + white).min(1.0),
+                 (color[1] * boost + white).min(1.0),
+                 (color[2] * boost + white).min(1.0),
                  color[3])
             } else {
                 ((color[0] + highlight).min(1.0),
