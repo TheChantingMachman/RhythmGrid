@@ -1,9 +1,8 @@
 // Scene building — constructs 3D geometry and 2D HUD from game state.
 // Separated from world.rs to keep rendering logic isolated from game logic.
 
-use rhythm_grid::game::*;
-use rhythm_grid::grid::*;
-use rhythm_grid::pieces::*;
+use rhythm_grid::game::GameState;
+use rhythm_grid::grid::{WIDTH, HEIGHT};
 
 
 use super::drawing::*;
@@ -426,10 +425,8 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     // Mark where preview piece starts (won't be faded)
     let preview_start_vert = verts.len();
-    let next_type_idx = world.session.bag.peek();
-    let next_type = TETROMINO_TYPES[next_type_idx];
-    let next_cells = piece_cells(next_type, 0);
-    let next_color = rgba_to_f32(world.themed_piece_color(next_type_idx as u32));
+    let next_cells = world.render_next.cells;
+    let next_color = rgba_to_f32(world.themed_piece_color(world.render_next.type_index));
     // Correct preview scale for window aspect ratio
     let theme_aspect = w / h;
     let aspect_corr = theme_aspect / world.window_aspect;

@@ -9,7 +9,7 @@ use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
 use rhythm_grid::audio::{RollingEnergy, BeatConfidence};
-use rhythm_grid::render::{piece_color, board_state, held_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender};
+use rhythm_grid::render::{piece_color, board_state, held_piece_state, next_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender, NextPieceRender};
 use super::audio_output::{self, AudioState};
 use super::camera::CameraReactor;
 use super::drawing::{Vertex, rgba_to_f32};
@@ -71,6 +71,7 @@ pub struct GameWorld {
     pub(super) render_board: BoardRenderState,
     pub(super) render_status: GameStatusRender,
     pub(super) render_held: Option<HeldPieceRender>,
+    pub(super) render_next: NextPieceRender,
     pub(super) toast_text: String,
     pub(super) toast_timer: f32,
     pub(super) theme_index: usize,
@@ -227,6 +228,7 @@ impl GameWorld {
                 state: GameState::Menu, can_hold: true,
             },
             render_held: None,
+            render_next: next_piece_state(&GameSession::new()),
             toast_text: String::new(),
             toast_timer: 0.0,
             theme_index,
@@ -543,6 +545,7 @@ impl GameWorld {
             self.render_board = board_state(&self.session);
             self.render_status = game_status(&self.session);
             self.render_held = held_piece_state(&self.session);
+            self.render_next = next_piece_state(&self.session);
             return;
         }
         self.last_tick = now;
