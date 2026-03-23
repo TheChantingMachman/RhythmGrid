@@ -7,7 +7,7 @@ use winit::window::Window;
 use super::drawing::Vertex;
 
 const SCENE_SHADER: &str = r#"
-struct Uniforms { view_proj: mat4x4<f32> };
+struct Uniforms { view_proj: mat4x4<f32>, camera_pos: vec4<f32> };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
 struct VertexOutput {
@@ -41,15 +41,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ambient = 0.25;
     let diffuse = max(dot(n, light_dir), 0.0) * 0.55;
 
-    // Specular highlight (Blinn-Phong)
-    let view_dir = normalize(vec3<f32>(0.0, 0.0, 1.0)); // simplified
+    // Per-pixel view direction from camera position
+    let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
     let half_dir = normalize(light_dir + view_dir);
     let spec = pow(max(dot(n, half_dir), 0.0), 32.0) * 0.4;
 
-    // Rim light (edge glow)
-    let rim = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0) * 0.15;
+    // Fresnel (Schlick approximation) — edges facing away from camera glow
+    let fresnel = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0) * 0.3;
 
-    let brightness = ambient + diffuse + spec + rim;
+    let brightness = ambient + diffuse + spec + fresnel;
     return vec4<f32>(in.color.rgb * brightness, in.color.a);
 }
 "#;
@@ -59,6 +59,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Uniforms {
     pub view_proj: [[f32; 4]; 4],
+    pub camera_pos: [f32; 4], // xyz + padding for alignment
 }
 
 impl Uniforms {
@@ -70,11 +71,12 @@ impl Uniforms {
                 [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ],
+            camera_pos: [0.0, 0.0, 16.0, 0.0],
         }
     }
 
     pub fn from_mat(m: [[f32; 4]; 4]) -> Self {
-        Uniforms { view_proj: m }
+        Uniforms { view_proj: m, camera_pos: [0.0, 0.0, 16.0, 0.0] }
     }
 }
 
@@ -275,7 +277,7 @@ impl GpuState {
             label: Some("scene_bgl"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,

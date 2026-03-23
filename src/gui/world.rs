@@ -1007,7 +1007,7 @@ impl GameWorld {
         let proj = perspective(1.2, aspect, 0.1, 200.0);
         let vp = mat4_mul(&proj, &view);
 
-        Uniforms::from_mat(vp)
+        Uniforms { view_proj: vp, camera_pos: [cam_x, cam_y, cam_z, 0.0] }
     }
 
     pub fn build_scene_and_hud(&self) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
