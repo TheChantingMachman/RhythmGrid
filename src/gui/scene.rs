@@ -239,7 +239,6 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             super::world::ButtonId::Shuffle => {
                 // Crossed arrows — two diagonal bars (shortened 10%) with arrowheads
                 let t = s * 0.12;
-                let a = s * 0.25; // arrowhead size
                 let sh = s * 0.9; // shortened bar (tails stay, tips shorten)
                 // Diagonal 1: bottom-left → top-right
                 push_extruded_shape(&mut tv, &mut ti, &[

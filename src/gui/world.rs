@@ -891,7 +891,6 @@ impl GameWorld {
     pub fn update_track_queue_rects(&mut self) {
         self.track_queue_rects.clear();
         let vol_rect = self.btn_rect(ButtonId::VolDown);
-        let scale_x = self.window_size[0] / self.window_size[0]; // 1.0 — rects already in screen space
         let track_x = vol_rect[0];
         let track_bottom = vol_rect[1] - 8.0;
         if let Ok(audio) = self.audio.try_lock() {
