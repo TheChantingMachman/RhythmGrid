@@ -10,6 +10,22 @@ use super::drawing::*;
 use super::theme::*;
 use super::world::GameWorld;
 
+/// Embossed text — light highlight up-left, darker text on top. Looks raised/carved out.
+fn push_text_embossed(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+                      x: f32, y: f32, text: &str, color: [f32; 4], scale: f32) {
+    let off = scale * 1.2; // wider offset for cleaner separation
+    // Subtle light highlight (up-left)
+    let highlight = [
+        (color[0] + 0.2).min(1.0),
+        (color[1] + 0.2).min(1.0),
+        (color[2] + 0.2).min(1.0),
+        color[3] * 0.3,
+    ];
+    push_text(verts, indices, x - off * 0.3, y - off, text, highlight, scale);
+    // Main text on top
+    push_text(verts, indices, x, y, text, color, scale);
+}
+
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)
 /// Returns (opaque_scene, transparent_scene, hud) geometry.
 pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
@@ -109,20 +125,45 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     push_slab_3d(&mut tv, &mut ti, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
     let vol_fill = rgba_to_f32([60, 100, 180, (220.0 * hud_a) as u8]);
     push_slab_3d(&mut tv, &mut ti, vol_bar_x, vol_y + 0.15, vol_bar_w * vol, vol_h, 0.3, vol_fill);
-    // Vol down button [-]
-    let vd_color = if world.btn_hovered(super::world::ButtonId::VolDown) {
-        rgba_to_f32([80, 60, 60, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut tv, &mut ti, vol_minus_x, vol_y, vol_btn_w, 0.5, 0.4, vd_color);
-    // Vol up button [+]
-    let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
-        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut tv, &mut ti, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
+    // Vol down [-] — 3D extruded minus glyph
+    {
+        let btn = world.buttons.iter().find(|b| b.id == super::world::ButtonId::VolDown).unwrap();
+        let col = if btn.hovered {
+            rgba_to_f32([200, 140, 140, (255.0 * hud_a) as u8])
+        } else {
+            rgba_to_f32([160, 160, 200, (200.0 * hud_a) as u8])
+        };
+        let cx = btn.world_x + btn.world_w * 0.5;
+        let cy = btn.world_y + btn.world_h * 0.5;
+        let s = 0.15;
+        // Minus: horizontal bar
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - s, cy - s * 0.25], [cx + s, cy - s * 0.25],
+            [cx + s, cy + s * 0.25], [cx - s, cy + s * 0.25],
+        ], 0.0, 0.25, col);
+    }
+    // Vol up [+] — 3D extruded plus glyph
+    {
+        let btn = world.buttons.iter().find(|b| b.id == super::world::ButtonId::VolUp).unwrap();
+        let col = if btn.hovered {
+            rgba_to_f32([140, 200, 140, (255.0 * hud_a) as u8])
+        } else {
+            rgba_to_f32([160, 160, 200, (200.0 * hud_a) as u8])
+        };
+        let cx = btn.world_x + btn.world_w * 0.5;
+        let cy = btn.world_y + btn.world_h * 0.5;
+        let s = 0.15;
+        // Plus: horizontal bar
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - s, cy - s * 0.25], [cx + s, cy - s * 0.25],
+            [cx + s, cy + s * 0.25], [cx - s, cy + s * 0.25],
+        ], 0.0, 0.25, col);
+        // Plus: vertical bar
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - s * 0.25, cy - s], [cx + s * 0.25, cy - s],
+            [cx + s * 0.25, cy + s], [cx - s * 0.25, cy + s],
+        ], 0.0, 0.25, col);
+    }
 
     // Transport buttons: [<<] [>||] [>>] [SH]
     // Transport buttons: [<<] [>||] [>>] [SH]
@@ -135,27 +176,122 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let is_paused = if let Ok(audio) = world.audio.try_lock() { audio.paused } else { false };
     for &id in &transport_ids {
         let btn = world.buttons.iter().find(|b| b.id == id).unwrap();
-        let base_color = match id {
-            super::world::ButtonId::PlayPause if is_paused => [50, 80, 50],
-            super::world::ButtonId::Shuffle => [50, 50, 80],
-            _ => [30, 30, 50],
+
+        // 3D extruded glyph — no backing cube, the icon IS the button
+        let base_rgb = match id {
+            super::world::ButtonId::PlayPause if is_paused => [120, 180, 120],
+            super::world::ButtonId::Shuffle => [120, 120, 200],
+            _ => [160, 180, 220],
         };
-        let color = if btn.hovered {
-            rgba_to_f32([base_color[0] + 40, base_color[1] + 40, base_color[2] + 40, (240.0 * hud_a) as u8])
+        let icon_col = if btn.hovered {
+            rgba_to_f32([
+                (base_rgb[0] as u8).saturating_add(60),
+                (base_rgb[1] as u8).saturating_add(60),
+                (base_rgb[2] as u8).saturating_add(60),
+                (255.0 * hud_a) as u8,
+            ])
         } else {
-            rgba_to_f32([base_color[0] as u8, base_color[1] as u8, base_color[2] as u8, (180.0 * hud_a) as u8])
+            rgba_to_f32([base_rgb[0] as u8, base_rgb[1] as u8, base_rgb[2] as u8, (200.0 * hud_a) as u8])
         };
-        push_slab_3d(&mut tv, &mut ti, btn.world_x, btn.world_y, btn.world_w, btn.world_h, 0.4, color);
+        let cx = btn.world_x + btn.world_w * 0.5;
+        let cy = btn.world_y + btn.world_h * 0.5;
+        let z0 = 0.0;
+        let z1 = 0.3;
+        let s = 0.2; // larger icon — is the button now
+
+        match id {
+            super::world::ButtonId::Back => {
+                // |◀ — bar + left triangle (extruded)
+                push_extruded_shape(&mut tv, &mut ti, &[
+                    [cx + s * 0.8, cy - s], [cx + s * 1.1, cy - s],
+                    [cx + s * 1.1, cy + s], [cx + s * 0.8, cy + s],
+                ], z0, z1, icon_col);
+                push_extruded_shape(&mut tv, &mut ti, &[
+                    [cx - s, cy], [cx + s * 0.6, cy - s], [cx + s * 0.6, cy + s],
+                ], z0, z1, icon_col);
+            }
+            super::world::ButtonId::PlayPause => {
+                if is_paused {
+                    // ▶ play triangle
+                    push_extruded_shape(&mut tv, &mut ti, &[
+                        [cx - s * 0.6, cy - s], [cx + s, cy], [cx - s * 0.6, cy + s],
+                    ], z0, z1, icon_col);
+                } else {
+                    // ❚❚ two pause bars
+                    for offset in [-s * 0.5, s * 0.2] {
+                        push_extruded_shape(&mut tv, &mut ti, &[
+                            [cx + offset, cy - s], [cx + offset + s * 0.3, cy - s],
+                            [cx + offset + s * 0.3, cy + s], [cx + offset, cy + s],
+                        ], z0, z1, icon_col);
+                    }
+                }
+            }
+            super::world::ButtonId::Skip => {
+                // ▶| — right triangle + bar
+                push_extruded_shape(&mut tv, &mut ti, &[
+                    [cx - s, cy - s], [cx + s * 0.6, cy], [cx - s, cy + s],
+                ], z0, z1, icon_col);
+                push_extruded_shape(&mut tv, &mut ti, &[
+                    [cx + s * 0.8, cy - s], [cx + s * 1.1, cy - s],
+                    [cx + s * 1.1, cy + s], [cx + s * 0.8, cy + s],
+                ], z0, z1, icon_col);
+            }
+            super::world::ButtonId::Shuffle => {
+                // Crossed arrows — two diagonal bars (shortened 10%) with arrowheads
+                let t = s * 0.12;
+                let sh = s * 0.9; // shortened bar (tails stay, tips shorten)
+                // Diagonal 1: bottom-left → top-right
+                push_extruded_shape(&mut tv, &mut ti, &[
+                    [cx - s, cy + s - t], [cx - s, cy + s + t],
+                    [cx + sh, cy - sh + t], [cx + sh, cy - sh - t],
+                ], z0, z1, icon_col);
+                // Arrowhead top-right (aligned with diagonal)
+                push_extruded_shape(&mut tv, &mut ti, &[
+                    [cx + s, cy - s],           // tip
+                    [cx + s * 0.5, cy - s],     // left wing
+                    [cx + s, cy - s * 0.5],     // bottom wing
+                ], z0, z1, icon_col);
+                // Diagonal 2: top-left → bottom-right
+                push_extruded_shape(&mut tv, &mut ti, &[
+                    [cx - s, cy - s - t], [cx - s, cy - s + t],
+                    [cx + sh, cy + sh + t], [cx + sh, cy + sh - t],
+                ], z0, z1, icon_col);
+                // Arrowhead bottom-right (aligned with diagonal)
+                push_extruded_shape(&mut tv, &mut ti, &[
+                    [cx + s, cy + s],           // tip
+                    [cx + s * 0.5, cy + s],     // left wing
+                    [cx + s, cy + s * 0.5],     // top wing
+                ], z0, z1, icon_col);
+            }
+            _ => {}
+        }
     }
 
-    // Folder button (right side, below transport)
-    let fld = world.buttons.iter().find(|b| b.id == super::world::ButtonId::Folder).unwrap();
-    let fld_color = if fld.hovered {
-        rgba_to_f32([60, 80, 140, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 40, 70, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut tv, &mut ti, fld.world_x, fld.world_y, fld.world_w, fld.world_h, 0.4, fld_color);
+    // Folder button — 3D extruded folder icon
+    {
+        let fld = world.buttons.iter().find(|b| b.id == super::world::ButtonId::Folder).unwrap();
+        let col = if fld.hovered {
+            rgba_to_f32([140, 160, 220, (255.0 * hud_a) as u8])
+        } else {
+            rgba_to_f32([100, 120, 180, (200.0 * hud_a) as u8])
+        };
+        let cx = fld.world_x + fld.world_w * 0.5;
+        let cy = fld.world_y + fld.world_h * 0.5;
+        let w = 0.385;
+        let h = 0.28;
+        let tab_w = w * 0.35; // tab width
+        let tab_h = h * 0.2;  // tab height
+        // Folder body (rectangle)
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - w, cy - h + tab_h], [cx + w, cy - h + tab_h],
+            [cx + w, cy + h], [cx - w, cy + h],
+        ], 0.0, 0.2, col);
+        // Tab (small rectangle on top-left)
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - w, cy - h], [cx - w + tab_w, cy - h],
+            [cx - w + tab_w, cy - h + tab_h], [cx - w, cy - h + tab_h],
+        ], 0.0, 0.2, col);
+    }
 
     // FFT visualizer (effect module)
     if ef.fft_visualizer {
@@ -481,12 +617,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
                   "T-SPIN", rgba_to_f32([255, 100, 255, ta]), 3.0);
     }
 
-    // Combo counter (only visible during active combo)
-    if ef.combo_text && rs.combo_count > 0 {
-        let combo_col = rgba_to_f32([255, 200, 60, 255]);
-        push_text(&mut verts, &mut indices, 12.0, stats_y + 114.0,
-                  &format!("COMBO {}", rs.combo_count), combo_col, 2.0);
-    }
+    // Combo counter rendered after HUD fade (always visible)
 
 
 
@@ -528,41 +659,17 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         (lx, ly)
     };
 
-    // Vol -/+ labels
-    let (vd_x, vd_y) = project_label(super::world::ButtonId::VolDown, world);
-    push_text(&mut verts, &mut indices, vd_x, vd_y, "-", dim_col, 1.0);
-    let (vu_x, vu_y) = project_label(super::world::ButtonId::VolUp, world);
-    push_text(&mut verts, &mut indices, vu_x, vu_y, "+", dim_col, 1.0);
+    // Vol -/+ labels removed — 3D glyphs rendered in scene pass
 
-    // Transport labels
-    let (is_paused_lbl, is_shuffled_lbl) = if let Ok(audio) = world.audio.try_lock() {
-        (audio.paused, audio.shuffled)
-    } else {
-        (false, false)
-    };
-    let shuffle_label = if is_shuffled_lbl { "SH*" } else { "SH" };
-    let transport_labels = [
-        (super::world::ButtonId::Back, "<<"),
-        (super::world::ButtonId::PlayPause, if is_paused_lbl { ">" } else { "||" }),
-        (super::world::ButtonId::Skip, ">>"),
-        (super::world::ButtonId::Shuffle, shuffle_label),
-    ];
-    for (id, label) in transport_labels {
-        let col = if id == super::world::ButtonId::Shuffle && is_shuffled_lbl {
-            rgba_to_f32([100, 200, 255, 255]) // highlighted when active
-        } else if world.btn_hovered(id) {
-            text_col
-        } else {
-            dim_col
-        };
-        let (lx, ly) = project_label(id, world);
-        push_text(&mut verts, &mut indices, lx, ly, label, col, 1.0);
+    // Transport labels removed — 3D icons rendered on button faces in scene pass
+    // Shuffle state indicator (text below shuffle button)
+    let is_shuffled_lbl = if let Ok(audio) = world.audio.try_lock() { audio.shuffled } else { false };
+    if is_shuffled_lbl {
+        let (sx, sy) = project_label(super::world::ButtonId::Shuffle, world);
+        push_text(&mut verts, &mut indices, sx - 2.0, sy, "ON", rgba_to_f32([100, 200, 255, 255]), 1.0);
     }
 
-    // Folder label
-    let folder_col = if world.btn_hovered(super::world::ButtonId::Folder) { text_col } else { dim_col };
-    let (fl_x, fl_y) = project_label(super::world::ButtonId::Folder, world);
-    push_text(&mut verts, &mut indices, fl_x - 8.0, fl_y, "FOLDER", folder_col, 1.0);
+    // Folder label removed — 3D glyph rendered in scene pass
 
     // FFT lock label
     let lock_col = if world.fft_locked { text_col } else { dim_col };
@@ -572,55 +679,55 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     // State overlays
     if rs.state == GameState::GameOver {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([120, 0, 0, 80]), 0.08);
-        let go_w = 200.0; let go_h = 150.0;
+        let go_w = 400.0; let go_h = 300.0;
         let go_x = (w - go_w) / 2.0;
         let go_y = (h - go_h) / 2.0;
         push_panel(&mut verts, &mut indices, go_x, go_y, go_w, go_h, 0.09);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 8.0, "GAME OVER", rgba_to_f32([255, 80, 80, 255]), 2.0);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 34.0, "SCORE", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 46.0,
-                  &format!("{}", rs.score), text_col, 3.0);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 72.0,
-                  &format!("LVL {}  LINES {}", rs.level, rs.total_lines), dim_col, 1.0);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 84.0,
-                  &format!("COMBO {}  PCS {}", rs.max_combo, rs.pieces_placed), dim_col, 1.0);
+        push_text_embossed(&mut verts, &mut indices, go_x + 20.0, go_y + 16.0, "GAME OVER", rgba_to_f32([255, 80, 80, 255]), 4.0);
+        push_text_embossed(&mut verts, &mut indices, go_x + 20.0, go_y + 60.0, "SCORE", dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, go_x + 20.0, go_y + 84.0,
+                  &format!("{}", rs.score), text_col, 5.0);
+        push_text_embossed(&mut verts, &mut indices, go_x + 20.0, go_y + 140.0,
+                  &format!("LVL {}  LINES {}", rs.level, rs.total_lines), dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, go_x + 20.0, go_y + 166.0,
+                  &format!("COMBO {}  PCS {}", rs.max_combo, rs.pieces_placed), dim_col, 2.0);
         let mins = (rs.time_played_secs / 60.0) as u32;
         let secs = (rs.time_played_secs % 60.0) as u32;
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 96.0,
-                  &format!("TIME {}:{:02}", mins, secs), dim_col, 1.0);
-        push_text(&mut verts, &mut indices, go_x + 12.0, go_y + 116.0, "ENTER TO RESTART", dim_col, 1.0);
+        push_text_embossed(&mut verts, &mut indices, go_x + 20.0, go_y + 192.0,
+                  &format!("TIME {}:{:02}", mins, secs), dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, go_x + 20.0, go_y + 240.0, "ENTER TO RESTART", dim_col, 2.0);
     }
 
     if rs.state == GameState::Paused {
         push_quad(&mut verts, &mut indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, 60]), 0.08);
-        let pa_w = 130.0; let pa_h = 240.0;
+        let pa_w = 280.0; let pa_h = 480.0;
         let pa_x = (w - pa_w) / 2.0;
         let pa_y = (h - pa_h) / 2.0;
         push_panel(&mut verts, &mut indices, pa_x, pa_y, pa_w, pa_h, 0.09);
-        let px = pa_x + 8.0;
+        let px = pa_x + 12.0;
         let highlight = rgba_to_f32([255, 255, 100, 255]);
-        push_text(&mut verts, &mut indices, px, pa_y + 8.0, "PAUSED", highlight, 2.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 12.0, "PAUSED", highlight, 4.0);
         // Controls
-        push_text(&mut verts, &mut indices, px, pa_y + 30.0, "L-R MOVE", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 42.0, "DN  SOFT DROP", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 54.0, "SPC HARD DROP", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 66.0, "UP  CW  Z CCW", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 78.0, "C   HOLD", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 90.0, "P   RESUME", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 102.0, "N SKIP +- VOL", dim_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 114.0, "F1  THEME", dim_col, 1.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 56.0, "L-R MOVE", dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 80.0, "DN  SOFT DROP", dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 104.0, "SPC HARD DROP", dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 128.0, "UP  CW  Z CCW", dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 152.0, "C   HOLD", dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 176.0, "P   RESUME", dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 200.0, "N SKIP +- VOL", dim_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 224.0, "F1  THEME", dim_col, 2.0);
         // Settings section
-        push_text(&mut verts, &mut indices, px, pa_y + 136.0, "SETTINGS", highlight, 1.5);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 264.0, "SETTINGS", highlight, 2.5);
         // Volume
         let vol = if let Ok(audio) = world.audio.try_lock() { audio.volume } else { 0.8 };
-        push_text(&mut verts, &mut indices, px, pa_y + 154.0,
-                  &format!("VOL  {:.0}%", vol * 100.0), text_col, 1.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 296.0,
+                  &format!("VOL  {:.0}%", vol * 100.0), text_col, 2.0);
         // Theme
         let theme_names = ["DEFAULT", "WATER", "DEBUG"];
         let theme_name = theme_names.get(world.theme_index).unwrap_or(&"DEFAULT");
-        push_text(&mut verts, &mut indices, px, pa_y + 166.0,
-                  &format!("THEME  {}", theme_name), text_col, 1.0);
-        push_text(&mut verts, &mut indices, px, pa_y + 210.0, "ESC  MENU", dim_col, 1.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 322.0,
+                  &format!("THEME  {}", theme_name), text_col, 2.0);
+        push_text_embossed(&mut verts, &mut indices, px, pa_y + 430.0, "ESC  MENU", dim_col, 2.0);
     }
 
     // Particles (always visible, not affected by HUD fade)
@@ -640,11 +747,36 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         }
     }
 
-    // Analysis phase label (always visible, not affected by HUD fade)
-    if world.toast_timer > 0.0 && (world.fft_locked || world.track_time < 45.0) {
-        let ta = (world.toast_timer.min(1.0) * 200.0) as u8;
-        push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
-                  &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
+    // Toast (always visible, not affected by HUD fade)
+    // Analysis labels (SAMPLING/MAPPED/etc) only on debug theme
+    // Theme switch toasts show on all themes
+    if world.toast_timer > 0.0 {
+        let is_analysis = world.toast_text.starts_with("SAMPLING")
+            || world.toast_text.starts_with("MAPPED")
+            || world.toast_text.starts_with("RESAMPLING")
+            || world.toast_text.starts_with("REMAPPED")
+            || world.toast_text.starts_with("ANALYZING");
+        let show = if is_analysis { world.theme_index == 2 } else { true }; // 2 = debug
+        if show {
+            let ta = (world.toast_timer.min(1.0) * 200.0) as u8;
+            push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
+                      &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
+        }
+    }
+
+    // Combo counter (always visible, not affected by HUD fade)
+    if ef.combo_text && rs.combo_count > 0 {
+        let intensity = (rs.combo_count as f32 * 0.15).min(1.0);
+        let combo_col = rgba_to_f32([
+            255,
+            (200.0 - intensity * 100.0) as u8,
+            (60.0 - intensity * 60.0) as u8,
+            (180.0 + intensity * 75.0) as u8,
+        ]);
+        let scale = 3.0 + rs.combo_count as f32 * 0.3;
+        push_text_embossed(&mut verts, &mut indices,
+            w / 2.0 - 50.0, h / 2.0 + 40.0,
+            &format!("COMBO {}", rs.combo_count), combo_col, scale.min(6.0));
     }
 
     (verts, indices)

@@ -28,6 +28,7 @@ pub struct AudioState {
     pub back_requested: bool,
     pub shuffle_requested: bool,
     pub shuffled: bool,            // mirrors Playlist::is_shuffled() for GUI display
+    pub jump_to_requested: Option<usize>, // jump to track index in playlist
     pub paused: bool,
     pub shutdown: bool,        // set to stop audio thread
     beat_detector: BeatDetector,
@@ -59,6 +60,7 @@ impl AudioState {
             back_requested: false,
             shuffle_requested: false,
             shuffled: false,
+            jump_to_requested: None,
             paused: false,
             shutdown: false,
             beat_detector: BeatDetector::new(),
@@ -194,7 +196,7 @@ fn stream_decode_track(
     while let Some(chunk) = decoder.next_chunk() {
         // Check for skip/back/shuffle — abort decode so control loop can handle it
         if let Ok(s) = state.try_lock() {
-            if s.skip_requested || s.back_requested || s.shuffle_requested {
+            if s.skip_requested || s.back_requested || s.shuffle_requested || s.jump_to_requested.is_some() {
                 return false;
             }
         }
@@ -336,6 +338,31 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                                 buf.samples.clear();
                                 buf.finished = true;
                             }
+                            break;
+                        }
+                        if let Some(target) = s.jump_to_requested.take() {
+                            if let Some(p) = playlist_decode.lock().unwrap().as_mut() {
+                                // Advance until we reach the target index
+                                let len = p.files().len();
+                                for _ in 0..len {
+                                    if s.track_list.get(s.current_track_index).map(|n| {
+                                        p.current().map(|path| track_name_from_path(path) == *n).unwrap_or(false)
+                                    }).unwrap_or(false) && s.current_track_index == target {
+                                        break;
+                                    }
+                                    p.advance();
+                                    let name = p.current().map(|path| track_name_from_path(path)).unwrap_or_default();
+                                    if let Some(idx) = s.track_list.iter().position(|n| *n == name) {
+                                        s.current_track_index = idx;
+                                        if idx == target { break; }
+                                    }
+                                }
+                            }
+                            if let Ok(mut buf) = buffer_decode.lock() {
+                                buf.samples.clear();
+                                buf.finished = true;
+                            }
+                            go_back = false;
                             break;
                         }
                         if s.shuffle_requested {

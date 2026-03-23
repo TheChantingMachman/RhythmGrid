@@ -347,17 +347,31 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Dashboard elements in transparent pass (no black boxes on fade)
 - Bass zoom (camera Z push on bass beats)
 
+**Done:**
+- Effects interface: 6 AudioEffect modules + CameraReactor + EffectFlags (16 toggles) ✓
+- Theme piece color overrides: `themed_piece_color()` with per-theme palettes ✓
+- Theme switching: F1 cycles Default/Water/Debug with toast notification ✓
+- Rolling averages + dominant band ranking ✓
+- Dynamic audio-visual mapping: EffectBindings + SignalRank system ✓
+- Two-phase analysis (7s initial lock, 30-45s resample) ✓
+- Settings persistence (volume, theme, shuffle, music folder, window size) ✓
+- Render state layer (BoardRenderState, GameStatusRender, HeldPieceRender) ✓
+
 **Remaining:**
-- Effects interface complete: 5 AudioEffect modules (BeatRings, HexBackground, FftVisualizer, GridLines, Fireworks) + CameraReactor. VisualTheme params + toggle flags working. Two themes: Default (hex dots) and Water (fireworks, blue-green, smooth camera).
-- Theme piece color overrides: `themed_piece_color()` wrapper for per-theme piece palettes (e.g. blue gradient for water). Touches ~8 render call sites.
-- Theme switching UI — button or keyboard shortcut to swap themes at runtime
 - More themes: fire, neon, minimal, etc.
-- Rolling averages + dominant band ranking (infrastructure for dynamic effect routing) ✓
 - **Dynamic mapping refinements:**
-  - Minimum energy threshold: bands below a threshold shouldn't be ranked. If a song only has 3-4 active bands, ranks should only draw from those. Assigning near-zero-energy bands to effects wastes visual slots.
-  - Active band count detection: determine how many bands are "active" (above threshold) and only rank those. Rank 3 on a 3-band song = the least active of the active bands, not a dead band.
-  - Mid-song re-analysis: advanced case — some songs shift character (verse→chorus, breakdown→drop). Consider periodic re-analysis or continuous sliding window instead of one-shot lock at 45s.
-  - Track change detection: reset analysis when track changes (currently blends between songs)
+  - Minimum energy threshold: bands below a threshold shouldn't be ranked. If only 3-4 bands are active, ranks draw from those only.
+  - Active band count detection: rank 3 on a 3-band song = least active of active bands, not a dead band.
+  - Track change detection: reset analysis when track changes (currently blends between songs).
+  - Beat confidence tuning: fast guitar patterns can confuse the rhythmic band detector. Needs better distinction between rhythmic regularity and energetic activity.
+- **Debug theme analysis dashboard:**
+  - Visual display of all 7 band confidence values (bar chart or numeric)
+  - Visual display of all 7 rolling energy values alongside
+  - Show the ranked output: which bands are rank 1/2/3 for energy and separately for confidence
+  - Highlight which band is "the beat" vs "most active" — they're separate lists
+  - Allows listening to a song while verifying the algorithm is finding the foot-tap component
+  - Enables more nuanced artistic ranking decisions for different effects
+  - Stretch: interactive rank override — click to manually assign a band to a rank for A/B testing
 - **Grid distortion workshop** — explore variations:
   - Per-band warp points: each frequency band drives its own distortion point at a fixed grid position
   - Piece-tracking warp: falling piece subtly pulls the grid like a rubber band as it passes through

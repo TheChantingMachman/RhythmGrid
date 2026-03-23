@@ -106,10 +106,10 @@ impl AudioEffect for GridLines {
             255,
         ]);
         let thickness = p.base_thickness + self.presence_beat * p.beat_thickness_add;
-        let n = [0.0f32, 0.0, 1.0];
         let gw = ctx.board_width;
         let gh = ctx.board_height;
         let has_forces = !self.forces.is_empty();
+        let n = [0.0f32, 0.0, 1.0];
 
         // Vertical lines — segmented for distortion
         for col in 0..=WIDTH {
