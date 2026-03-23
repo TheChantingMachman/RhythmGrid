@@ -141,6 +141,7 @@ pub struct CameraParams {
 /// A complete visual theme — parameters for all effects.
 pub struct VisualTheme {
     pub name: &'static str,
+    pub color_grade: [f32; 3], // post-process color temperature [r, g, b] multiplier
     pub rings: RingParams,
     pub hex: HexParams,
     pub grid: GridParams,
@@ -154,6 +155,7 @@ pub struct VisualTheme {
 pub fn default_theme() -> VisualTheme {
     VisualTheme {
         name: "Default",
+        color_grade: [1.05, 1.0, 0.95], // slightly warm
         rings: RingParams {
             max_radius: 18.0, base_life: 3.0,
             color_r: 0.1, color_g: 0.15, color_b: 0.4, base_alpha: 0.3,
@@ -192,6 +194,7 @@ pub fn default_theme() -> VisualTheme {
 pub fn water_theme() -> VisualTheme {
     VisualTheme {
         name: "Water",
+        color_grade: [0.92, 0.97, 1.08], // subtle cool blue
         rings: RingParams {
             max_radius: 24.0, base_life: 4.5, // slower, wider ripples
             color_r: 0.05, color_g: 0.25, color_b: 0.5, base_alpha: 0.2,
@@ -248,6 +251,7 @@ pub fn debug_theme() -> VisualTheme {
     theme.effects.active_piece_pulse = true;
     theme.effects.beat_rings = true;
     theme.effects.fireworks = true;
+    theme.color_grade = [1.0, 1.0, 1.0]; // neutral for debug
     // Bindings: rings follow most active band, board pulse follows beat,
     // fireworks follow second most active
     theme.bindings = EffectBindings {

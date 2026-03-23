@@ -7,7 +7,7 @@ use winit::window::Window;
 use super::drawing::Vertex;
 
 const SCENE_SHADER: &str = r#"
-struct Uniforms { view_proj: mat4x4<f32> };
+struct Uniforms { view_proj: mat4x4<f32>, camera_pos: vec4<f32> };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
 struct VertexOutput {
@@ -41,15 +41,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ambient = 0.25;
     let diffuse = max(dot(n, light_dir), 0.0) * 0.55;
 
-    // Specular highlight (Blinn-Phong)
-    let view_dir = normalize(vec3<f32>(0.0, 0.0, 1.0)); // simplified
+    // Per-pixel view direction from camera position
+    let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
     let half_dir = normalize(light_dir + view_dir);
-    let spec = pow(max(dot(n, half_dir), 0.0), 32.0) * 0.4;
+    let spec = pow(max(dot(n, half_dir), 0.0), 32.0) * 0.6; // HDR: can exceed 1.0
 
-    // Rim light (edge glow)
-    let rim = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0) * 0.15;
+    // Fresnel (Schlick approximation) — edges facing away from camera glow
+    let fresnel = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0) * 0.4; // HDR: brighter edges
 
-    let brightness = ambient + diffuse + spec + rim;
+    let brightness = ambient + diffuse + spec + fresnel;
     return vec4<f32>(in.color.rgb * brightness, in.color.a);
 }
 "#;
@@ -59,6 +59,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Uniforms {
     pub view_proj: [[f32; 4]; 4],
+    pub camera_pos: [f32; 4], // xyz + padding for alignment
 }
 
 impl Uniforms {
@@ -70,11 +71,12 @@ impl Uniforms {
                 [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ],
+            camera_pos: [0.0, 0.0, 16.0, 0.0],
         }
     }
 
     pub fn from_mat(m: [[f32; 4]; 4]) -> Self {
-        Uniforms { view_proj: m }
+        Uniforms { view_proj: m, camera_pos: [0.0, 0.0, 16.0, 0.0] }
     }
 }
 
@@ -130,8 +132,10 @@ fn normalize3(v: [f32; 3]) -> [f32; 3] {
 
 // Single-pass bloom: extract bright + box blur + composite in one fragment shader
 const BLOOM_SHADER: &str = r#"
+struct BloomUniforms { color_grade: vec4<f32> };
 @group(0) @binding(0) var scene_tex: texture_2d<f32>;
 @group(0) @binding(1) var tex_sampler: sampler;
+@group(0) @binding(2) var<uniform> bloom_u: BloomUniforms;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -180,11 +184,19 @@ fn fs_bloom_composite(in: VsOut) -> @location(0) vec4<f32> {
     bloom /= count;
 
     let bloom_strength = 0.8;
-    return vec4<f32>(scene.rgb + bloom * bloom_strength, scene.a);
+    let composited = scene.rgb + bloom * bloom_strength;
+    // Color grading — per-theme color temperature
+    let graded = composited * bloom_u.color_grade.rgb;
+    // ACES tonemap — compress HDR to displayable range
+    let a = graded * (graded * 2.51 + vec3<f32>(0.03));
+    let b = graded * (graded * 2.43 + vec3<f32>(0.59)) + vec3<f32>(0.14);
+    let tonemapped = a / b;
+    return vec4<f32>(tonemapped, scene.a);
 }
 "#;
 
 const SAMPLE_COUNT: u32 = 4;
+const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 pub struct GpuState {
     surface: wgpu::Surface<'static>,
@@ -200,6 +212,7 @@ pub struct GpuState {
     bloom_pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     bloom_bind_group_layout: wgpu::BindGroupLayout,
+    bloom_uniform_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
 }
@@ -261,6 +274,15 @@ impl GpuState {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -275,7 +297,7 @@ impl GpuState {
             label: Some("scene_bgl"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -326,7 +348,7 @@ impl GpuState {
             fragment: Some(wgpu::FragmentState {
                 module: &scene_shader, entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
+                    format: HDR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
             }),
@@ -347,7 +369,7 @@ impl GpuState {
             fragment: Some(wgpu::FragmentState {
                 module: &scene_shader, entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
+                    format: HDR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
             }),
@@ -371,7 +393,7 @@ impl GpuState {
             fragment: Some(wgpu::FragmentState {
                 module: &scene_shader, entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
+                    format: HDR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
             }),
@@ -411,12 +433,18 @@ impl GpuState {
         let scene_texture = Self::create_render_texture(&device, &config);
         let depth_texture = Self::create_depth_texture(&device, &config);
 
+        let bloom_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("bloom_uniforms"),
+            contents: bytemuck::cast_slice(&[1.0f32, 1.0, 1.0, 1.0]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
         GpuState {
             surface, device, queue, config,
             scene_pipeline, scene_pipeline_transparent, scene_pipeline_no_depth,
             msaa_texture, scene_texture, depth_texture,
             bloom_pipeline, sampler, bloom_bind_group_layout: bind_group_layout,
-            uniform_buffer, scene_bind_group,
+            bloom_uniform_buffer, uniform_buffer, scene_bind_group,
         }
     }
 
@@ -425,7 +453,7 @@ impl GpuState {
             label: Some("msaa"),
             size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
             mip_level_count: 1, sample_count: SAMPLE_COUNT, dimension: wgpu::TextureDimension::D2,
-            format: config.format, usage: wgpu::TextureUsages::RENDER_ATTACHMENT, view_formats: &[],
+            format: HDR_FORMAT, usage: wgpu::TextureUsages::RENDER_ATTACHMENT, view_formats: &[],
         }).create_view(&Default::default())
     }
 
@@ -445,7 +473,7 @@ impl GpuState {
             label: Some("scene_rt"),
             size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
             mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
-            format: config.format,
+            format: HDR_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         }).create_view(&Default::default())
@@ -470,6 +498,11 @@ impl GpuState {
 
     pub fn update_uniforms(&self, uniforms: &Uniforms) {
         self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[*uniforms]));
+    }
+
+    pub fn set_color_grade(&self, grade: [f32; 3]) {
+        let data = [grade[0], grade[1], grade[2], 1.0f32];
+        self.queue.write_buffer(&self.bloom_uniform_buffer, 0, bytemuck::cast_slice(&data));
     }
 
     /// Render scene (opaque + transparent 3D) and HUD (2D overlay).
@@ -608,6 +641,7 @@ impl GpuState {
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.scene_texture) },
                     wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                    wgpu::BindGroupEntry { binding: 2, resource: self.bloom_uniform_buffer.as_entire_binding() },
                 ],
             });
             let mut encoder = self.device.create_command_encoder(&Default::default());

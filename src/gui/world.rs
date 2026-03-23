@@ -9,7 +9,7 @@ use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
 use rhythm_grid::audio::{RollingEnergy, BeatConfidence};
-use rhythm_grid::render::{piece_color, board_state, held_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender};
+use rhythm_grid::render::{piece_color, board_state, held_piece_state, next_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender, NextPieceRender};
 use super::audio_output::{self, AudioState};
 use super::camera::CameraReactor;
 use super::drawing::{Vertex, rgba_to_f32};
@@ -71,9 +71,11 @@ pub struct GameWorld {
     pub(super) render_board: BoardRenderState,
     pub(super) render_status: GameStatusRender,
     pub(super) render_held: Option<HeldPieceRender>,
+    pub(super) render_next: NextPieceRender,
     pub(super) toast_text: String,
     pub(super) toast_timer: f32,
     pub(super) theme_index: usize,
+    pub color_grade: [f32; 3],
     pub(super) music_folder: Option<String>,
     pub saved_window_width: u32,
     pub saved_window_height: u32,
@@ -85,6 +87,8 @@ pub struct GameWorld {
     beat_confidence: BeatConfidence,
     pub(super) bindings: themes::EffectBindings,
     pub(super) resolved_ranks: [usize; 3],  // band indices for rank 1, 2, 3
+    pub(super) energy_averages: [f32; 7],   // cached for debug dashboard
+    pub(super) confidence_values: [f32; 7], // cached for debug dashboard
     pub(super) track_time: f64,               // seconds into current track
     ranks_locked: bool,                      // true after analysis window
     pub(super) demo_mode: bool,
@@ -225,9 +229,11 @@ impl GameWorld {
                 state: GameState::Menu, can_hold: true,
             },
             render_held: None,
+            render_next: next_piece_state(&GameSession::new()),
             toast_text: String::new(),
             toast_timer: 0.0,
             theme_index,
+            color_grade: theme.color_grade,
             music_folder: settings.music_folder.clone(),
             saved_window_width: settings.window_width,
             saved_window_height: settings.window_height,
@@ -238,6 +244,8 @@ impl GameWorld {
             beat_confidence: BeatConfidence::new(),
             bindings: theme.bindings.clone(),
             resolved_ranks: [0, 1, 2],  // default: sub-bass, bass, low-mids
+            energy_averages: [0.0; 7],
+            confidence_values: [0.0; 7],
             track_time: 0.0,
             ranks_locked: false,
             danger_level: 0.0,
@@ -307,6 +315,8 @@ impl GameWorld {
                 self.band_beat_intensity[5] > 0.95,
                 self.band_beat_intensity[6] > 0.95,
             ], self.track_time);
+            self.energy_averages = self.rolling_energy.averages();
+            self.confidence_values = self.beat_confidence.confidence();
         }
 
         // Track time + two-phase rank resolution
@@ -537,6 +547,7 @@ impl GameWorld {
             self.render_board = board_state(&self.session);
             self.render_status = game_status(&self.session);
             self.render_held = held_piece_state(&self.session);
+            self.render_next = next_piece_state(&self.session);
             return;
         }
         self.last_tick = now;
@@ -630,6 +641,7 @@ impl GameWorld {
         self.render_board = board_state(&self.session);
         self.render_status = game_status(&self.session);
         self.render_held = held_piece_state(&self.session);
+        self.render_next = next_piece_state(&self.session);
     }
 
     pub fn cycle_theme(&mut self) {
@@ -642,6 +654,7 @@ impl GameWorld {
         let theme = theme_fns[self.theme_index]();
         self.effect_flags = theme.effects.clone();
         self.bindings = theme.bindings.clone();
+        self.color_grade = theme.color_grade;
         self.piece_colors = theme.piece_colors;
         self.beat_rings = BeatRings::new(theme.rings);
         self.hex_background = HexBackground::new(theme.hex);
@@ -998,7 +1011,7 @@ impl GameWorld {
         let proj = perspective(1.2, aspect, 0.1, 200.0);
         let vp = mat4_mul(&proj, &view);
 
-        Uniforms::from_mat(vp)
+        Uniforms { view_proj: vp, camera_pos: [cam_x, cam_y, cam_z, 0.0] }
     }
 
     pub fn build_scene_and_hud(&self) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {

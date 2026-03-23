@@ -219,7 +219,7 @@
   section: Audio
   description: 'Detect beats per frequency band. MultiBeatDetector holds 7 independent detectors, one per FFT band. MultiBeatDetector::new() creates with default min_gap of 0.15s. MultiBeatDetector::with_min_gap(min_gap_secs: f64) creates with custom minimum inter-beat gap. detect_bands(bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent> runs spike detection on each band independently. A spike occurs when a band''s energy exceeds its 43-sample rolling mean by 1.5x and at least min_gap_secs have passed since that band''s last beat. BandBeatEvent { band: usize, timestamp_secs: f64 }. The existing single-band BeatDetector and BeatEvent remain unchanged for backward compatibility. Default min_gap reduced from 0.3s to 0.15s to catch beats at tempos up to 400 BPM.'
   tags: [core, audio, analysis]
-  status: stale
+  status: implemented
   depends_on: [audio.amplitude, audio.fft]
   fixture_patterns: |
     - MultiBeatDetector::new() -> Self (7 internal detectors, min_gap = 0.15s)
@@ -602,5 +602,5 @@
   section: Music
   description: 'Jump to a specific track index in the playlist. Playlist::jump_to(&mut self, index: usize) sets current_index to index, clamped to 0..files.len()-1. Returns the track at the new position via current(). Used by GUI to let users click a track in the queue to play it immediately.'
   tags: [core, music, playback]
-  status: draft
+  status: implemented
   depends_on: [music.skip, music.prev_track]

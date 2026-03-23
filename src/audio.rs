@@ -356,21 +356,65 @@ pub struct BandBeatEvent {
     pub timestamp_secs: f64,
 }
 
+struct BandDetectorState {
+    window: [f32; 43],
+    window_pos: usize,
+    window_count: usize,
+    last_beat_secs: f64,
+    min_gap_secs: f64,
+}
+
+impl BandDetectorState {
+    fn new(min_gap_secs: f64) -> Self {
+        BandDetectorState {
+            window: [0.0; 43],
+            window_pos: 0,
+            window_count: 0,
+            last_beat_secs: f64::NEG_INFINITY,
+            min_gap_secs,
+        }
+    }
+
+    fn detect(&mut self, energy: f32, timestamp_secs: f64) -> bool {
+        self.window[self.window_pos] = energy;
+        self.window_pos = (self.window_pos + 1) % 43;
+        if self.window_count < 43 {
+            self.window_count += 1;
+        }
+
+        let count = self.window_count;
+        let mean: f32 = self.window[..count].iter().sum::<f32>() / count as f32;
+
+        if energy > mean * 1.5 && timestamp_secs >= self.last_beat_secs + self.min_gap_secs {
+            self.last_beat_secs = timestamp_secs;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 pub struct MultiBeatDetector {
-    detectors: [BeatDetector; 7],
+    detectors: [BandDetectorState; 7],
 }
 
 impl MultiBeatDetector {
     pub fn new() -> Self {
         MultiBeatDetector {
-            detectors: std::array::from_fn(|_| BeatDetector::new()),
+            detectors: std::array::from_fn(|_| BandDetectorState::new(0.15)),
+        }
+    }
+
+    pub fn with_min_gap(min_gap_secs: f64) -> Self {
+        MultiBeatDetector {
+            detectors: std::array::from_fn(|_| BandDetectorState::new(min_gap_secs)),
         }
     }
 
     pub fn detect_bands(&mut self, bands: &[f32; 7], timestamp_secs: f64) -> Vec<BandBeatEvent> {
         let mut events = Vec::new();
         for (i, &energy) in bands.iter().enumerate() {
-            if self.detectors[i].detect(energy, timestamp_secs).is_some() {
+            if self.detectors[i].detect(energy, timestamp_secs) {
                 events.push(BandBeatEvent { band: i, timestamp_secs });
             }
         }

@@ -117,6 +117,7 @@ impl ApplicationHandler for App {
                     self.world.update_button_rects(&uniforms, gpu.aspect_ratio());
                     self.world.update_track_queue_rects();
                     gpu.update_uniforms(&uniforms);
+                    gpu.set_color_grade(self.world.color_grade);
                 }
                 let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
                 if let Some(gpu) = &self.gpu {
