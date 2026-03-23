@@ -352,7 +352,12 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Theme piece color overrides: `themed_piece_color()` wrapper for per-theme piece palettes (e.g. blue gradient for water). Touches ~8 render call sites.
 - Theme switching UI — button or keyboard shortcut to swap themes at runtime
 - More themes: fire, neon, minimal, etc.
-- Rolling averages + dominant band ranking (infrastructure for dynamic effect routing)
+- Rolling averages + dominant band ranking (infrastructure for dynamic effect routing) ✓
+- **Dynamic mapping refinements:**
+  - Minimum energy threshold: bands below a threshold shouldn't be ranked. If a song only has 3-4 active bands, ranks should only draw from those. Assigning near-zero-energy bands to effects wastes visual slots.
+  - Active band count detection: determine how many bands are "active" (above threshold) and only rank those. Rank 3 on a 3-band song = the least active of the active bands, not a dead band.
+  - Mid-song re-analysis: advanced case — some songs shift character (verse→chorus, breakdown→drop). Consider periodic re-analysis or continuous sliding window instead of one-shot lock at 45s.
+  - Track change detection: reset analysis when track changes (currently blends between songs)
 - **Grid distortion workshop** — explore variations:
   - Per-band warp points: each frequency band drives its own distortion point at a fixed grid position
   - Piece-tracking warp: falling piece subtly pulls the grid like a rubber band as it passes through
