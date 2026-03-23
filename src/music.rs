@@ -84,6 +84,14 @@ impl Playlist {
         self.files.get(self.current_index)
     }
 
+    pub fn jump_to(&mut self, index: usize) -> Option<&PathBuf> {
+        if self.files.is_empty() {
+            return None;
+        }
+        self.current_index = index.min(self.files.len() - 1);
+        self.current()
+    }
+
     pub fn files(&self) -> &[PathBuf] {
         &self.files
     }
