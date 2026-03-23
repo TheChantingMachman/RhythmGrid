@@ -352,14 +352,26 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Theme piece color overrides: `themed_piece_color()` wrapper for per-theme piece palettes (e.g. blue gradient for water). Touches ~8 render call sites.
 - Theme switching UI — button or keyboard shortcut to swap themes at runtime
 - More themes: fire, neon, minimal, etc.
-- Rolling averages + dominant band ranking (infrastructure for dynamic effect routing)
+- Rolling averages + dominant band ranking (infrastructure for dynamic effect routing) ✓
+- **Dynamic mapping refinements:**
+  - Minimum energy threshold: bands below a threshold shouldn't be ranked. If a song only has 3-4 active bands, ranks should only draw from those. Assigning near-zero-energy bands to effects wastes visual slots.
+  - Active band count detection: determine how many bands are "active" (above threshold) and only rank those. Rank 3 on a 3-band song = the least active of the active bands, not a dead band.
+  - Mid-song re-analysis: advanced case — some songs shift character (verse→chorus, breakdown→drop). Consider periodic re-analysis or continuous sliding window instead of one-shot lock at 45s.
+  - Track change detection: reset analysis when track changes (currently blends between songs)
 - **Grid distortion workshop** — explore variations:
   - Per-band warp points: each frequency band drives its own distortion point at a fixed grid position
   - Piece-tracking warp: falling piece subtly pulls the grid like a rubber band as it passes through
   - Multiple gentle ripple points that interfere with each other
   - Warp intensity driven by band energy (gentle ambient undulation vs beat-driven pulses)
   - Currently on debug theme only — needs tuning before promoting to default/water
-- Settings persistence (volume, shuffle state, selected theme survive restart)
+- Settings persistence (volume, shuffle state, selected theme survive restart) ✓
+- **Cube material workshop** — needs interactive tuning, not recompile cycles:
+  - Build a debug slider panel (separate window or overlay) for real-time adjustment of:
+    - Front face alpha (tested 0.4), back face brightness (tested 0.25-0.5)
+    - Fresnel per-face boost values, edge highlight intensity
+    - Glow multiplier (tested 2.0-4.0), saturation/brightness curves
+  - Jumping-off values from testing: front alpha=0.4, back dim=0.25-0.5, edge=0.08-0.15, fresnel sides=0.08-0.10
+  - Currently reverted to candy colors (flat + subtle edge highlight) pending debug tooling
 - 3D elements replacing 2D HUD overlays:
   - Shaped transport buttons (play triangle, pause bars, skip arrows)
   - Button press animation (depth halve on click)

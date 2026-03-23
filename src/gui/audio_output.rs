@@ -27,6 +27,7 @@ pub struct AudioState {
     pub skip_requested: bool,  // set by game loop, consumed by decode thread
     pub back_requested: bool,
     pub shuffle_requested: bool,
+    pub shuffled: bool,            // mirrors Playlist::is_shuffled() for GUI display
     pub paused: bool,
     pub shutdown: bool,        // set to stop audio thread
     beat_detector: BeatDetector,
@@ -57,6 +58,7 @@ impl AudioState {
             skip_requested: false,
             back_requested: false,
             shuffle_requested: false,
+            shuffled: false,
             paused: false,
             shutdown: false,
             beat_detector: BeatDetector::new(),
@@ -190,9 +192,9 @@ fn stream_decode_track(
     }
 
     while let Some(chunk) = decoder.next_chunk() {
-        // Check for skip/back
+        // Check for skip/back/shuffle — abort decode so control loop can handle it
         if let Ok(s) = state.try_lock() {
-            if s.skip_requested || s.back_requested {
+            if s.skip_requested || s.back_requested || s.shuffle_requested {
                 return false;
             }
         }
@@ -338,18 +340,15 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                         }
                         if s.shuffle_requested {
                             s.shuffle_requested = false;
-                            if let Ok(mut pl) = playlist_decode.try_lock() {
-                                if let Some(p) = pl.as_mut() {
-                                    p.toggle_shuffle();
-                                    // Refresh track list with new order
-                                    s.track_list = p.files().iter()
-                                        .map(|path| track_name_from_path(path))
-                                        .collect();
-                                    s.current_track_index = 0;
-                                }
+                            if let Some(p) = playlist_decode.lock().unwrap().as_mut() {
+                                p.toggle_shuffle();
+                                s.shuffled = p.is_shuffled();
+                                s.track_list = p.files().iter()
+                                    .map(|path| track_name_from_path(path))
+                                    .collect();
+                                s.current_track_index = 0;
                             }
-                            // Restart current track after shuffle
-                            if let Ok(mut buf) = buffer_decode.try_lock() {
+                            if let Ok(mut buf) = buffer_decode.lock() {
                                 buf.samples.clear();
                                 buf.finished = true;
                             }

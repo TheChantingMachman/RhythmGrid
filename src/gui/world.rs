@@ -8,6 +8,7 @@ use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
+use rhythm_grid::audio::{RollingEnergy, BeatConfidence};
 use rhythm_grid::render::{piece_color, board_state, held_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender};
 use super::audio_output::{self, AudioState};
 use super::camera::CameraReactor;
@@ -73,6 +74,19 @@ pub struct GameWorld {
     pub(super) toast_text: String,
     pub(super) toast_timer: f32,
     pub(super) theme_index: usize,
+    pub(super) music_folder: Option<String>,
+    pub saved_window_width: u32,
+    pub saved_window_height: u32,
+    pub saved_window_x: Option<i32>,
+    pub saved_window_y: Option<i32>,
+    pub logical_window_size: [u32; 2],
+    // Dynamic audio-visual mapping
+    rolling_energy: RollingEnergy,
+    beat_confidence: BeatConfidence,
+    pub(super) bindings: themes::EffectBindings,
+    pub(super) resolved_ranks: [usize; 3],  // band indices for rank 1, 2, 3
+    pub(super) track_time: f64,               // seconds into current track
+    ranks_locked: bool,                      // true after analysis window
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -122,6 +136,16 @@ pub(super) struct ClearingCell {
 pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
 impl GameWorld {
+    /// Resolve a SignalRank to an actual band index using analysis results.
+    pub fn resolve_rank(&self, rank: themes::SignalRank) -> usize {
+        match rank {
+            themes::SignalRank::First => self.resolved_ranks[0],
+            themes::SignalRank::Second => self.resolved_ranks[1],
+            themes::SignalRank::Third => self.resolved_ranks[2],
+            themes::SignalRank::Fixed(band) => band.min(6),
+        }
+    }
+
     pub fn themed_piece_color(&self, type_index: u32) -> [u8; 4] {
         if let Some(colors) = &self.piece_colors {
             colors[type_index as usize]
@@ -130,15 +154,21 @@ impl GameWorld {
         }
     }
 
-    fn save_settings(&self) {
-        let vol = if let Ok(audio) = self.audio.try_lock() { audio.volume } else { 0.8 };
+    pub fn save_settings(&self) {
+        let vol = if let Ok(audio) = self.audio.lock() { audio.volume } else { 0.8 };
+        let shuffled = if let Ok(audio) = self.audio.lock() { audio.shuffled } else { false };
         let theme_names = ["Default", "Water", "Debug"];
         let settings = rhythm_grid::config::Settings {
             volume: vol,
             speed: 1.0,
-            music_folder: None, // TODO: track folder path
+            music_folder: self.music_folder.clone(),
             theme: theme_names.get(self.theme_index).unwrap_or(&"Default").to_string(),
-            shuffle: false, // TODO: track shuffle state
+            shuffle: shuffled,
+            window_width: self.logical_window_size[0],
+            window_height: self.logical_window_size[1],
+            window_x: self.saved_window_x,
+            window_y: self.saved_window_y,
+            ..rhythm_grid::config::Settings::default()
         };
         let path = config_dir().join("settings.toml");
         let _ = save_settings(&settings, &path);
@@ -197,6 +227,18 @@ impl GameWorld {
             toast_text: String::new(),
             toast_timer: 0.0,
             theme_index,
+            music_folder: settings.music_folder.clone(),
+            saved_window_width: settings.window_width,
+            saved_window_height: settings.window_height,
+            saved_window_x: settings.window_x,
+            saved_window_y: settings.window_y,
+            logical_window_size: [settings.window_width, settings.window_height],
+            rolling_energy: RollingEnergy::new(10.0, 60.0),  // 10s window, ~60fps
+            beat_confidence: BeatConfidence::new(),
+            bindings: theme.bindings.clone(),
+            resolved_ranks: [0, 1, 2],  // default: sub-bass, bass, low-mids
+            track_time: 0.0,
+            ranks_locked: false,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -251,6 +293,68 @@ impl GameWorld {
             }
             audio.band_beats = [false; 7]; // clear after reading
             got_beat = audio.beat_intensity > 0.9; // fresh beat
+
+            // Feed analysis trackers
+            self.rolling_energy.update(&self.bands);
+            self.beat_confidence.update(&[
+                self.band_beat_intensity[0] > 0.95,
+                self.band_beat_intensity[1] > 0.95,
+                self.band_beat_intensity[2] > 0.95,
+                self.band_beat_intensity[3] > 0.95,
+                self.band_beat_intensity[4] > 0.95,
+                self.band_beat_intensity[5] > 0.95,
+                self.band_beat_intensity[6] > 0.95,
+            ], self.track_time);
+        }
+
+        // Track time + two-phase rank resolution
+        // Phase 1: sample 0-7s, lock at 7s (catches songs that start strong)
+        // Phase 2: sample 30-45s, reapply at 45s (catches slow ramp-ups)
+        self.track_time += dt;
+        let band_names = ["SUB", "BASS", "LMID", "MID", "UMID", "PRES", "BRIL"];
+
+        // Resolve ranks from current analysis state
+        let resolve = |energy: &RollingEnergy, conf: &BeatConfidence| -> [usize; 3] {
+            let dominant = energy.dominant_bands(3);
+            let confidence = conf.confidence();
+            let rank1 = *dominant.iter()
+                .max_by(|&&a, &&b| confidence[a].partial_cmp(&confidence[b]).unwrap())
+                .unwrap_or(&0);
+            let others: Vec<usize> = dominant.iter().filter(|&&b| b != rank1).copied().collect();
+            let rank2 = others.first().copied().unwrap_or(1);
+            let rank3 = others.get(1).copied().unwrap_or(2);
+            [rank1, rank2, rank3]
+        };
+
+        // Phase labels
+        if self.track_time < 7.0 {
+            self.toast_text = format!("SAMPLING {:.0}S", 7.0 - self.track_time);
+            self.toast_timer = 2.0;
+        } else if self.track_time >= 30.0 && self.track_time < 45.0 {
+            self.toast_text = format!("RESAMPLING {:.0}S", 45.0 - self.track_time);
+            self.toast_timer = 2.0;
+        }
+
+        // Phase 1: first lock at 7s
+        if !self.ranks_locked && self.track_time > 7.0 {
+            self.resolved_ranks = resolve(&self.rolling_energy, &self.beat_confidence);
+            self.ranks_locked = true;
+            let [r1, r2, r3] = self.resolved_ranks;
+            self.toast_text = format!("MAPPED: {} {} {}",
+                band_names[r1], band_names[r2], band_names[r3]);
+            self.toast_timer = 3.0;
+        }
+
+        // Phase 2: reapply at 45s after 15s of fresh sampling
+        if self.track_time > 45.0 && self.track_time - dt <= 45.0 {
+            let new_ranks = resolve(&self.rolling_energy, &self.beat_confidence);
+            if new_ranks != self.resolved_ranks {
+                self.resolved_ranks = new_ranks;
+                let [r1, r2, r3] = self.resolved_ranks;
+                self.toast_text = format!("REMAPPED: {} {} {}",
+                    band_names[r1], band_names[r2], band_names[r3]);
+                self.toast_timer = 3.0;
+            }
         }
 
         // Peak hold (slow decay — for visual indicator on FFT bars)
@@ -380,7 +484,11 @@ impl GameWorld {
         // Update all effect modules + camera (guarded by effect_flags)
         use super::effects::AudioEffect;
         let ef = &self.effect_flags;
-        if ef.beat_rings { self.beat_rings.update(&self.audio_frame); }
+        // Set resolved band indices on effects before update
+        if ef.beat_rings {
+            self.beat_rings.trigger_band = self.resolve_rank(self.bindings.beat_rings);
+            self.beat_rings.update(&self.audio_frame);
+        }
         if ef.hex_background { self.hex_background.update(&self.audio_frame); }
         self.fft_vis.locked = self.fft_locked;
         self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
@@ -389,12 +497,15 @@ impl GameWorld {
             self.grid_lines.distortion_enabled = ef.grid_distortion;
             self.grid_lines.update(&self.audio_frame);
         }
-        if ef.fireworks { self.fireworks.update(&self.audio_frame); }
+        if ef.fireworks {
+            self.fireworks.trigger_band = Some(self.resolve_rank(self.bindings.fireworks));
+            self.fireworks.update(&self.audio_frame);
+        }
         if ef.camera_sway { self.camera.update(&self.audio_frame); }
 
         // Decay AFTER effects have consumed the frame
         for i in 0..7 {
-            self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 4.0).max(0.0);
+            self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 8.0).max(0.0);
         }
 
         // T-spin flash decay
@@ -528,6 +639,7 @@ impl GameWorld {
         self.theme_index = (self.theme_index + 1) % theme_fns.len();
         let theme = theme_fns[self.theme_index]();
         self.effect_flags = theme.effects.clone();
+        self.bindings = theme.bindings.clone();
         self.piece_colors = theme.piece_colors;
         self.beat_rings = BeatRings::new(theme.rings);
         self.hex_background = HexBackground::new(theme.hex);
@@ -547,35 +659,39 @@ impl GameWorld {
     }
 
     pub fn toggle_audio_pause(&mut self) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.paused = !audio.paused;
         }
         self.on_mouse_activity();
     }
 
     pub fn prev_track(&mut self) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.back_requested = true;
         }
         self.on_mouse_activity();
     }
 
     pub fn toggle_shuffle(&mut self) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.shuffle_requested = true;
+            audio.shuffled = !audio.shuffled;
+            let state = if audio.shuffled { "ON" } else { "OFF" };
+            self.toast_text = format!("SHUFFLE {}", state);
+            self.toast_timer = 1.5;
         }
         self.on_mouse_activity();
     }
 
     pub fn skip_track(&mut self) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.skip_requested = true;
         }
         self.on_mouse_activity();
     }
 
     pub fn adjust_volume(&mut self, delta: f32) {
-        if let Ok(mut audio) = self.audio.try_lock() {
+        if let Ok(mut audio) = self.audio.lock() {
             audio.volume = (audio.volume + delta).clamp(0.0, 1.0);
         }
         self.on_mouse_activity();
@@ -807,10 +923,8 @@ impl GameWorld {
 
         if let Some(path) = folder {
             let folder_str = path.to_string_lossy().to_string();
-            let settings_path = config_dir().join("settings.toml");
-            let mut settings = load_settings(&settings_path);
-            settings.music_folder = Some(folder_str.clone());
-            let _ = save_settings(&settings, &settings_path);
+            self.music_folder = Some(folder_str.clone());
+            self.save_settings();
             // Shut down old audio before starting new
             if let Ok(mut audio) = self.audio.lock() {
                 audio.shutdown = true;

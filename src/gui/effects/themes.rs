@@ -52,6 +52,44 @@ impl EffectFlags {
     }
 }
 
+/// Which analysis rank drives an effect.
+#[derive(Clone, Copy)]
+pub enum SignalRank {
+    First,          // most active/rhythmic band
+    Second,         // second most
+    Third,          // third most
+    Fixed(usize),   // always use this band index (0-6)
+}
+
+/// Maps effects to analysis ranks. The runtime resolves ranks to actual
+/// band indices based on rolling_energy + beat_confidence analysis.
+#[derive(Clone)]
+pub struct EffectBindings {
+    pub board_pulse: SignalRank,
+    pub cube_glow: SignalRank,
+    pub beat_rings: SignalRank,
+    pub fireworks: SignalRank,
+    pub particles: SignalRank,
+    pub camera_sway: SignalRank,
+    pub grid_shimmer: SignalRank,
+    pub hex_dots: SignalRank,
+}
+
+impl EffectBindings {
+    pub fn default_bindings() -> Self {
+        EffectBindings {
+            board_pulse: SignalRank::First,
+            cube_glow: SignalRank::Second,
+            beat_rings: SignalRank::Fixed(0),   // sub-bass (legacy behavior until wired)
+            fireworks: SignalRank::Fixed(1),    // bass (legacy)
+            particles: SignalRank::Third,
+            camera_sway: SignalRank::Fixed(1),  // bass (legacy)
+            grid_shimmer: SignalRank::Fixed(5), // presence (legacy)
+            hex_dots: SignalRank::Fixed(2),     // low-mids (legacy)
+        }
+    }
+}
+
 /// Parameters for BeatRings effect.
 pub struct RingParams {
     pub max_radius: f32,
@@ -109,6 +147,7 @@ pub struct VisualTheme {
     pub fft: FftParams,
     pub camera: CameraParams,
     pub effects: EffectFlags,
+    pub bindings: EffectBindings,
     pub piece_colors: Option<[[u8; 4]; 7]>,
 }
 
@@ -145,6 +184,7 @@ pub fn default_theme() -> VisualTheme {
             f.hex_background = false;
             f
         },
+        bindings: EffectBindings::default_bindings(),
         piece_colors: None,
     }
 }
@@ -183,6 +223,7 @@ pub fn water_theme() -> VisualTheme {
             f.fireworks = false;
             f
         },
+        bindings: EffectBindings::default_bindings(),
         piece_colors: Some([
             [100, 180, 255, 255], // I — light blue
             [ 60, 140, 220, 255], // O — medium blue
@@ -199,7 +240,25 @@ pub fn debug_theme() -> VisualTheme {
     let mut theme = default_theme();
     theme.name = "Debug";
     theme.effects = EffectFlags::all_off();
-    // Base visibility for debugging
+    // Base visibility + dynamic mapping test effects
     theme.effects.grid_lines = true;
+    theme.effects.fft_visualizer = true;
+    theme.effects.cube_glow = true;
+    theme.effects.ghost_piece = true;
+    theme.effects.active_piece_pulse = true;
+    theme.effects.beat_rings = true;
+    theme.effects.fireworks = true;
+    // Bindings: rings follow most active band, board pulse follows beat,
+    // fireworks follow second most active
+    theme.bindings = EffectBindings {
+        board_pulse: SignalRank::First,     // most rhythmic band → board depth pulse
+        cube_glow: SignalRank::Second,
+        beat_rings: SignalRank::First,      // most active band → rings
+        fireworks: SignalRank::Second,      // second most active → fireworks
+        particles: SignalRank::Third,
+        camera_sway: SignalRank::Fixed(1),
+        grid_shimmer: SignalRank::Fixed(5),
+        hex_dots: SignalRank::Fixed(2),
+    };
     theme
 }

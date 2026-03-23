@@ -26,10 +26,16 @@ pub struct App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() { return; }
-        let attrs = Window::default_attributes()
+        let mut attrs = Window::default_attributes()
             .with_title("RhythmGrid")
-            .with_inner_size(winit::dpi::LogicalSize::new(THEME.win_w, THEME.win_h))
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                self.world.saved_window_width,
+                self.world.saved_window_height,
+            ))
             .with_min_inner_size(winit::dpi::LogicalSize::new(800, 600));
+        if let (Some(x), Some(y)) = (self.world.saved_window_x, self.world.saved_window_y) {
+            attrs = attrs.with_position(winit::dpi::LogicalPosition::new(x, y));
+        }
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let gpu = GpuState::new(window.clone());
         self.gpu = Some(gpu);
@@ -38,10 +44,28 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                // Save window position on close
+                if let Some(w) = &self.window {
+                    if let Ok(pos) = w.outer_position() {
+                        self.world.saved_window_x = Some(pos.x);
+                        self.world.saved_window_y = Some(pos.y);
+                    }
+                }
+                self.world.save_settings();
+                event_loop.exit();
+            }
             WindowEvent::Resized(new_size) => {
                 self.pending_resize = Some((new_size.width, new_size.height));
                 self.resize_debounce = std::time::Instant::now();
+                // Track logical size for persistence
+                if let Some(w) = &self.window {
+                    let scale = w.scale_factor();
+                    self.world.logical_window_size = [
+                        (new_size.width as f64 / scale) as u32,
+                        (new_size.height as f64 / scale) as u32,
+                    ];
+                }
             }
             WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Pressed, .. }, .. } => {
                 self.world.demo_idle_timer = 0.0; // any key resets idle
@@ -81,6 +105,7 @@ impl ApplicationHandler for App {
                         if let Some(gpu) = &mut self.gpu {
                             gpu.resize(w, h);
                         }
+                        self.world.save_settings(); // persist new size
                     }
                 }
                 self.world.tick();

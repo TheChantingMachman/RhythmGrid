@@ -41,14 +41,16 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Occupied cells as translucent 3D cubes
+    // Occupied cells — glow per piece type, pulse from dynamic rank analysis
     let ef = &world.effect_flags;
+    let pulse_band = world.resolve_rank(world.bindings.board_pulse);
+    let glow_band = world.resolve_rank(world.bindings.cube_glow);
     for cell in &world.render_board.occupied {
-        let band = (cell.type_index as usize) % 7;
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.75;
         let (band_glow, depth) = if ef.cube_glow {
-            (world.bands_norm[band] * 2.0, cube_depth + world.band_beat_intensity[band] * 0.3)
+            (world.bands_norm[glow_band] * 2.0,
+             cube_depth + world.band_beat_intensity[pulse_band] * 0.3)
         } else {
             (0.0, cube_depth)
         };
@@ -295,7 +297,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     // Correct preview scale for window aspect ratio
     let theme_aspect = w / h;
     let aspect_corr = theme_aspect / world.window_aspect;
-    let preview_scale = 18.0;
+    let preview_scale = 36.0;
     let cube_half = 0.42;
     let preview_cx = np_x + 54.0;
     let preview_cy = np_y + 52.0;
@@ -384,7 +386,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         let held_color = rgba_to_f32(world.themed_piece_color(held.type_index));
         let held_cx = 66.0;
         let held_cy = np_y + 52.0;
-        let held_scale = 18.0;
+        let held_scale = 36.0;
 
         let mut held_center = [0.0f32; 3];
         for &(dr, dc) in &held_cells {
@@ -486,12 +488,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
                   &format!("COMBO {}", rs.combo_count), combo_col, 2.0);
     }
 
-    // Toast message (theme switch notification)
-    if world.toast_timer > 0.0 {
-        let ta = (world.toast_timer.min(1.0) * 255.0) as u8;
-        push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
-                  &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
-    }
+
 
     // Track queue display — positioned above audio controls
     // Use VolDown button screen rect as anchor for alignment
@@ -538,15 +535,26 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, vu_x, vu_y, "+", dim_col, 1.0);
 
     // Transport labels
-    let is_paused_lbl = if let Ok(audio) = world.audio.try_lock() { audio.paused } else { false };
+    let (is_paused_lbl, is_shuffled_lbl) = if let Ok(audio) = world.audio.try_lock() {
+        (audio.paused, audio.shuffled)
+    } else {
+        (false, false)
+    };
+    let shuffle_label = if is_shuffled_lbl { "SH*" } else { "SH" };
     let transport_labels = [
         (super::world::ButtonId::Back, "<<"),
         (super::world::ButtonId::PlayPause, if is_paused_lbl { ">" } else { "||" }),
         (super::world::ButtonId::Skip, ">>"),
-        (super::world::ButtonId::Shuffle, "SH"),
+        (super::world::ButtonId::Shuffle, shuffle_label),
     ];
     for (id, label) in transport_labels {
-        let col = if world.btn_hovered(id) { text_col } else { dim_col };
+        let col = if id == super::world::ButtonId::Shuffle && is_shuffled_lbl {
+            rgba_to_f32([100, 200, 255, 255]) // highlighted when active
+        } else if world.btn_hovered(id) {
+            text_col
+        } else {
+            dim_col
+        };
         let (lx, ly) = project_label(id, world);
         push_text(&mut verts, &mut indices, lx, ly, label, col, 1.0);
     }
@@ -630,6 +638,13 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             }
             v.color[3] *= opacity;
         }
+    }
+
+    // Analysis phase label (always visible, not affected by HUD fade)
+    if world.toast_timer > 0.0 && (world.fft_locked || world.track_time < 45.0) {
+        let ta = (world.toast_timer.min(1.0) * 200.0) as u8;
+        push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
+                  &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
     }
 
     (verts, indices)
