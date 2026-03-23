@@ -125,20 +125,45 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     push_slab_3d(&mut tv, &mut ti, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
     let vol_fill = rgba_to_f32([60, 100, 180, (220.0 * hud_a) as u8]);
     push_slab_3d(&mut tv, &mut ti, vol_bar_x, vol_y + 0.15, vol_bar_w * vol, vol_h, 0.3, vol_fill);
-    // Vol down button [-]
-    let vd_color = if world.btn_hovered(super::world::ButtonId::VolDown) {
-        rgba_to_f32([80, 60, 60, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut tv, &mut ti, vol_minus_x, vol_y, vol_btn_w, 0.5, 0.4, vd_color);
-    // Vol up button [+]
-    let vu_color = if world.btn_hovered(super::world::ButtonId::VolUp) {
-        rgba_to_f32([60, 80, 60, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 30, 50, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut tv, &mut ti, audio_x + 2.5, vol_y, vol_btn_w, 0.5, 0.4, vu_color);
+    // Vol down [-] — 3D extruded minus glyph
+    {
+        let btn = world.buttons.iter().find(|b| b.id == super::world::ButtonId::VolDown).unwrap();
+        let col = if btn.hovered {
+            rgba_to_f32([200, 140, 140, (255.0 * hud_a) as u8])
+        } else {
+            rgba_to_f32([160, 160, 200, (200.0 * hud_a) as u8])
+        };
+        let cx = btn.world_x + btn.world_w * 0.5;
+        let cy = btn.world_y + btn.world_h * 0.5;
+        let s = 0.15;
+        // Minus: horizontal bar
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - s, cy - s * 0.25], [cx + s, cy - s * 0.25],
+            [cx + s, cy + s * 0.25], [cx - s, cy + s * 0.25],
+        ], 0.0, 0.25, col);
+    }
+    // Vol up [+] — 3D extruded plus glyph
+    {
+        let btn = world.buttons.iter().find(|b| b.id == super::world::ButtonId::VolUp).unwrap();
+        let col = if btn.hovered {
+            rgba_to_f32([140, 200, 140, (255.0 * hud_a) as u8])
+        } else {
+            rgba_to_f32([160, 160, 200, (200.0 * hud_a) as u8])
+        };
+        let cx = btn.world_x + btn.world_w * 0.5;
+        let cy = btn.world_y + btn.world_h * 0.5;
+        let s = 0.15;
+        // Plus: horizontal bar
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - s, cy - s * 0.25], [cx + s, cy - s * 0.25],
+            [cx + s, cy + s * 0.25], [cx - s, cy + s * 0.25],
+        ], 0.0, 0.25, col);
+        // Plus: vertical bar
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - s * 0.25, cy - s], [cx + s * 0.25, cy - s],
+            [cx + s * 0.25, cy + s], [cx - s * 0.25, cy + s],
+        ], 0.0, 0.25, col);
+    }
 
     // Transport buttons: [<<] [>||] [>>] [SH]
     // Transport buttons: [<<] [>||] [>>] [SH]
@@ -243,14 +268,31 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Folder button (right side, below transport)
-    let fld = world.buttons.iter().find(|b| b.id == super::world::ButtonId::Folder).unwrap();
-    let fld_color = if fld.hovered {
-        rgba_to_f32([60, 80, 140, (240.0 * hud_a) as u8])
-    } else {
-        rgba_to_f32([30, 40, 70, (180.0 * hud_a) as u8])
-    };
-    push_slab_3d(&mut tv, &mut ti, fld.world_x, fld.world_y, fld.world_w, fld.world_h, 0.4, fld_color);
+    // Folder button — 3D extruded folder icon
+    {
+        let fld = world.buttons.iter().find(|b| b.id == super::world::ButtonId::Folder).unwrap();
+        let col = if fld.hovered {
+            rgba_to_f32([140, 160, 220, (255.0 * hud_a) as u8])
+        } else {
+            rgba_to_f32([100, 120, 180, (200.0 * hud_a) as u8])
+        };
+        let cx = fld.world_x + fld.world_w * 0.5;
+        let cy = fld.world_y + fld.world_h * 0.5;
+        let w = 0.385;
+        let h = 0.28;
+        let tab_w = w * 0.35; // tab width
+        let tab_h = h * 0.2;  // tab height
+        // Folder body (rectangle)
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - w, cy - h + tab_h], [cx + w, cy - h + tab_h],
+            [cx + w, cy + h], [cx - w, cy + h],
+        ], 0.0, 0.2, col);
+        // Tab (small rectangle on top-left)
+        push_extruded_shape(&mut tv, &mut ti, &[
+            [cx - w, cy - h], [cx - w + tab_w, cy - h],
+            [cx - w + tab_w, cy - h + tab_h], [cx - w, cy - h + tab_h],
+        ], 0.0, 0.2, col);
+    }
 
     // FFT visualizer (effect module)
     if ef.fft_visualizer {
@@ -576,12 +618,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
                   "T-SPIN", rgba_to_f32([255, 100, 255, ta]), 3.0);
     }
 
-    // Combo counter (only visible during active combo)
-    if ef.combo_text && rs.combo_count > 0 {
-        let combo_col = rgba_to_f32([255, 200, 60, 255]);
-        push_text(&mut verts, &mut indices, 12.0, stats_y + 114.0,
-                  &format!("COMBO {}", rs.combo_count), combo_col, 2.0);
-    }
+    // Combo counter rendered after HUD fade (always visible)
 
 
 
@@ -623,11 +660,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         (lx, ly)
     };
 
-    // Vol -/+ labels
-    let (vd_x, vd_y) = project_label(super::world::ButtonId::VolDown, world);
-    push_text(&mut verts, &mut indices, vd_x, vd_y, "-", dim_col, 1.0);
-    let (vu_x, vu_y) = project_label(super::world::ButtonId::VolUp, world);
-    push_text(&mut verts, &mut indices, vu_x, vu_y, "+", dim_col, 1.0);
+    // Vol -/+ labels removed — 3D glyphs rendered in scene pass
 
     // Transport labels removed — 3D icons rendered on button faces in scene pass
     // Shuffle state indicator (text below shuffle button)
@@ -637,10 +670,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         push_text(&mut verts, &mut indices, sx - 2.0, sy, "ON", rgba_to_f32([100, 200, 255, 255]), 1.0);
     }
 
-    // Folder label
-    let folder_col = if world.btn_hovered(super::world::ButtonId::Folder) { text_col } else { dim_col };
-    let (fl_x, fl_y) = project_label(super::world::ButtonId::Folder, world);
-    push_text(&mut verts, &mut indices, fl_x - 8.0, fl_y, "FOLDER", folder_col, 1.0);
+    // Folder label removed — 3D glyph rendered in scene pass
 
     // FFT lock label
     let lock_col = if world.fft_locked { text_col } else { dim_col };
@@ -733,6 +763,21 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
                       &world.toast_text, rgba_to_f32([200, 200, 200, ta]), 1.5);
         }
+    }
+
+    // Combo counter (always visible, not affected by HUD fade)
+    if ef.combo_text && rs.combo_count > 0 {
+        let intensity = (rs.combo_count as f32 * 0.15).min(1.0);
+        let combo_col = rgba_to_f32([
+            255,
+            (200.0 - intensity * 100.0) as u8,
+            (60.0 - intensity * 60.0) as u8,
+            (180.0 + intensity * 75.0) as u8,
+        ]);
+        let scale = 3.0 + rs.combo_count as f32 * 0.3;
+        push_text_embossed(&mut verts, &mut indices,
+            w / 2.0 - 50.0, h / 2.0 + 40.0,
+            &format!("COMBO {}", rs.combo_count), combo_col, scale.min(6.0));
     }
 
     (verts, indices)
