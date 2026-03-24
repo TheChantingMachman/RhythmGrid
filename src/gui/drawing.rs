@@ -303,6 +303,38 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
             [lx0, by0, iz0], [lx0, by0, iz1], [lx1, by1, iz1], [lx1, by1, iz0],
             [-sinm, -cosm, 0.0]);                                                      // bottom-left
     }
+
+    // Corner patches — single triangle fills each gap where 3 bevels meet.
+    // Per-vertex normals are axis-aligned; GPU interpolation approximates a sphere.
+    for &(sx, sy, sz) in &[
+        (1.0f32, 1.0, 1.0), (-1.0, 1.0, 1.0), (1.0, -1.0, 1.0), (-1.0, -1.0, 1.0),
+        (1.0, 1.0, -1.0), (-1.0, 1.0, -1.0), (1.0, -1.0, -1.0), (-1.0, -1.0, -1.0),
+    ] {
+        let ccx = if sx > 0.0 { ix1 } else { ix0 };
+        let ccy = if sy > 0.0 { iy0 } else { iy1 };
+        let ccz = if sz > 0.0 { iz1 } else { iz0 };
+
+        let tri: [([f32; 3], [f32; 3]); 3] = [
+            ([ccx + sx * b, ccy, ccz], [sx, 0.0, 0.0]),
+            ([ccx, ccy + sy * b, ccz], [0.0, sy, 0.0]),
+            ([ccx, ccy, ccz + sz * b], [0.0, 0.0, sz]),
+        ];
+
+        let base = verts.len() as u32;
+        for &(pos, normal) in &tri {
+            let pnx = ((pos[0] - x0) / (x1 - x0)).clamp(0.0, 1.0);
+            let pny = ((pos[1] - y1) / (y0 - y1)).clamp(0.0, 1.0);
+            let mut ao = 0.0f32;
+            if neighbors & 1 != 0 { ao += pny * pny; }
+            if neighbors & 2 != 0 { ao += (1.0 - pny) * (1.0 - pny); }
+            if neighbors & 4 != 0 { ao += (1.0 - pnx) * (1.0 - pnx); }
+            if neighbors & 8 != 0 { ao += pnx * pnx; }
+            let f = 1.0 - ao.min(1.0) * 0.3;
+            let c = [color[0] * f, color[1] * f, color[2] * f, color[3]];
+            verts.push(Vertex { position: pos, normal, color: c });
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2]);
+    }
 }
 
 /// 3D slab in world space — simplified box for dashboard elements.

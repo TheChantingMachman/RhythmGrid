@@ -59,11 +59,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let F = 0.04 + 0.96 * pow(1.0 - max(dot(n, half_dir), 0.0), 5.0);
     let spec = D * G * F / max(4.0 * ndotv * ndotl, 0.001);
 
-    // Subtle rim light — artistic edge glow independent of light direction
-    let rim = pow(1.0 - max(dot(n, view_dir), 0.0), 4.0) * 0.15;
+    // Environment reflection — procedural gradient sampled by reflection vector
+    let refl = reflect(-view_dir, n);
+    let env_y = refl.y * 0.5 + 0.5; // 0=down, 1=up
+    let env_base = mix(
+        vec3<f32>(0.02, 0.02, 0.06),  // dark floor
+        vec3<f32>(0.15, 0.20, 0.35),  // bright sky
+        smoothstep(0.0, 1.0, env_y)
+    );
+    // Warm horizon band
+    let horizon = exp(-16.0 * (env_y - 0.5) * (env_y - 0.5)) * vec3<f32>(0.12, 0.06, 0.02);
+    let env_color = env_base + horizon;
+    // Blend by fresnel — edges reflect more (dielectric)
+    let env_fresnel = 0.04 + 0.96 * pow(1.0 - ndotv, 5.0);
+    let reflection = env_color * env_fresnel * 0.8;
 
-    let brightness = ambient + diffuse + spec + rim;
-    return vec4<f32>(in.color.rgb * brightness, in.color.a);
+    // Subtle rim light — artistic edge glow independent of light direction
+    let rim = pow(1.0 - ndotv, 4.0) * 0.10;
+
+    let lit = in.color.rgb * (ambient + diffuse) + vec3<f32>(spec, spec, spec) + reflection;
+    return vec4<f32>(lit + in.color.rgb * rim, in.color.a);
 }
 "#;
 
