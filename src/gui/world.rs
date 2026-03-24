@@ -49,6 +49,8 @@ pub struct GameWorld {
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
     pub(super) drop_trails: Vec<DropTrail>,
+    pub(super) settle_cells: Vec<SettleCell>,
+    pub(super) shatter_fragments: Vec<ShatterFragment>,
     pub(super) bg_rings: Vec<BgRing>, // legacy — kept for level-up rings
     pub(super) beat_rings: BeatRings,
     pub(super) hex_background: HexBackground,
@@ -141,6 +143,19 @@ pub(super) struct ClearingCell {
 
 pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
+pub(super) struct ShatterFragment {
+    pub x: f32,
+    pub y: f32,
+    pub vx: f32,
+    pub vy: f32,
+    pub size: f32,
+    pub color: [f32; 4],
+    pub timer: f32,
+    pub max_life: f32,
+}
+
+pub(super) const SHATTER_DURATION: f32 = 0.6;
+
 pub(super) struct DropTrail {
     pub col: i32,
     pub start_row: i32,   // where the piece was before drop
@@ -150,6 +165,14 @@ pub(super) struct DropTrail {
 }
 
 pub(super) const DROP_TRAIL_DURATION: f32 = 0.2;
+
+pub(super) struct SettleCell {
+    pub col: i32,
+    pub row: i32,
+    pub timer: f32,
+}
+
+pub(super) const SETTLE_DURATION: f32 = 0.15;
 
 impl GameWorld {
     /// Resolve a SignalRank to an actual band index using analysis results.
@@ -226,6 +249,8 @@ impl GameWorld {
             prev_beat: false,
             clearing_cells: Vec::new(),
             drop_trails: Vec::new(),
+            settle_cells: Vec::new(),
+            shatter_fragments: Vec::new(),
             bg_rings: Vec::new(),
             beat_rings: BeatRings::new(theme.rings),
             hex_background: HexBackground::new(theme.hex),
@@ -457,6 +482,22 @@ impl GameWorld {
         }
         self.drop_trails.retain(|t| t.timer > 0.0);
 
+        // Shatter fragment physics
+        for frag in &mut self.shatter_fragments {
+            frag.timer -= dt as f32;
+            frag.x += frag.vx * dt as f32;
+            frag.y += frag.vy * dt as f32;
+            frag.vy += 8.0 * dt as f32; // gravity (positive = downward in row coords)
+            frag.vx *= 0.97; // drag
+        }
+        self.shatter_fragments.retain(|f| f.timer > 0.0);
+
+        // Settle animation decay
+        for cell in &mut self.settle_cells {
+            cell.timer -= dt as f32;
+        }
+        self.settle_cells.retain(|c| c.timer > 0.0);
+
         // Level up detection
         let current_level = level_for_lines(self.session.total_lines);
         if current_level > self.last_level {
@@ -577,6 +618,15 @@ impl GameWorld {
 
         match tick(&mut self.session, dt) {
             TickResult::PieceLocked { lines_cleared } => {
+                // Settle animation on the locked piece cells
+                let lock_cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
+                for &(dr, dc) in &lock_cells {
+                    let r = pre_piece.row + dr;
+                    let c = pre_piece.col + dc;
+                    if r >= 0 && r < HEIGHT as i32 {
+                        self.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
+                    }
+                }
                 if pre_is_t_spin {
                     self.t_spin_flash = 1.0;
                 }
@@ -586,6 +636,10 @@ impl GameWorld {
                     let piece_row = pre_piece.row + max_dr;
                     if self.effect_flags.line_clear_particles {
                         self.spawn_line_clear_particles(lines_cleared, piece_row);
+                    }
+                    // Shatter fragments for cleared rows (tick path)
+                    if self.effect_flags.clearing_flash {
+                        self.spawn_shatter_for_row_range(piece_row - lines_cleared as i32 + 1, lines_cleared);
                     }
                     if self.effect_flags.camera_shake {
                         self.camera.trigger_shake((lines_cleared as f32 * 0.3).min(1.0));
@@ -783,8 +837,10 @@ impl GameWorld {
                             self.session.grid.cells[r as usize][c as usize] = CellState::Occupied(piece_type as u32);
                         }
                     }
+                    let mut cleared_rows = Vec::new();
                     for row in 0..HEIGHT {
                         if self.session.grid.cells[row].iter().all(|c| *c != CellState::Empty) {
+                            cleared_rows.push(row as i32);
                             for col in 0..WIDTH {
                                 if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
                                     self.clearing_cells.push(ClearingCell {
@@ -796,6 +852,10 @@ impl GameWorld {
                                 }
                             }
                         }
+                    }
+                    // Shatter fragments for cleared rows (hard drop path)
+                    for &row in &cleared_rows {
+                        self.spawn_shatter_for_row_range(row, 1);
                     }
                     // Undo simulation
                     for &(dr, dc) in &cells {
@@ -822,6 +882,15 @@ impl GameWorld {
                                     timer: DROP_TRAIL_DURATION,
                                 });
                             }
+                        }
+                    }
+
+                    // Settle animation on landing cells
+                    for &(dr, dc) in &cells {
+                        let r = land_row + dr;
+                        let c = piece_col + dc;
+                        if r >= 0 && r < HEIGHT as i32 {
+                            self.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
                         }
                     }
 
@@ -901,6 +970,38 @@ impl GameWorld {
         };
         for _ in 0..lines {
             self.particles.spawn_line_clear(top_y, clear_height, bx, bw, color);
+        }
+    }
+
+    fn spawn_shatter_for_row_range(&mut self, top_row: i32, lines: u32) {
+        // Use a simple deterministic scatter based on cell position
+        let mut seed = (top_row as u32).wrapping_mul(31).wrapping_add(lines * 17);
+        let pseudo = |s: &mut u32| -> f32 {
+            *s = s.wrapping_mul(1103515245).wrapping_add(12345);
+            ((*s >> 16) & 0x7FFF) as f32 / 32767.0
+        };
+        for row in top_row..(top_row + lines as i32) {
+            if row < 0 || row >= HEIGHT as i32 { continue; }
+            for col in 0..WIDTH as i32 {
+                let cx = col as f32 + 0.5;
+                let cy = row as f32 + 0.5;
+                let frags = 3 + (pseudo(&mut seed) * 2.0) as u32; // 3-4 fragments per cell
+                for _ in 0..frags {
+                    let angle = pseudo(&mut seed) * std::f32::consts::TAU;
+                    let speed = 2.0 + pseudo(&mut seed) * 4.0;
+                    let size = 0.1 + pseudo(&mut seed) * 0.2;
+                    self.shatter_fragments.push(ShatterFragment {
+                        x: cx,
+                        y: cy,
+                        vx: angle.cos() * speed,
+                        vy: angle.sin() * speed,
+                        size,
+                        color: [1.0, 1.0, 1.0, 0.9],
+                        timer: SHATTER_DURATION,
+                        max_life: SHATTER_DURATION,
+                    });
+                }
+            }
         }
     }
 

@@ -78,7 +78,12 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         if r + 1 < HEIGHT && g[r+1][c] != CellState::Empty { nb |= 2; }
         if c > 0 && g[r][c-1] != CellState::Empty { nb |= 4; }
         if c + 1 < WIDTH && g[r][c+1] != CellState::Empty { nb |= 8; }
-        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow, nb);
+        // Check settle animation for this cell
+        let settle = world.settle_cells.iter()
+            .find(|s| s.col == cell.col && s.row == cell.row)
+            .map(|s| (s.timer / super::world::SETTLE_DURATION).clamp(0.0, 1.0))
+            .unwrap_or(0.0);
+        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow, nb, settle);
     }
 
     // Ghost piece
@@ -86,7 +91,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         for cell in &world.render_board.ghost {
             let base_color = world.themed_piece_color(cell.type_index);
             let ghost_color = rgba_to_f32([base_color[0], base_color[1], base_color[2], 40]);
-            push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0, 0);
+            push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0, 0, 0.0);
         }
     }
 
@@ -100,7 +105,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         } else {
             (0.0, cube_depth)
         };
-        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, active_depth, color, active_glow, 0);
+        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, active_depth, color, active_glow, 0, 0.0);
     }
 
     // Hard drop trails — translucent streaks from start to landing
@@ -116,7 +121,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
                 let fade = 1.0 - (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
                 let mut c = color;
                 c[3] = alpha * fade; // fade from top to bottom of trail
-                push_cube_3d(&mut tv, &mut ti, trail.col as f32, row as f32, cube_depth * 0.15, c, 0.0, 0);
+                push_cube_3d(&mut tv, &mut ti, trail.col as f32, row as f32, cube_depth * 0.15, c, 0.0, 0, 0.0);
             }
         }
     }
@@ -127,7 +132,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             if cell.row > 0 {
                 let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
                 color[3] = 0.08;
-                push_cube_3d(&mut tv, &mut ti, cell.col as f32, (cell.row - 1) as f32, cube_depth * 0.1, color, 0.0, 0);
+                push_cube_3d(&mut tv, &mut ti, cell.col as f32, (cell.row - 1) as f32, cube_depth * 0.1, color, 0.0, 0, 0.0);
             }
         }
     }
@@ -343,45 +348,19 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         world.fft_vis.render(&mut tv, &mut ti, &fft_ctx);
     }
 
-    // Per-cell clearing animations (shrinking bright cubes)
-    if ef.clearing_flash { for cell in &world.clearing_cells {
-        if cell.scale > 0.01 {
-            // Stay white throughout, fade alpha
-            let progress = 1.0 - (cell.timer / super::world::LINE_CLEAR_DURATION).max(0.0);
-            let alpha = (1.0 - progress).max(0.0);
-            let bright_color = [1.0, 1.0, 1.0, alpha];
-
-            // Render as a scaled cube centered on the cell
-            let cx = cell.col as f32 + 0.5;
-            let cy = cell.row as f32 + 0.5;
-            let half = cell.scale * 0.5;
-            let gap = 0.08 * cell.scale;
-            let x0 = cx - half + gap;
-            let x1 = cx + half - gap;
-            let y0 = -(cy - half + gap);
-            let y1 = -(cy + half - gap);
-            let z0 = 0.0;
-            let z1 = cube_depth * cell.scale;
-            let n_front = [0.0f32, 0.0, 1.0];
-
-            // Just front face + top face for dissolving cells (simpler, faster)
-            let base = tv.len() as u32;
-            tv.push(Vertex { position: [x0, y0, z1], normal: n_front, color: bright_color });
-            tv.push(Vertex { position: [x1, y0, z1], normal: n_front, color: bright_color });
-            tv.push(Vertex { position: [x1, y1, z1], normal: n_front, color: bright_color });
-            tv.push(Vertex { position: [x0, y1, z1], normal: n_front, color: bright_color });
-            ti.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-
-            let n_top = [0.0f32, 1.0, 0.0];
-            let top_color = [1.0, 1.0, 1.0, alpha * 0.8];
-            let base = tv.len() as u32;
-            tv.push(Vertex { position: [x0, y0, z1], normal: n_top, color: top_color });
-            tv.push(Vertex { position: [x0, y0, z0], normal: n_top, color: top_color });
-            tv.push(Vertex { position: [x1, y0, z0], normal: n_top, color: top_color });
-            tv.push(Vertex { position: [x1, y0, z1], normal: n_top, color: top_color });
-            ti.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+    // Shatter fragments — scattered mini-cubes from line clears
+    if ef.clearing_flash {
+        for frag in &world.shatter_fragments {
+            let life = (frag.timer / frag.max_life).clamp(0.0, 1.0);
+            let alpha = life * life; // quadratic fade
+            if alpha < 0.01 { continue; }
+            let s = frag.size * (0.5 + life * 0.5); // shrink as they die
+            let color = [frag.color[0], frag.color[1], frag.color[2], alpha * frag.color[3]];
+            push_slab_3d(&mut tv, &mut ti,
+                frag.x - s * 0.5, frag.y - s * 0.5,
+                s, s, s * 0.5, color);
         }
-    }}
+    }
 
     // HUD
     let (hv, hi) = build_hud(world);

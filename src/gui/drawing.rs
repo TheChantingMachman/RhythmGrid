@@ -73,12 +73,16 @@ pub fn push_panel(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
 /// `neighbors` bitmask for contact AO: 1=up, 2=down, 4=left, 8=right.
 pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                     col: f32, row: f32, depth: f32, color: [f32; 4],
-                    glow_boost: f32, neighbors: u8) {
+                    glow_boost: f32, neighbors: u8, settle: f32) {
     let gap = 0.08; // visible gap between cubes creates grid structure
-    let x0 = col + gap;
-    let x1 = col + 1.0 - gap;
-    let y0 = -row - gap;        // top of cell (y-up)
-    let y1 = -row - 1.0 + gap;  // bottom of cell
+    // Settle deformation: squish Y, widen X, shift down
+    let sq_y = settle * 0.12;
+    let sq_x = settle * 0.06;
+    let sq_drop = settle * 0.06;
+    let x0 = col + gap - sq_x * 0.5;
+    let x1 = col + 1.0 - gap + sq_x * 0.5;
+    let y0 = -row - gap - sq_y * 0.5 - sq_drop;        // top of cell (y-up)
+    let y1 = -row - 1.0 + gap + sq_y * 0.5 - sq_drop;  // bottom of cell
     let z0 = -depth * 0.5;      // back face (behind grid plane)
     let z1 = depth * 0.5;       // front face (in front of grid plane)
 
