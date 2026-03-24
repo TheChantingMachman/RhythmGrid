@@ -39,17 +39,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Directional light from upper-front-right
     let light_dir = normalize(vec3<f32>(0.3, 0.5, 0.8));
     let ambient = 0.25;
-    let diffuse = max(dot(n, light_dir), 0.0) * 0.55;
+    let ndotl = max(dot(n, light_dir), 0.0);
+    let diffuse = ndotl * 0.55;
 
     // Per-pixel view direction from camera position
     let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
     let half_dir = normalize(light_dir + view_dir);
-    let spec = pow(max(dot(n, half_dir), 0.0), 32.0) * 0.6; // HDR: can exceed 1.0
+    let ndotv = max(dot(n, view_dir), 0.001);
+    let ndoth = max(dot(n, half_dir), 0.0);
 
-    // Fresnel (Schlick approximation) — edges facing away from camera glow
-    let fresnel = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0) * 0.4; // HDR: brighter edges
+    // GGX specular (Cook-Torrance BRDF)
+    let roughness = 0.3;
+    let a = roughness * roughness;
+    let a2 = a * a;
+    let d = ndoth * ndoth * (a2 - 1.0) + 1.0;
+    let D = a2 / (3.14159 * d * d);
+    let k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+    let G = (ndotv / (ndotv * (1.0 - k) + k)) * (ndotl / (ndotl * (1.0 - k) + k));
+    let F = 0.04 + 0.96 * pow(1.0 - max(dot(n, half_dir), 0.0), 5.0);
+    let spec = D * G * F / max(4.0 * ndotv * ndotl, 0.001);
 
-    let brightness = ambient + diffuse + spec + fresnel;
+    // Subtle rim light — artistic edge glow independent of light direction
+    let rim = pow(1.0 - max(dot(n, view_dir), 0.0), 4.0) * 0.15;
+
+    let brightness = ambient + diffuse + spec + rim;
     return vec4<f32>(in.color.rgb * brightness, in.color.a);
 }
 "#;

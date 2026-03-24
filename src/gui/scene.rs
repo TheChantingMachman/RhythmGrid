@@ -2,7 +2,7 @@
 // Separated from world.rs to keep rendering logic isolated from game logic.
 
 use rhythm_grid::game::GameState;
-use rhythm_grid::grid::{WIDTH, HEIGHT};
+use rhythm_grid::grid::{CellState, WIDTH, HEIGHT};
 
 
 use super::drawing::*;
@@ -69,7 +69,16 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         } else {
             (0.0, cube_depth)
         };
-        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow);
+        // Contact AO: check grid neighbors (1=up, 2=down, 4=left, 8=right)
+        let r = cell.row as usize;
+        let c = cell.col as usize;
+        let g = &world.session.grid.cells;
+        let mut nb = 0u8;
+        if r > 0 && g[r-1][c] != CellState::Empty { nb |= 1; }
+        if r + 1 < HEIGHT && g[r+1][c] != CellState::Empty { nb |= 2; }
+        if c > 0 && g[r][c-1] != CellState::Empty { nb |= 4; }
+        if c + 1 < WIDTH && g[r][c+1] != CellState::Empty { nb |= 8; }
+        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow, nb);
     }
 
     // Ghost piece
@@ -77,7 +86,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         for cell in &world.render_board.ghost {
             let base_color = world.themed_piece_color(cell.type_index);
             let ghost_color = rgba_to_f32([base_color[0], base_color[1], base_color[2], 40]);
-            push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0);
+            push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0, 0);
         }
     }
 
@@ -91,7 +100,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         } else {
             (0.0, cube_depth)
         };
-        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, active_depth, color, active_glow);
+        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, active_depth, color, active_glow, 0);
     }
 
     // Grid lines (effect module)
