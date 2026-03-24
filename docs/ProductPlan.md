@@ -455,6 +455,11 @@ Current demo mode plays randomly. A smarter demo AI would:
 - **Beat-synced placement:** final drop/lock on the beat rather than arbitrary timing. Requires lookahead or buffered placement.
 - Pipeline-friendly: the AI decision logic (which piece where, when to drop) is testable and spec-able. Only the music-timing bridge lives in GUI code.
 
+### Preview/Hold piece overhaul (future)
+Two issues with the next-piece preview and held-piece display:
+- **Perspective warping bug:** pieces distort as they rotate due to perspective projection being applied at close range. The 3D preview uses the same perspective matrix as the board, but the preview cubes are much closer to the camera. Fix: render previews with an orthographic or less aggressive perspective, or project them in a separate viewport.
+- **Visual parity with board cubes:** preview/hold pieces use simplified rendering (basic cube faces, no bevels, no inner glow, no GGX lighting). They should match the board cube fidelity: full 12-edge bevels, inner glow, contact AO between piece cells, environment reflections, GGX specular. This is a significant rework of the preview rendering path in scene.rs — the current code manually builds rotated cube faces with painter's algorithm sorting, which would need to be replaced with push_cube_3d calls in a local coordinate space.
+
 ### Dynamic point lights (future)
 Firework bursts and line clears could cast momentary colored light onto nearby cubes:
 - Pass active flash positions + colors via a uniform buffer (e.g., up to 4 point lights)
