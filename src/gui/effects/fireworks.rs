@@ -13,8 +13,19 @@ struct Spark {
     color: [f32; 4],
 }
 
+struct BurstTrail {
+    x: f32, y: f32,
+    life: f32,
+    color: [f32; 4],
+}
+
 struct Burst {
     sparks: Vec<Spark>,
+    trails: Vec<BurstTrail>,
+    flash_x: f32,
+    flash_y: f32,
+    flash_timer: f32,
+    flash_color: [f32; 4],
 }
 
 // --- Multi-stage firework shells (rare dramatic events) ---
@@ -46,12 +57,13 @@ struct Shell {
 pub struct Fireworks {
     bursts: Vec<Burst>,
     shells: Vec<Shell>,
-    shell_cooldown: f32, // seconds until next shell can spawn
+    pub shell_cooldown: f32, // seconds until next shell can spawn
     rng: u64,
     prev_beat: [bool; 7],
     prev_flux: f32,
     pub trigger_band: Option<usize>, // None = any band (legacy), Some(n) = only band n
     pub shells_only: bool, // skip quick bursts, only spawn multi-stage shells
+    pub bursts_only: bool, // skip shells, only spawn quick bursts
 }
 
 fn rng_next(rng: &mut u64) -> f32 {
@@ -70,6 +82,7 @@ impl Fireworks {
             prev_flux: 0.0,
             trigger_band: None,
             shells_only: false,
+            bursts_only: false,
         }
     }
 }
@@ -95,20 +108,14 @@ impl AudioEffect for Fireworks {
                     let cy = -(rng_next(&mut self.rng).abs() * 24.0); // full visible height
                     let spark_count = 20 + (audio.bands_norm[band] * 20.0) as usize;
 
-                    // Color based on band — low=warm, high=cool
-                    let t = band as f32 / 6.0;
-                    let base_color = [
-                        1.0 - t * 0.6,      // red fades with frequency
-                        0.3 + t * 0.5,      // green rises
-                        0.2 + t * 0.8,      // blue rises
-                        0.9,
-                    ];
+                    // White bursts — clean HDR flash
+                    let base_color = [1.8, 1.8, 1.8, 0.9];
 
                     let mut sparks = Vec::with_capacity(spark_count);
                     for _ in 0..spark_count {
                         let angle = rng_next(&mut self.rng) * std::f32::consts::TAU;
-                        let speed = 2.6 + rng_next(&mut self.rng).abs() * 7.8;
-                        let life = 1.5 + rng_next(&mut self.rng).abs() * 3.0;
+                        let speed = 3.0 + rng_next(&mut self.rng).abs() * 7.0;
+                        let life = 0.3 + rng_next(&mut self.rng).abs() * 0.45; // snap decay
                         sparks.push(Spark {
                             x: cx,
                             y: cy,
@@ -119,27 +126,52 @@ impl AudioEffect for Fireworks {
                             color: base_color,
                         });
                     }
-                    self.bursts.push(Burst { sparks });
+                    // Flash at burst origin
+                    let flash_color = [
+                        base_color[0].min(1.0) * 0.5 + 0.5,
+                        base_color[1].min(1.0) * 0.5 + 0.5,
+                        base_color[2].min(1.0) * 0.5 + 0.5,
+                        1.0,
+                    ];
+                    self.bursts.push(Burst { sparks, trails: Vec::new(), flash_x: cx, flash_y: cy, flash_timer: 0.15, flash_color });
                 }
             }
             self.prev_beat[band] = is_beat;
         }
 
-        // Update all sparks
+        // Update all sparks + flash
         for burst in &mut self.bursts {
+            burst.flash_timer -= audio.dt;
             for spark in &mut burst.sparks {
                 spark.x += spark.vx * audio.dt;
                 spark.y += spark.vy * audio.dt;
                 spark.vy += 0.3 * audio.dt; // gentle droop
-                spark.vx *= 0.99;
-                spark.vy *= 0.99;
+                spark.vx *= 0.9975;
+                spark.vy *= 0.9975;
                 spark.life -= audio.dt;
+
+                // Drop trail particle at spark position
+                if spark.life > 0.0 && burst.trails.len() < 500 {
+                    let t = spark.life / spark.max_life;
+                    burst.trails.push(BurstTrail {
+                        x: spark.x, y: spark.y,
+                        life: 0.15 + t * 0.15,
+                        color: [spark.color[0] * 1.5, spark.color[1] * 1.5, spark.color[2] * 1.5, 0.8],
+                    });
+                }
             }
             burst.sparks.retain(|s| s.life > 0.0);
+
+            // Decay trails
+            for t in &mut burst.trails {
+                t.life -= audio.dt;
+            }
+            burst.trails.retain(|t| t.life > 0.0);
         }
-        self.bursts.retain(|b| !b.sparks.is_empty());
+        self.bursts.retain(|b| !b.sparks.is_empty() || !b.trails.is_empty() || b.flash_timer > 0.0);
 
         // --- Multi-stage shells ---
+        if self.bursts_only { self.shell_cooldown = 1.0; } else {
         self.shell_cooldown -= audio.dt;
 
         // Spawn shell on flux spike, strong bass, or any decent beat
@@ -149,14 +181,20 @@ impl AudioEffect for Fireworks {
         if self.shell_cooldown <= 0.0 && (flux_spike || strong_bass || any_strong) && self.shells.len() < 3 {
             let cx = rng_next(&mut self.rng) * 26.0 - 8.0; // wider spread: -8 to 18
             let start_y = 22.0; // below bottom of board (row 20 = bottom)
-            // Color: pick a vibrant hue
-            let hue = rng_next(&mut self.rng).abs();
-            let color = [
-                (hue * 6.0).sin().abs() * 0.5 + 0.5,
-                ((hue * 6.0) + 2.0).sin().abs() * 0.4 + 0.4,
-                ((hue * 6.0) + 4.0).sin().abs() * 0.5 + 0.5,
-                1.0,
+            // Color: random piece color (I=cyan, O=yellow, T=purple, S=green, Z=red, J=blue, L=orange)
+            let piece_colors: [[f32; 3]; 8] = [
+                [0.0, 1.0, 1.0],     // I - cyan
+                [1.0, 1.0, 0.0],     // O - yellow
+                [0.5, 0.0, 0.5],     // T - purple
+                [0.0, 1.0, 0.0],     // S - green
+                [1.0, 0.0, 0.0],     // Z - red
+                [0.0, 0.0, 1.0],     // J - blue
+                [1.0, 0.47, 0.0],    // L - orange
+                [1.0, 1.0, 1.0],     // white
             ];
+            let ci = (rng_next(&mut self.rng).abs() * 8.0) as usize % 8;
+            let pc = piece_colors[ci];
+            let color = [pc[0], pc[1], pc[2], 1.0];
             self.shells.push(Shell {
                 phase: ShellPhase::Launch,
                 x: cx, y: start_y,
@@ -171,6 +209,7 @@ impl AudioEffect for Fireworks {
             self.shell_cooldown = 3.0 + rng_next(&mut self.rng).abs() * 7.0; // 3-10s between shells
         }
         self.prev_flux = audio.flux;
+        } // end !bursts_only
 
         // Update shells (extract rng to avoid borrow conflict)
         let mut rng = self.rng;
@@ -268,8 +307,27 @@ impl AudioEffect for Fireworks {
         let z = -1.5; // behind board, in front of hex grid
 
         for burst in &self.bursts {
+            // Flash glow at burst origin
+            if burst.flash_timer > 0.0 {
+                let ft = (burst.flash_timer / 0.15).clamp(0.0, 1.0);
+                let flash_alpha = ft * ft * ft; // cubic — very fast snap
+                let flash_size = 0.5 + (1.0 - ft) * 0.8; // expands as it fades
+                let fc = [
+                    burst.flash_color[0] * 4.0, // bright HDR flash — heavy bloom
+                    burst.flash_color[1] * 4.0,
+                    burst.flash_color[2] * 4.0,
+                    flash_alpha,
+                ];
+                let base = verts.len() as u32;
+                verts.push(Vertex { position: [burst.flash_x - flash_size, burst.flash_y - flash_size, z], normal: n, color: fc });
+                verts.push(Vertex { position: [burst.flash_x + flash_size, burst.flash_y - flash_size, z], normal: n, color: fc });
+                verts.push(Vertex { position: [burst.flash_x + flash_size, burst.flash_y + flash_size, z], normal: n, color: fc });
+                verts.push(Vertex { position: [burst.flash_x - flash_size, burst.flash_y + flash_size, z], normal: n, color: fc });
+                indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            }
+
             for spark in &burst.sparks {
-                let alpha = (spark.life / spark.max_life).powf(0.7);
+                let alpha = (spark.life / spark.max_life).powf(0.4); // slower decay curve
                 let color = [
                     spark.color[0],
                     spark.color[1],
@@ -305,6 +363,19 @@ impl AudioEffect for Fireworks {
                     verts.push(Vertex { position: [spark.x - fx - nx, spark.y - fy - ny, z], normal: n, color });
                     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
                 }
+            }
+
+            // Burst trails — fading dots along spark paths
+            for t in &burst.trails {
+                let alpha = (t.life / 0.3).clamp(0.0, 1.0);
+                let s = 0.03;
+                let c = [t.color[0], t.color[1], t.color[2], t.color[3] * alpha * alpha];
+                let base = verts.len() as u32;
+                verts.push(Vertex { position: [t.x - s, t.y - s, z], normal: n, color: c });
+                verts.push(Vertex { position: [t.x + s, t.y - s, z], normal: n, color: c });
+                verts.push(Vertex { position: [t.x + s, t.y + s, z], normal: n, color: c });
+                verts.push(Vertex { position: [t.x - s, t.y + s, z], normal: n, color: c });
+                indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
         }
 

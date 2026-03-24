@@ -93,6 +93,7 @@ pub struct GameWorld {
     pub(super) energy_averages: [f32; 7],   // cached for debug dashboard
     pub(super) confidence_values: [f32; 7], // cached for debug dashboard
     pub(super) track_time: f64,               // seconds into current track
+    last_track_name: String,                 // detect track changes
     ranks_locked: bool,                      // true after analysis window
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
@@ -256,7 +257,7 @@ impl GameWorld {
             hex_background: HexBackground::new(theme.hex),
             fft_vis: FftVisualizer::new(theme.fft),
             grid_lines: GridLines::new(theme.grid),
-            fireworks: { let mut fw = Fireworks::new(); fw.shells_only = theme.name == "Debug"; fw },
+            fireworks: { let mut fw = Fireworks::new(); fw.bursts_only = theme.name == "Debug"; fw },
             effect_flags: theme.effects.clone(),
             piece_colors: theme.piece_colors,
             render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
@@ -284,6 +285,7 @@ impl GameWorld {
             energy_averages: [0.0; 7],
             confidence_values: [0.0; 7],
             track_time: 0.0,
+            last_track_name: String::new(),
             ranks_locked: false,
             danger_level: 0.0,
             level_up_flash: 0.0,
@@ -325,6 +327,23 @@ impl GameWorld {
         let mut got_beat = false;
         if let Ok(mut audio) = self.audio.try_lock() {
             audio.tick(dt as f32);
+
+            // Detect track change — reset all analysis state
+            if audio.track_name != self.last_track_name && !audio.track_name.is_empty() {
+                self.last_track_name = audio.track_name.clone();
+                self.track_time = 0.0;
+                self.ranks_locked = false;
+                self.rolling_energy = RollingEnergy::new(10.0, 60.0);
+                self.beat_confidence = BeatConfidence::new();
+                self.energy_averages = [0.0; 7];
+                self.confidence_values = [0.0; 7];
+                self.norm_ceil = [0.01; 7];
+                self.peak_bands = [0.0; 7];
+                self.bands_norm = [0.0; 7];
+                self.band_beat_intensity = [0.0; 7];
+                self.fireworks.shell_cooldown = 3.0; // allow shells on new track
+            }
+
             self.beat_intensity = audio.beat_intensity;
             self.amplitude = audio.amplitude;
             self.bass = audio.bass;
@@ -664,7 +683,7 @@ impl GameWorld {
         }
 
         // Demo mode: auto-play when idle
-        const DEMO_IDLE_THRESHOLD: f32 = 15.0; // seconds before demo activates
+        const DEMO_IDLE_THRESHOLD: f32 = 30.0; // seconds before demo activates
         self.demo_idle_timer += dt as f32;
         if self.demo_idle_timer >= DEMO_IDLE_THRESHOLD && !self.demo_mode {
             self.demo_mode = true;
@@ -733,7 +752,8 @@ impl GameWorld {
         self.fft_vis = FftVisualizer::new(theme.fft);
         self.grid_lines = GridLines::new(theme.grid);
         self.camera = CameraReactor::new(theme.camera);
-        self.fireworks.shells_only = theme.name == "Debug";
+        self.fireworks.shells_only = false;
+        self.fireworks.bursts_only = theme.name == "Debug";
         self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
         self.toast_timer = 2.0;
         self.save_settings();

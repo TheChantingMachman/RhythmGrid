@@ -455,6 +455,14 @@ Current demo mode plays randomly. A smarter demo AI would:
 - **Beat-synced placement:** final drop/lock on the beat rather than arbitrary timing. Requires lookahead or buffered placement.
 - Pipeline-friendly: the AI decision logic (which piece where, when to drop) is testable and spec-able. Only the music-timing bridge lives in GUI code.
 
+### Dynamic point lights (future)
+Firework bursts and line clears could cast momentary colored light onto nearby cubes:
+- Pass active flash positions + colors via a uniform buffer (e.g., up to 4 point lights)
+- Fragment shader computes per-pixel contribution from each point light (distance falloff)
+- Triggered by firework detonations, line clear flashes, T-spin events
+- Short-lived (0.1-0.2s) — flash effect, not sustained illumination
+- Would make burst flashes feel physically present rather than just overlaid
+
 ### Long-term roadmap
 1. **More themes** — 5-8 distinct visual personalities (neon, minimal, organic, retro, dark) to make adaptive theme selection meaningful
 2. **Adaptive theme selection** — auto-switch themes based on music energy (see above)
