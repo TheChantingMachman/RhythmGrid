@@ -256,7 +256,7 @@ impl GameWorld {
             hex_background: HexBackground::new(theme.hex),
             fft_vis: FftVisualizer::new(theme.fft),
             grid_lines: GridLines::new(theme.grid),
-            fireworks: Fireworks::new(),
+            fireworks: { let mut fw = Fireworks::new(); fw.shells_only = theme.name == "Debug"; fw },
             effect_flags: theme.effects.clone(),
             piece_colors: theme.piece_colors,
             render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
@@ -733,6 +733,7 @@ impl GameWorld {
         self.fft_vis = FftVisualizer::new(theme.fft);
         self.grid_lines = GridLines::new(theme.grid);
         self.camera = CameraReactor::new(theme.camera);
+        self.fireworks.shells_only = theme.name == "Debug";
         self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
         self.toast_timer = 2.0;
         self.save_settings();

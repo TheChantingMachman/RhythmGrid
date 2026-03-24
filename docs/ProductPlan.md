@@ -436,6 +436,37 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 - Motion trails: revisit intensity/duration, may need to dial down or add toggle
 - Overall: do a holistic tuning pass once all techniques are in place
 
+### Adaptive theme selection (future)
+Automatically select or blend visual themes based on the character of the playing music:
+- **Energy classification:** use rolling energy, beat confidence, and spectral centroid to categorize the current track (chill/ambient, mid-energy, high-energy/aggressive)
+- **Theme tagging:** each theme gets an energy profile tag (e.g., Water=chill, Default=mid, Debug=high) and optional genre affinity
+- **Auto-switch:** when a new track starts or energy profile shifts significantly, cross-fade to the best-matching theme
+- **Hysteresis:** avoid rapid switching — require sustained energy shift (10-15s) before triggering a change
+- **Manual override:** player can lock a theme to disable auto-switching
+- Builds on existing RollingEnergy + BeatConfidence + spectral centroid infrastructure
+- Prerequisite: more themes with distinct energy personalities to make switching meaningful
+
+### Music-reactive demo AI (future)
+Current demo mode plays randomly. A smarter demo AI would:
+- **Pace to the music:** place pieces faster during high-energy sections, slower during breakdowns/ambient passages. Use rolling energy and BPM to set drop cadence.
+- **Intentional drama:** hold pieces at the top during quiet passages, then rapid-fire drops on beat drops. Build tension visually.
+- **Line clear choreography:** time line clears to coincide with strong beats or measure boundaries. Stack deliberately for multi-line clears on musical climaxes.
+- **Aggression tiers:** chill (slow, methodical, mostly singles/doubles) → mid (steady pace, occasional triples) → aggressive (fast placement, tetris chasing, T-spins)
+- **Beat-synced placement:** final drop/lock on the beat rather than arbitrary timing. Requires lookahead or buffered placement.
+- Pipeline-friendly: the AI decision logic (which piece where, when to drop) is testable and spec-able. Only the music-timing bridge lives in GUI code.
+
+### Long-term roadmap
+1. **More themes** — 5-8 distinct visual personalities (neon, minimal, organic, retro, dark) to make adaptive theme selection meaningful
+2. **Adaptive theme selection** — auto-switch themes based on music energy (see above)
+3. **Music-reactive demo AI** — demo mode that performs to the music (see above)
+4. **Background environments** — procedural or authored 3D scenes behind the board (underwater, space, city) per theme
+5. **Screen-space effects** — chromatic aberration, vignette, radial blur as post-process options
+6. **GPU particle system** — compute shader particles for orders of magnitude more density
+7. **SDF text rendering** — smooth scalable fonts replacing bitmap glyphs
+8. **Visualizer-only mode** — no game, just the music visualization filling the screen
+9. **Custom music analysis** — pre-scan tracks on load for BPM, section boundaries, energy map. Enables choreographed effects.
+10. **Platform expansion** — web (via wgpu/WebGPU), macOS, Steam release
+
 ---
 
 *This plan will be refined as open questions are resolved and architecture takes shape.*

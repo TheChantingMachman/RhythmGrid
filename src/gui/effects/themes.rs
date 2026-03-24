@@ -249,7 +249,7 @@ pub fn debug_theme() -> VisualTheme {
     theme.effects.cube_glow = true;
     theme.effects.ghost_piece = true;
     theme.effects.active_piece_pulse = true;
-    theme.effects.beat_rings = true;
+    theme.effects.beat_rings = false;
     theme.effects.fireworks = true;
     theme.color_grade = [1.0, 1.0, 1.0]; // neutral for debug
     // Bindings: rings follow most active band, board pulse follows beat,
