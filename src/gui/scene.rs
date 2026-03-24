@@ -103,6 +103,35 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, active_depth, color, active_glow, 0);
     }
 
+    // Hard drop trails — translucent streaks from start to landing
+    for trail in &world.drop_trails {
+        let progress = 1.0 - (trail.timer / super::world::DROP_TRAIL_DURATION).max(0.0);
+        let alpha = (1.0 - progress) * 0.35;
+        let mut color = rgba_to_f32(world.themed_piece_color(trail.type_index));
+        color[3] = alpha;
+        // Cap trail length to 6 rows near the landing point
+        let trail_start = trail.start_row.max(trail.end_row - 6);
+        for row in trail_start..trail.end_row {
+            if row >= 0 && row < HEIGHT as i32 {
+                let fade = 1.0 - (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
+                let mut c = color;
+                c[3] = alpha * fade; // fade from top to bottom of trail
+                push_cube_3d(&mut tv, &mut ti, trail.col as f32, row as f32, cube_depth * 0.15, c, 0.0, 0);
+            }
+        }
+    }
+
+    // Subtle fall ghost — faint echo one row behind the active piece (level 5+)
+    if world.session.state == GameState::Playing && world.render_status.level >= 5 {
+        for cell in &world.render_board.active {
+            if cell.row > 0 {
+                let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
+                color[3] = 0.08;
+                push_cube_3d(&mut tv, &mut ti, cell.col as f32, (cell.row - 1) as f32, cube_depth * 0.1, color, 0.0, 0);
+            }
+        }
+    }
+
     // Grid lines (effect module)
     if ef.grid_lines {
         use super::effects::AudioEffect;

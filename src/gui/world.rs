@@ -48,6 +48,7 @@ pub struct GameWorld {
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
+    pub(super) drop_trails: Vec<DropTrail>,
     pub(super) bg_rings: Vec<BgRing>, // legacy — kept for level-up rings
     pub(super) beat_rings: BeatRings,
     pub(super) hex_background: HexBackground,
@@ -140,6 +141,16 @@ pub(super) struct ClearingCell {
 
 pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
 
+pub(super) struct DropTrail {
+    pub col: i32,
+    pub start_row: i32,   // where the piece was before drop
+    pub end_row: i32,     // where it landed
+    pub type_index: u32,
+    pub timer: f32,
+}
+
+pub(super) const DROP_TRAIL_DURATION: f32 = 0.2;
+
 impl GameWorld {
     /// Resolve a SignalRank to an actual band index using analysis results.
     pub fn resolve_rank(&self, rank: themes::SignalRank) -> usize {
@@ -214,6 +225,7 @@ impl GameWorld {
             particles: ParticleSystem::new(),
             prev_beat: false,
             clearing_cells: Vec::new(),
+            drop_trails: Vec::new(),
             bg_rings: Vec::new(),
             beat_rings: BeatRings::new(theme.rings),
             hex_background: HexBackground::new(theme.hex),
@@ -438,6 +450,12 @@ impl GameWorld {
             cell.scale = 1.0 - progress; // shrink to 0
         }
         self.clearing_cells.retain(|c| c.timer > 0.0);
+
+        // Drop trail decay
+        for trail in &mut self.drop_trails {
+            trail.timer -= dt as f32;
+        }
+        self.drop_trails.retain(|t| t.timer > 0.0);
 
         // Level up detection
         let current_level = level_for_lines(self.session.total_lines);
@@ -785,6 +803,25 @@ impl GameWorld {
                         let c = piece_col + dc;
                         if r >= 0 && r < HEIGHT as i32 && c >= 0 && c < WIDTH as i32 {
                             self.session.grid.cells[r as usize][c as usize] = CellState::Empty;
+                        }
+                    }
+
+                    // Spawn drop trails per piece cell (column streak from start to land)
+                    let start_row = self.session.active_piece.row;
+                    if land_row > start_row {
+                        for &(dr, dc) in &cells {
+                            let col = piece_col + dc;
+                            let sr = start_row + dr;
+                            let er = land_row + dr;
+                            if col >= 0 && col < WIDTH as i32 {
+                                self.drop_trails.push(DropTrail {
+                                    col,
+                                    start_row: sr,
+                                    end_row: er,
+                                    type_index: piece_type as u32,
+                                    timer: DROP_TRAIL_DURATION,
+                                });
+                            }
                         }
                     }
 

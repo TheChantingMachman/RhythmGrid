@@ -417,16 +417,24 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 | Schlick fresnel | Very high | Low | ~5 shader lines, `dot(normal, viewDir)`. Single biggest visual upgrade. |
 | Rounded cube geometry | High | Moderate | Beveled edges catch specular highlights. Combined with fresnel = gem look. |
 | Color grading / LUT | High | Low | Post-process color curve per theme. Instant cinematic feel. |
-| HDR + tonemap | High | Moderate | Float color space, brighter highlights without wash-out. |
-| Fake subsurface scattering | Medium | Low | Tint back faces with transmitted front color. Cheap inner glow. |
-| Emissive per-pixel | Medium | Moderate | Different surface areas glow differently. Patterns, center vs edge. |
+| HDR + tonemap | High | Moderate | **Done.** Float color space, ACES tonemapping. |
+| Fake subsurface scattering | Medium | Low | **Done.** Back-face brightening scaled by darkness. |
+| Inner glow (geometry) | Medium | Moderate | **Done.** HDR emissive cube inside translucent shell. |
+| GGX specular | High | Low | **Done.** Cook-Torrance BRDF replaces Blinn-Phong. |
+| Full bevel (12 edges + corners) | High | Moderate | **Done.** All edges rounded with corner patches. |
+| Contact AO | Medium | Low | **Done.** Per-vertex darkening from neighbor bitmask. |
+| Environment reflection | Medium | Low | **Done.** Procedural gradient sampled by reflection vector. |
+| Motion trails | Medium | Low | **Done.** Hard drop streak + subtle fall ghost. |
 | Normal mapping | Medium | Moderate | Fake surface detail. Needs UV coords + texture. |
-| SSAO | Medium | Hard | Darkens creases where cubes meet. Depth and grounding. |
-| Environment mapping | Medium | Hard | Cubes reflect surroundings (cubemap or SSR). |
 | Soft particles | Low | Moderate | Particles fade near surfaces instead of hard-clip. |
 | Depth of field | Low | Hard | Background blur, focus on play area. |
-| Motion blur | Low | Hard | Fast pieces leave streaks. |
 | Volumetric lighting | Low | Hard | God rays, light shafts. |
+
+### Visual tuning backlog
+- Cube brightness balance: inner glow + env reflection + specular stack can run hot — revisit multipliers
+- AO on camera-away corners looks a touch dark — may reduce AO strength or raise ambient
+- Motion trails: revisit intensity/duration, may need to dial down or add toggle
+- Overall: do a holistic tuning pass once all techniques are in place
 
 ---
 
