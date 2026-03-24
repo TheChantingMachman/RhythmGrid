@@ -125,7 +125,16 @@ impl AudioState {
 
     fn reset_for_new_track(&mut self, name: &str) {
         self.beat_detector = BeatDetector::new();
+        self.multi_beat_detector = MultiBeatDetector::new();
+        self.flux_detector = SpectralFluxDetector::new();
         self.elapsed_secs = 0.0;
+        self.amplitude = 0.0;
+        self.beat_intensity = 0.0;
+        self.bands = [0.0; 7];
+        self.band_beats = [false; 7];
+        self.centroid = 0.0;
+        self.flux = 0.0;
+        self.fft_buffer.clear();
         self.track_name = name.to_string();
     }
 }
