@@ -12,8 +12,17 @@ struct Star {
     twinkle_phase: f32,
 }
 
+struct BgStar {
+    x: f32,
+    y: f32,
+    brightness: f32,
+    twinkle_phase: f32,
+    size: f32,
+}
+
 pub struct Starfield {
     stars: Vec<Star>,
+    bg_stars: Vec<BgStar>,  // distant static/slow background layer
     rng: u64,
     speed: f32,           // smoothed flight speed
     beat_flash: f32,      // 1.0 on beat, decays
@@ -40,15 +49,29 @@ impl Starfield {
         for _ in 0..STAR_COUNT {
             stars.push(Self::spawn_star(&mut rng));
         }
+        // Background stars — scattered across a wide area, barely moving
+        let mut bg_stars = Vec::with_capacity(300);
+        for _ in 0..300 {
+            let angle = rng_next(&mut rng) * std::f32::consts::TAU;
+            let dist = rng_next(&mut rng).abs().sqrt() * SPREAD * 1.2;
+            bg_stars.push(BgStar {
+                x: CENTER_X + angle.cos() * dist,
+                y: CENTER_Y + angle.sin() * dist,
+                brightness: 0.2 + rng_next(&mut rng).abs() * 0.4,
+                twinkle_phase: rng_next(&mut rng).abs() * std::f32::consts::TAU,
+                size: 0.008 + rng_next(&mut rng).abs() * 0.015,
+            });
+        }
         Starfield {
             stars,
+            bg_stars,
             rng,
             speed: 0.0,
             beat_flash: 0.0,
             warp_level: 0.0,
             warp_flash: 0.0,
             energy_smooth: 0.0,
-            warp_threshold: 0.44, // tunable: 0.0 = always warp, 1.0 = never warp
+            warp_threshold: 0.44,
         }
     }
 
@@ -132,6 +155,27 @@ impl AudioEffect for Starfield {
                 star.twinkle_phase = rng_next(&mut self.rng).abs() * std::f32::consts::TAU;
             }
         }
+
+        // Background stars — twinkle + drift during warp
+        for bg in &mut self.bg_stars {
+            bg.twinkle_phase += audio.dt * 1.5;
+            // During warp, bg stars expand outward like a slow travel layer
+            if self.warp_level > 0.1 {
+                let dx = bg.x - CENTER_X;
+                let dy = bg.y - CENTER_Y;
+                let dist = (dx * dx + dy * dy).sqrt().max(0.01);
+                let expand = self.warp_level * 2.0 * audio.dt;
+                bg.x += (dx / dist) * expand;
+                bg.y += (dy / dist) * expand;
+                // Respawn if too far out
+                if dist > SPREAD * 1.2 {
+                    let angle = rng_next(&mut self.rng) * std::f32::consts::TAU;
+                    let d = 2.0 + rng_next(&mut self.rng).abs() * 6.0;
+                    bg.x = CENTER_X + angle.cos() * d;
+                    bg.y = CENTER_Y + angle.sin() * d;
+                }
+            }
+        }
     }
 
     fn render(&self, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, _ctx: &RenderContext) {
@@ -151,7 +195,28 @@ impl AudioEffect for Starfield {
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
 
+        // Background stars — distant, nearly static during cruise, normal travel during warp
+        let z_bg = -3.5; // behind everything including main stars
+        for bg in &self.bg_stars {
+            let twinkle = 0.6 + 0.4 * bg.twinkle_phase.sin();
+            let alpha = bg.brightness * twinkle * (0.4 + w * 0.4); // brighter during warp
+            let color = [0.6, 0.65, 0.8, alpha.min(0.8)];
+            let s = bg.size;
+            let base = verts.len() as u32;
+            verts.push(Vertex { position: [bg.x - s, bg.y - s, z_bg], normal: n, color, uv: [-1.0, -1.0] });
+            verts.push(Vertex { position: [bg.x + s, bg.y - s, z_bg], normal: n, color, uv: [1.0, -1.0] });
+            verts.push(Vertex { position: [bg.x + s, bg.y + s, z_bg], normal: n, color, uv: [1.0, 1.0] });
+            verts.push(Vertex { position: [bg.x - s, bg.y + s, z_bg], normal: n, color, uv: [-1.0, 1.0] });
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+
+        // Main traveling stars — skip 20% during warp to reduce noise
+        let mut skip_counter = 0u32;
         for star in &self.stars {
+            if w > 0.5 {
+                skip_counter += 1;
+                if skip_counter % 2 == 0 { continue; } // skip every other star (~50% culled)
+            }
             let dist = (star.x * star.x + star.y * star.y).sqrt();
 
             // Size: near + distant from center = larger, warp makes everything brighter
