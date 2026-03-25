@@ -27,6 +27,7 @@ pub struct AudioFrame {
 }
 
 /// Rendering context — board geometry and window info.
+#[allow(dead_code)]
 pub struct RenderContext {
     pub board_width: f32,
     pub board_height: f32,
@@ -39,6 +40,7 @@ pub struct RenderContext {
 
 /// Which render pass an effect targets.
 #[derive(Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum RenderPass {
     Opaque,
     Transparent,
@@ -48,6 +50,7 @@ pub enum RenderPass {
 /// A visual effect module driven by audio data.
 pub trait AudioEffect {
     /// Which render pass this effect's geometry belongs to.
+    #[allow(dead_code)]
     fn pass(&self) -> RenderPass;
 
     /// Update internal state from the current audio frame.

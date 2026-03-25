@@ -418,30 +418,6 @@ pub fn push_extruded_shape(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     }
 }
 
-pub fn push_grid_line_v(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
-                        x: f32, height: f32, color: [f32; 4], thickness: f32) {
-    let w = thickness;
-    let n = [0.0f32, 0.0, 1.0];
-    let base = verts.len() as u32;
-    verts.push(Vertex { position: [x - w, 0.0, 0.0], normal: n, color, uv: [0.0, 0.0] });
-    verts.push(Vertex { position: [x + w, 0.0, 0.0], normal: n, color, uv: [0.0, 0.0] });
-    verts.push(Vertex { position: [x + w, -height, 0.0], normal: n, color, uv: [0.0, 0.0] });
-    verts.push(Vertex { position: [x - w, -height, 0.0], normal: n, color, uv: [0.0, 0.0] });
-    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-}
-
-pub fn push_grid_line_h(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
-                        y: f32, width: f32, color: [f32; 4], thickness: f32) {
-    let w = thickness;
-    let n = [0.0f32, 0.0, 1.0];
-    let base = verts.len() as u32;
-    verts.push(Vertex { position: [0.0, y - w, 0.0], normal: n, color, uv: [0.0, 0.0] });
-    verts.push(Vertex { position: [width, y - w, 0.0], normal: n, color, uv: [0.0, 0.0] });
-    verts.push(Vertex { position: [width, y + w, 0.0], normal: n, color, uv: [0.0, 0.0] });
-    verts.push(Vertex { position: [0.0, y + w, 0.0], normal: n, color, uv: [0.0, 0.0] });
-    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-}
-
 pub fn push_text(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                  x: f32, y: f32, text: &str, color: [f32; 4], scale: f32) {
     for (i, ch) in text.chars().enumerate() {

@@ -12,7 +12,6 @@ use rhythm_grid::input;
 
 use super::input_bridge::winit_to_rg;
 use super::renderer::GpuState;
-use super::theme::THEME;
 use super::world::GameWorld;
 
 pub struct App {

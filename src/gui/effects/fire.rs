@@ -5,10 +5,8 @@ use super::{AudioEffect, AudioFrame, RenderContext, RenderPass};
 use crate::gui::drawing::Vertex;
 
 struct Ember {
-    x: f32,
+    origin_x: f32,
     y: f32,
-    origin_x: f32, // spawn x for sinusoidal offset
-    vx: f32,
     vy: f32,
     life: f32,
     max_life: f32,
@@ -23,9 +21,8 @@ struct Ember {
 }
 
 struct GlowBlob {
-    x: f32,
-    y: f32,
     origin_x: f32,
+    y: f32,
     vy: f32,
     life: f32,
     max_life: f32,
@@ -87,10 +84,8 @@ impl AudioEffect for Fire {
             let speed = 1.4 + rng_next(&mut self.rng).abs() * 2.0 + self.intensity * 1.2;
 
             self.embers.push(Ember {
-                x,
-                y: -3.0 + rng_next(&mut self.rng).abs() * 1.0, // start below visible board
                 origin_x: x,
-                vx: rng_next(&mut self.rng) * 0.3,
+                y: -3.0 + rng_next(&mut self.rng).abs() * 1.0, // start below visible board
                 vy: speed,
                 life,
                 max_life: life,
@@ -107,7 +102,6 @@ impl AudioEffect for Fire {
 
         // Update embers
         for e in &mut self.embers {
-            e.x += e.vx * audio.dt;
             e.y += e.vy * audio.dt;
             e.life -= audio.dt;
             e.heat = (e.heat - audio.dt * 0.4).max(0.0);
@@ -127,9 +121,8 @@ impl AudioEffect for Fire {
             let size = 0.5 + rng_next(&mut self.rng).abs() * 1.5 + self.intensity * 0.6;
 
             self.blobs.push(GlowBlob {
-                x,
-                y: -3.0 + rng_next(&mut self.rng).abs() * 1.0, // start below visible board
                 origin_x: x,
+                y: -3.0 + rng_next(&mut self.rng).abs() * 1.0, // start below visible board
                 vy: speed,
                 life,
                 max_life: life,

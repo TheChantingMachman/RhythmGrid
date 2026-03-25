@@ -136,7 +136,8 @@ pub(super) struct BgRing {
     pub color: [f32; 4],
 }
 
-/// Per-cell clearing animation
+/// Per-cell clearing animation (fields used for spawn tracking; rendering replaced by shatter)
+#[allow(dead_code)]
 pub(super) struct ClearingCell {
     pub col: i32,
     pub row: i32,

@@ -67,6 +67,7 @@ pub enum SignalRank {
 /// Maps effects to analysis ranks. The runtime resolves ranks to actual
 /// band indices based on rolling_energy + beat_confidence analysis.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct EffectBindings {
     pub board_pulse: SignalRank,
     pub cube_glow: SignalRank,

@@ -112,10 +112,6 @@ impl Uniforms {
             camera_pos: [0.0, 0.0, 16.0, 0.0],
         }
     }
-
-    pub fn from_mat(m: [[f32; 4]; 4]) -> Self {
-        Uniforms { view_proj: m, camera_pos: [0.0, 0.0, 16.0, 0.0] }
-    }
 }
 
 // --- Matrix math ---
