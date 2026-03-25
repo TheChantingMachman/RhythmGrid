@@ -10,6 +10,7 @@ pub mod themes;
 pub mod fireworks;
 pub mod fire;
 pub mod starfield;
+pub mod aurora;
 
 use super::drawing::Vertex;
 

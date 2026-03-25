@@ -59,6 +59,7 @@ pub struct GameWorld {
     pub(super) fireworks: Fireworks,
     pub(super) fire: super::effects::fire::Fire,
     pub(super) starfield: super::effects::starfield::Starfield,
+    pub(super) aurora: super::effects::aurora::Aurora,
     pub(super) effect_flags: themes::EffectFlags,
     pub(super) danger_level: f32,
     pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
@@ -262,6 +263,7 @@ impl GameWorld {
             fireworks: { let mut fw = Fireworks::new(); fw.bursts_only = theme.name == "Debug"; fw },
             fire: super::effects::fire::Fire::new(),
             starfield: super::effects::starfield::Starfield::new(),
+            aurora: super::effects::aurora::Aurora::new(),
             effect_flags: theme.effects.clone(),
             piece_colors: theme.piece_colors,
             render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
@@ -600,6 +602,9 @@ impl GameWorld {
         }
         if ef.starfield {
             self.starfield.update(&self.audio_frame);
+        }
+        if ef.aurora {
+            self.aurora.update(&self.audio_frame);
         }
         if ef.camera_sway { self.camera.update(&self.audio_frame); }
 

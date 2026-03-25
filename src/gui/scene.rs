@@ -60,6 +60,9 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         if world.effect_flags.starfield {
             world.starfield.render(&mut tv, &mut ti, &fx_ctx);
         }
+        if world.effect_flags.aurora {
+            world.aurora.render(&mut tv, &mut ti, &fx_ctx);
+        }
     }
 
     // Occupied cells — glow per piece type, pulse from dynamic rank analysis
