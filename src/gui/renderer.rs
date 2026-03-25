@@ -15,21 +15,31 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) world_pos: vec3<f32>,
+    @location(3) uv: vec2<f32>,
 };
 
 @vertex
-fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec4<f32>) -> VertexOutput {
+fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec4<f32>, @location(3) uv: vec2<f32>) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = u.view_proj * vec4<f32>(position, 1.0);
     out.color = color;
     out.normal = normal;
     out.world_pos = position;
+    out.uv = uv;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
+
+    // Soft particle: radial falloff from quad center (uv = -1..1)
+    if (in.uv.x != 0.0 || in.uv.y != 0.0) {
+        let dist = length(in.uv);
+        if (dist > 1.0) { discard; }
+        let soft = 1.0 - dist * dist; // quadratic falloff — bright center, soft edges
+        return vec4<f32>(in.color.rgb, in.color.a * soft);
+    }
 
     // Skip lighting for HUD elements (normal = 0,0,1 and z near 0)
     if (n.z > 0.99 && in.world_pos.z < 0.1) {

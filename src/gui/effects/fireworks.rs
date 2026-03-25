@@ -319,10 +319,10 @@ impl AudioEffect for Fireworks {
                     flash_alpha,
                 ];
                 let base = verts.len() as u32;
-                verts.push(Vertex { position: [burst.flash_x - flash_size, burst.flash_y - flash_size, z], normal: n, color: fc });
-                verts.push(Vertex { position: [burst.flash_x + flash_size, burst.flash_y - flash_size, z], normal: n, color: fc });
-                verts.push(Vertex { position: [burst.flash_x + flash_size, burst.flash_y + flash_size, z], normal: n, color: fc });
-                verts.push(Vertex { position: [burst.flash_x - flash_size, burst.flash_y + flash_size, z], normal: n, color: fc });
+                verts.push(Vertex { position: [burst.flash_x - flash_size, burst.flash_y - flash_size, z], normal: n, color: fc, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [burst.flash_x + flash_size, burst.flash_y - flash_size, z], normal: n, color: fc, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [burst.flash_x + flash_size, burst.flash_y + flash_size, z], normal: n, color: fc, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [burst.flash_x - flash_size, burst.flash_y + flash_size, z], normal: n, color: fc, uv: [0.0, 0.0] });
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
 
@@ -342,10 +342,10 @@ impl AudioEffect for Fireworks {
                 if speed < 0.01 {
                     // Dot for stationary sparks
                     let base = verts.len() as u32;
-                    verts.push(Vertex { position: [spark.x - half_w, spark.y - half_w, z], normal: n, color });
-                    verts.push(Vertex { position: [spark.x + half_w, spark.y - half_w, z], normal: n, color });
-                    verts.push(Vertex { position: [spark.x + half_w, spark.y + half_w, z], normal: n, color });
-                    verts.push(Vertex { position: [spark.x - half_w, spark.y + half_w, z], normal: n, color });
+                    verts.push(Vertex { position: [spark.x - half_w, spark.y - half_w, z], normal: n, color, uv: [0.0, 0.0] });
+                    verts.push(Vertex { position: [spark.x + half_w, spark.y - half_w, z], normal: n, color, uv: [0.0, 0.0] });
+                    verts.push(Vertex { position: [spark.x + half_w, spark.y + half_w, z], normal: n, color, uv: [0.0, 0.0] });
+                    verts.push(Vertex { position: [spark.x - half_w, spark.y + half_w, z], normal: n, color, uv: [0.0, 0.0] });
                     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
                 } else {
                     // Streak aligned to velocity
@@ -357,10 +357,10 @@ impl AudioEffect for Fireworks {
                     let fy = dy * half_len;
 
                     let base = verts.len() as u32;
-                    verts.push(Vertex { position: [spark.x - fx + nx, spark.y - fy + ny, z], normal: n, color });
-                    verts.push(Vertex { position: [spark.x + fx + nx, spark.y + fy + ny, z], normal: n, color });
-                    verts.push(Vertex { position: [spark.x + fx - nx, spark.y + fy - ny, z], normal: n, color });
-                    verts.push(Vertex { position: [spark.x - fx - nx, spark.y - fy - ny, z], normal: n, color });
+                    verts.push(Vertex { position: [spark.x - fx + nx, spark.y - fy + ny, z], normal: n, color, uv: [0.0, 0.0] });
+                    verts.push(Vertex { position: [spark.x + fx + nx, spark.y + fy + ny, z], normal: n, color, uv: [0.0, 0.0] });
+                    verts.push(Vertex { position: [spark.x + fx - nx, spark.y + fy - ny, z], normal: n, color, uv: [0.0, 0.0] });
+                    verts.push(Vertex { position: [spark.x - fx - nx, spark.y - fy - ny, z], normal: n, color, uv: [0.0, 0.0] });
                     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
                 }
             }
@@ -371,10 +371,10 @@ impl AudioEffect for Fireworks {
                 let s = 0.03;
                 let c = [t.color[0], t.color[1], t.color[2], t.color[3] * alpha * alpha];
                 let base = verts.len() as u32;
-                verts.push(Vertex { position: [t.x - s, t.y - s, z], normal: n, color: c });
-                verts.push(Vertex { position: [t.x + s, t.y - s, z], normal: n, color: c });
-                verts.push(Vertex { position: [t.x + s, t.y + s, z], normal: n, color: c });
-                verts.push(Vertex { position: [t.x - s, t.y + s, z], normal: n, color: c });
+                verts.push(Vertex { position: [t.x - s, t.y - s, z], normal: n, color: c, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [t.x + s, t.y - s, z], normal: n, color: c, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [t.x + s, t.y + s, z], normal: n, color: c, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [t.x - s, t.y + s, z], normal: n, color: c, uv: [0.0, 0.0] });
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
         }
@@ -388,10 +388,10 @@ impl AudioEffect for Fireworks {
                 let s = 0.08;
                 let c = [1.0, 0.95, 0.7, 1.0];
                 let base = verts.len() as u32;
-                verts.push(Vertex { position: [shell.x - s, -shell.y - s, z_shell], normal: n, color: c });
-                verts.push(Vertex { position: [shell.x + s, -shell.y - s, z_shell], normal: n, color: c });
-                verts.push(Vertex { position: [shell.x + s, -shell.y + s, z_shell], normal: n, color: c });
-                verts.push(Vertex { position: [shell.x - s, -shell.y + s, z_shell], normal: n, color: c });
+                verts.push(Vertex { position: [shell.x - s, -shell.y - s, z_shell], normal: n, color: c, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [shell.x + s, -shell.y - s, z_shell], normal: n, color: c, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [shell.x + s, -shell.y + s, z_shell], normal: n, color: c, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [shell.x - s, -shell.y + s, z_shell], normal: n, color: c, uv: [0.0, 0.0] });
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
 
@@ -412,10 +412,10 @@ impl AudioEffect for Fireworks {
                     let fy = dy * half_len;
 
                     let base = verts.len() as u32;
-                    verts.push(Vertex { position: [spark.x - fx + nx_s, -(spark.y - fy + ny_s), z_shell], normal: n, color });
-                    verts.push(Vertex { position: [spark.x + fx + nx_s, -(spark.y + fy + ny_s), z_shell], normal: n, color });
-                    verts.push(Vertex { position: [spark.x + fx - nx_s, -(spark.y + fy - ny_s), z_shell], normal: n, color });
-                    verts.push(Vertex { position: [spark.x - fx - nx_s, -(spark.y - fy - ny_s), z_shell], normal: n, color });
+                    verts.push(Vertex { position: [spark.x - fx + nx_s, -(spark.y - fy + ny_s), z_shell], normal: n, color, uv: [0.0, 0.0] });
+                    verts.push(Vertex { position: [spark.x + fx + nx_s, -(spark.y + fy + ny_s), z_shell], normal: n, color, uv: [0.0, 0.0] });
+                    verts.push(Vertex { position: [spark.x + fx - nx_s, -(spark.y + fy - ny_s), z_shell], normal: n, color, uv: [0.0, 0.0] });
+                    verts.push(Vertex { position: [spark.x - fx - nx_s, -(spark.y - fy - ny_s), z_shell], normal: n, color, uv: [0.0, 0.0] });
                     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
                 }
             }
@@ -426,10 +426,10 @@ impl AudioEffect for Fireworks {
                 let s = t.size * (0.5 + alpha * 0.5);
                 let color = [t.color[0], t.color[1], t.color[2], t.color[3] * alpha];
                 let base = verts.len() as u32;
-                verts.push(Vertex { position: [t.x - s, -t.y - s, z_shell], normal: n, color });
-                verts.push(Vertex { position: [t.x + s, -t.y - s, z_shell], normal: n, color });
-                verts.push(Vertex { position: [t.x + s, -t.y + s, z_shell], normal: n, color });
-                verts.push(Vertex { position: [t.x - s, -t.y + s, z_shell], normal: n, color });
+                verts.push(Vertex { position: [t.x - s, -t.y - s, z_shell], normal: n, color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [t.x + s, -t.y - s, z_shell], normal: n, color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [t.x + s, -t.y + s, z_shell], normal: n, color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [t.x - s, -t.y + s, z_shell], normal: n, color, uv: [0.0, 0.0] });
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
         }

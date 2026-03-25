@@ -8,6 +8,8 @@ pub mod fft_visualizer;
 pub mod grid_lines;
 pub mod themes;
 pub mod fireworks;
+pub mod fire;
+pub mod starfield;
 
 use super::drawing::Vertex;
 

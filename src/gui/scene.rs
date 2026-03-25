@@ -54,6 +54,12 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         if world.effect_flags.fireworks {
             world.fireworks.render(&mut tv, &mut ti, &fx_ctx);
         }
+        if world.effect_flags.fire {
+            world.fire.render(&mut tv, &mut ti, &fx_ctx);
+        }
+        if world.effect_flags.starfield {
+            world.starfield.render(&mut tv, &mut ti, &fx_ctx);
+        }
     }
 
     // Occupied cells — glow per piece type, pulse from dynamic rank analysis
@@ -64,8 +70,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.75;
         let (band_glow, depth) = if ef.cube_glow {
-            (world.bands_norm[glow_band] * 2.0,
-             cube_depth + world.band_beat_intensity[pulse_band] * 0.3)
+            (world.bands_norm[glow_band] * 1.5,
+             cube_depth + world.band_beat_intensity[pulse_band] * 0.22)
         } else {
             (0.0, cube_depth)
         };
@@ -101,7 +107,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.85;
         let (active_glow, active_depth) = if ef.active_piece_pulse {
-            (world.bands_norm[band] * 2.0, cube_depth + world.band_beat_intensity[band] * 0.3)
+            (world.bands_norm[band] * 1.5, cube_depth + world.band_beat_intensity[band] * 0.22)
         } else {
             (0.0, cube_depth)
         };
@@ -414,10 +420,10 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
             let (c1, s1) = (a1.cos(), a1.sin());
 
             let base = sv.len() as u32;
-            sv.push(Vertex { position: [ring_cx + c0 * inner_r, ring_cy + s0 * inner_r, ring_z], normal: ring_n, color: color_inner });
-            sv.push(Vertex { position: [ring_cx + c1 * inner_r, ring_cy + s1 * inner_r, ring_z], normal: ring_n, color: color_inner });
-            sv.push(Vertex { position: [ring_cx + c1 * outer_r, ring_cy + s1 * outer_r, ring_z], normal: ring_n, color: color_outer });
-            sv.push(Vertex { position: [ring_cx + c0 * outer_r, ring_cy + s0 * outer_r, ring_z], normal: ring_n, color: color_outer });
+            sv.push(Vertex { position: [ring_cx + c0 * inner_r, ring_cy + s0 * inner_r, ring_z], normal: ring_n, color: color_inner, uv: [0.0, 0.0] });
+            sv.push(Vertex { position: [ring_cx + c1 * inner_r, ring_cy + s1 * inner_r, ring_z], normal: ring_n, color: color_inner, uv: [0.0, 0.0] });
+            sv.push(Vertex { position: [ring_cx + c1 * outer_r, ring_cy + s1 * outer_r, ring_z], normal: ring_n, color: color_outer, uv: [0.0, 0.0] });
+            sv.push(Vertex { position: [ring_cx + c0 * outer_r, ring_cy + s0 * outer_r, ring_z], normal: ring_n, color: color_outer, uv: [0.0, 0.0] });
             si.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
         }
     }
@@ -524,7 +530,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             for &idx in ci {
                 let px = projected[idx];
                 let (nx, ny) = px_to_ndc(px[0], px[1], w, h);
-                verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc });
+                verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc, uv: [0.0, 0.0] });
             }
             indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
         }
@@ -600,7 +606,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
                 for &idx in ci {
                     let px = proj[idx];
                     let (nx, ny) = px_to_ndc(px[0], px[1], w, h);
-                    verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc });
+                    verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc, uv: [0.0, 0.0] });
                 }
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }

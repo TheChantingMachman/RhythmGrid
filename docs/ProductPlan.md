@@ -446,6 +446,14 @@ Automatically select or blend visual themes based on the character of the playin
 - Builds on existing RollingEnergy + BeatConfidence + spectral centroid infrastructure
 - Prerequisite: more themes with distinct energy personalities to make switching meaningful
 
+### Melodic drift signal (future, brainstorm)
+A slow-moving audio analysis signal that captures the meandering, non-rhythmic character of music — melody contour, harmonic center, or a smoothed spectral average that evolves over 5-20 second timescales. Not beat-driven or percussive. More like "where is the music wandering?"
+- Could derive from: heavily smoothed spectral centroid, rolling harmonic center of gravity, pitch class energy distribution, or a low-pass filtered version of the dominant frequency
+- Output: a slow 2D vector (direction + magnitude) that changes gradually, almost randomly
+- Use case: steer the starfield flight direction so you're not always flying straight. The field would gently curve and drift as the music's tonal character shifts. Quiet passages might spiral slowly, busy sections might carve wider arcs.
+- Could also drive: camera orbit drift, hex grid rotation bias, aurora flow direction, fog drift
+- Key quality: must feel organic and unpredictable, not mechanically tied to any one musical event
+
 ### Music-reactive demo AI (future)
 Current demo mode plays randomly. A smarter demo AI would:
 - **Pace to the music:** place pieces faster during high-energy sections, slower during breakdowns/ambient passages. Use rolling energy and BPM to set drop cadence.

@@ -57,6 +57,8 @@ pub struct GameWorld {
     pub(super) fft_vis: FftVisualizer,
     pub(super) grid_lines: GridLines,
     pub(super) fireworks: Fireworks,
+    pub(super) fire: super::effects::fire::Fire,
+    pub(super) starfield: super::effects::starfield::Starfield,
     pub(super) effect_flags: themes::EffectFlags,
     pub(super) danger_level: f32,
     pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
@@ -258,6 +260,8 @@ impl GameWorld {
             fft_vis: FftVisualizer::new(theme.fft),
             grid_lines: GridLines::new(theme.grid),
             fireworks: { let mut fw = Fireworks::new(); fw.bursts_only = theme.name == "Debug"; fw },
+            fire: super::effects::fire::Fire::new(),
+            starfield: super::effects::starfield::Starfield::new(),
             effect_flags: theme.effects.clone(),
             piece_colors: theme.piece_colors,
             render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
@@ -590,6 +594,12 @@ impl GameWorld {
         if ef.fireworks {
             self.fireworks.trigger_band = Some(self.resolve_rank(self.bindings.fireworks));
             self.fireworks.update(&self.audio_frame);
+        }
+        if ef.fire {
+            self.fire.update(&self.audio_frame);
+        }
+        if ef.starfield {
+            self.starfield.update(&self.audio_frame);
         }
         if ef.camera_sway { self.camera.update(&self.audio_frame); }
 
