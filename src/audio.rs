@@ -253,19 +253,12 @@ impl BeatDetector {
 const BAND_COUNT: usize = 7;
 const FREQ_MIN: u32 = 20;
 const FREQ_MAX: u32 = 20000;
-const BAND0_LOW: u32 = 20;
 const BAND0_HIGH: u32 = 60;
-const BAND1_LOW: u32 = 61;
 const BAND1_HIGH: u32 = 250;
-const BAND2_LOW: u32 = 251;
 const BAND2_HIGH: u32 = 500;
-const BAND3_LOW: u32 = 501;
 const BAND3_HIGH: u32 = 2000;
-const BAND4_LOW: u32 = 2001;
 const BAND4_HIGH: u32 = 4000;
-const BAND5_LOW: u32 = 4001;
 const BAND5_HIGH: u32 = 8000;
-const BAND6_LOW: u32 = 8001;
 const BAND6_HIGH: u32 = 20000;
 
 pub fn fft_bands(samples: &[f32], sample_rate: u32) -> [f32; 7] {

@@ -1,6 +1,6 @@
 // @spec-tags: core,audio,analysis
 // @invariants: fft_bands returns [f32; 7] with normalized energy in 7 bands (sub-bass, bass, low-mids, mids, upper-mids, presence, brilliance); edge cases return [0.0; 7]; pure tones route to correct band index; values in [0.0,1.0]
-// @build: 77
+// @build: 97
 
 use rhythm_grid::audio::fft_bands;
 use std::f32::consts::PI;

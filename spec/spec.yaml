@@ -370,7 +370,7 @@
   section: Audio
   description: 'Compute FFT frequency decomposition of audio samples. Takes a window of PCM samples and returns energy in 7 frequency bands. Boundaries are exclusive on the low end, inclusive on the high end (except sub-bass which includes its low bound). Band 0: sub-bass 20-60Hz, Band 1: bass 61-250Hz, Band 2: low-mids 251-500Hz, Band 3: mids 501-2000Hz, Band 4: upper-mids 2001-4000Hz, Band 5: presence 4001-8000Hz, Band 6: brilliance 8001-20000Hz. FFT bins whose center frequency falls below 20Hz or above 20000Hz are excluded. Each band is a normalized 0.0-1.0 value representing relative energy. Function fft_bands(samples: &[f32], sample_rate: u32) -> [f32; 7] returns an array in frequency order. Empty or all-zero input returns [0.0; 7]. Only define constants that are actually used in the implementation — remove any unused BAND*_LOW constants since only the HIGH boundaries are needed for bin assignment.'
   tags: [core, audio, analysis]
-  status: stale
+  status: implemented
   constants:
     band0_high: "60"
     band0_low: "20"
