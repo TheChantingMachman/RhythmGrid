@@ -243,6 +243,61 @@ pub fn water_theme() -> VisualTheme {
     }
 }
 
+pub fn space_theme() -> VisualTheme {
+    VisualTheme {
+        name: "Space",
+        color_grade: [0.85, 0.88, 1.15], // cold blue-purple
+        rings: RingParams {
+            max_radius: 22.0, base_life: 5.0,
+            color_r: 0.2, color_g: 0.1, color_b: 0.5, base_alpha: 0.2,
+        },
+        hex: HexParams {
+            dot_min_size: 0.03, dot_max_size: 0.12, base_speed: 0.08,
+            danger_speed_mult: 0.15,
+            base_r: 0.15, base_g: 0.08, base_b: 0.35, base_alpha: 0.03,
+            hex_rings: 5, ring_spacing: 3.2,
+        },
+        grid: GridParams {
+            base_r: 30.0, base_g: 25.0, base_b: 80.0,
+            base_thickness: 0.015, beat_thickness_add: 0.025,
+        },
+        fft: FftParams {
+            band_colors: [
+                [40, 10, 120], [60, 20, 160], [80, 40, 200],
+                [100, 60, 220], [140, 100, 255], [180, 140, 255], [220, 200, 255],
+            ],
+        },
+        camera: CameraParams {
+            sway_base: 0.12, sway_danger_add: 0.06,
+            jitter_x: 0.02, jitter_y: 0.015,
+            zoom_amount: 0.6, shake_decay: 1.0,
+        },
+        effects: {
+            let mut f = EffectFlags::all_on();
+            f.fire = false;
+            f.hex_background = false;
+            f.beat_rings = false;
+            f.fireworks = false;
+            f.particle_beat_pulse = false;
+            f.line_clear_particles = false;
+            // starfield + aurora are the stars of this theme
+            f.starfield = true;
+            f.aurora = true;
+            f
+        },
+        bindings: EffectBindings::default_bindings(),
+        piece_colors: Some([
+            [140, 120, 255, 255], // I — lavender
+            [180, 160, 255, 255], // O — light purple
+            [100,  80, 220, 255], // T — deep violet
+            [ 80, 200, 255, 255], // S — cyan
+            [200, 100, 255, 255], // Z — magenta
+            [ 50,  60, 180, 255], // J — dark blue
+            [120, 220, 255, 255], // L — ice blue
+        ]),
+    }
+}
+
 pub fn debug_theme() -> VisualTheme {
     let mut theme = default_theme();
     theme.name = "Debug";
