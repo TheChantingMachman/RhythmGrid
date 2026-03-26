@@ -128,8 +128,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.75;
         let (band_glow, depth) = if ef.cube_glow {
-            (world.bands_norm[glow_band] * 1.5,
-             cube_depth + world.band_beat_intensity[pulse_band] * 0.22)
+            (world.analysis.bands_norm[glow_band] * 1.5,
+             cube_depth + world.analysis.band_beat_intensity[pulse_band] * 0.22)
         } else {
             (0.0, cube_depth)
         };
@@ -165,7 +165,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.85;
         let (active_glow, active_depth) = if ef.active_piece_pulse {
-            (world.bands_norm[band] * 1.5, cube_depth + world.band_beat_intensity[band] * 0.22)
+            (world.analysis.bands_norm[band] * 1.5, cube_depth + world.analysis.band_beat_intensity[band] * 0.22)
         } else {
             (0.0, cube_depth)
         };
@@ -176,7 +176,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     {
         let next_color = rgba_to_f32(world.themed_piece_color(world.render_next.type_index));
         let band = (world.render_next.type_index as usize) % 7;
-        let glow = if ef.cube_glow { world.bands_norm[band] * 1.0 } else { 0.0 };
+        let glow = if ef.cube_glow { world.analysis.bands_norm[band] * 1.0 } else { 0.0 };
         render_preview_piece(
             &mut tv, &mut ti,
             &world.render_next.cells, next_color, cube_depth, glow,
@@ -189,7 +189,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     if let Some(ref held) = world.render_held {
         let held_color = rgba_to_f32(world.themed_piece_color(held.type_index));
         let band = (held.type_index as usize) % 7;
-        let glow = if ef.cube_glow { world.bands_norm[band] * 1.0 } else { 0.0 };
+        let glow = if ef.cube_glow { world.analysis.bands_norm[band] * 1.0 } else { 0.0 };
         render_preview_piece(
             &mut tv, &mut ti,
             &held.cells, held_color, cube_depth, glow,
@@ -729,15 +729,15 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             push_quad(&mut verts, &mut indices, px, by, pair_w, max_h, rgba_to_f32([20, 20, 40, 150]), 0.01);
 
             // Left bar: rolling energy average (blue/gold)
-            let avg_val = world.energy_averages[i].min(1.0);
+            let avg_val = world.analysis.energy_averages[i].min(1.0);
             let avg_h = avg_val * max_h;
-            let avg_col = if world.resolved_ranks.contains(&i) { rank_col } else {
+            let avg_col = if world.analysis.resolved_ranks.contains(&i) { rank_col } else {
                 rgba_to_f32([40, 80, 160, 220])
             };
             push_quad(&mut verts, &mut indices, px, by + max_h - avg_h, bar_w, avg_h, avg_col, 0.02);
 
             // Right bar: real-time band level (green)
-            let live_val = world.bands[i].min(1.0);
+            let live_val = world.analysis.bands[i].min(1.0);
             let live_h = live_val * max_h;
             push_quad(&mut verts, &mut indices, px + bar_w + 2.0, by + max_h - live_h, bar_w, live_h, live_col, 0.02);
 
@@ -755,15 +755,15 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             push_quad(&mut verts, &mut indices, px, by, pair_w, max_h, rgba_to_f32([20, 20, 40, 150]), 0.01);
 
             // Left bar: confidence (orange/gold)
-            let conf_val = world.confidence_values[i].min(1.0);
+            let conf_val = world.analysis.confidence_values[i].min(1.0);
             let conf_h = conf_val * max_h;
-            let conf_col = if world.resolved_ranks[0] == i { rank_col } else {
+            let conf_col = if world.analysis.resolved_ranks[0] == i { rank_col } else {
                 rgba_to_f32([160, 80, 40, 220])
             };
             push_quad(&mut verts, &mut indices, px, by + max_h - conf_h, bar_w, conf_h, conf_col, 0.02);
 
             // Right bar: real-time beat intensity (green)
-            let beat_val = world.band_beat_intensity[i].min(1.0);
+            let beat_val = world.analysis.band_beat_intensity[i].min(1.0);
             let beat_h = beat_val * max_h;
             push_quad(&mut verts, &mut indices, px + bar_w + 2.0, by + max_h - beat_h, bar_w, beat_h, live_col, 0.02);
 
@@ -772,7 +772,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
         // Resolved ranks display
         let ry = cy + max_h + 36.0;
-        let [r1, r2, r3] = world.resolved_ranks;
+        let [r1, r2, r3] = world.analysis.resolved_ranks;
         push_text(&mut verts, &mut indices, dx, ry,
             &format!("R1:{} R2:{} R3:{}", band_names[r1], band_names[r2], band_names[r3]),
             rank_col, 1.5);

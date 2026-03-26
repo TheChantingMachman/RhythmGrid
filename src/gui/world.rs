@@ -8,7 +8,6 @@ use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
-use rhythm_grid::audio::{RollingEnergy, BeatConfidence};
 use rhythm_grid::render::{piece_color, board_state, held_piece_state, next_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender, NextPieceRender};
 use super::audio_output::{self, AudioState};
 use super::camera::CameraReactor;
@@ -32,18 +31,7 @@ pub struct GameWorld {
     pub(super) preview_rotation: usize,
     preview_timer: f32,
     pub audio: Arc<Mutex<AudioState>>,
-    pub beat_intensity: f32,
-    pub amplitude: f32,
-    pub bass: f32,
-    pub mids: f32,
-    pub highs: f32,
-    pub(super) bands: [f32; 7],
-    pub(super) peak_bands: [f32; 7],   // slow decay — for visual peak hold indicator
-    pub(super) norm_ceil: [f32; 7],    // fast decay — normalization ceiling
-    pub(super) bands_norm: [f32; 7],   // each band normalized to its own ceiling (0-1)
-    pub(super) band_beat_intensity: [f32; 7], // per-band beat decay (1.0 on beat, decays)
-    pub(super) centroid: f32,         // spectral centroid 0-1 (dark↔bright)
-    pub(super) flux: f32,             // spectral flux (rate of spectral change)
+    pub analysis: super::audio_analysis::AudioAnalysis,
     pub(super) t_spin_flash: f32, // 1.0 on t-spin, decays to 0
     pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
@@ -89,16 +77,7 @@ pub struct GameWorld {
     pub saved_window_x: Option<i32>,
     pub saved_window_y: Option<i32>,
     pub logical_window_size: [u32; 2],
-    // Dynamic audio-visual mapping
-    rolling_energy: RollingEnergy,
-    beat_confidence: BeatConfidence,
     pub(super) bindings: themes::EffectBindings,
-    pub(super) resolved_ranks: [usize; 3],  // band indices for rank 1, 2, 3
-    pub(super) energy_averages: [f32; 7],   // cached for debug dashboard
-    pub(super) confidence_values: [f32; 7], // cached for debug dashboard
-    pub(super) track_time: f64,               // seconds into current track
-    last_track_name: String,                 // detect track changes
-    ranks_locked: bool,                      // true after analysis window
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -183,12 +162,7 @@ pub(super) const SETTLE_DURATION: f32 = 0.15;
 impl GameWorld {
     /// Resolve a SignalRank to an actual band index using analysis results.
     pub fn resolve_rank(&self, rank: themes::SignalRank) -> usize {
-        match rank {
-            themes::SignalRank::First => self.resolved_ranks[0],
-            themes::SignalRank::Second => self.resolved_ranks[1],
-            themes::SignalRank::Third => self.resolved_ranks[2],
-            themes::SignalRank::Fixed(band) => band.min(6),
-        }
+        self.analysis.resolve_rank(rank)
     }
 
     pub fn themed_piece_color(&self, type_index: u32) -> [u8; 4] {
@@ -240,18 +214,7 @@ impl GameWorld {
             preview_rotation: 0,
             preview_timer: 0.0,
             audio,
-            beat_intensity: 0.0,
-            amplitude: 0.0,
-            bass: 0.0,
-            mids: 0.0,
-            highs: 0.0,
-            bands: [0.0; 7],
-            peak_bands: [0.0; 7],
-            norm_ceil: [0.01; 7],
-            bands_norm: [0.0; 7],
-            band_beat_intensity: [0.0; 7],
-            centroid: 0.0,
-            flux: 0.0,
+            analysis: super::audio_analysis::AudioAnalysis::new(),
             t_spin_flash: 0.0,
             particles: ParticleSystem::new(),
             prev_beat: false,
@@ -289,15 +252,7 @@ impl GameWorld {
             saved_window_x: settings.window_x,
             saved_window_y: settings.window_y,
             logical_window_size: [settings.window_width, settings.window_height],
-            rolling_energy: RollingEnergy::new(10.0, 60.0),  // 10s window, ~60fps
-            beat_confidence: BeatConfidence::new(),
             bindings: theme.bindings.clone(),
-            resolved_ranks: [0, 1, 2],  // default: sub-bass, bass, low-mids
-            energy_averages: [0.0; 7],
-            confidence_values: [0.0; 7],
-            track_time: 0.0,
-            last_track_name: String::new(),
-            ranks_locked: false,
             danger_level: 0.0,
             level_up_flash: 0.0,
             last_level: 1,
@@ -334,127 +289,19 @@ impl GameWorld {
         let now = Instant::now();
         let dt = now.duration_since(self.last_tick).as_secs_f64();
 
-        // Pull audio state for rendering
-        let mut got_beat = false;
+        // Audio analysis pipeline
         if let Ok(mut audio) = self.audio.try_lock() {
-            audio.tick(dt as f32);
-
-            // Detect track change — reset all analysis state
-            if audio.track_name != self.last_track_name && !audio.track_name.is_empty() {
-                self.last_track_name = audio.track_name.clone();
-                self.track_time = 0.0;
-                self.ranks_locked = false;
-                self.rolling_energy = RollingEnergy::new(10.0, 60.0);
-                self.beat_confidence = BeatConfidence::new();
-                self.energy_averages = [0.0; 7];
-                self.confidence_values = [0.0; 7];
-                self.norm_ceil = [0.01; 7];
-                self.peak_bands = [0.0; 7];
-                self.bands_norm = [0.0; 7];
-                self.band_beat_intensity = [0.0; 7];
-                self.fireworks.shell_cooldown = 3.0; // allow shells on new track
+            if self.analysis.track_changed() {
+                self.fireworks.shell_cooldown = 3.0;
             }
-
-            self.beat_intensity = audio.beat_intensity;
-            self.amplitude = audio.amplitude;
-            self.bass = audio.bass;
-            self.mids = audio.mids;
-            self.highs = audio.highs;
-            self.bands = audio.bands;
-            self.centroid = audio.centroid;
-            self.flux = audio.flux;
-            for i in 0..7 {
-                if audio.band_beats[i] {
-                    self.band_beat_intensity[i] = 1.0;
-                }
-            }
-            audio.band_beats = [false; 7]; // clear after reading
-            got_beat = audio.beat_intensity > 0.9; // fresh beat
-
-            // Feed analysis trackers
-            self.rolling_energy.update(&self.bands);
-            self.beat_confidence.update(&[
-                self.band_beat_intensity[0] > 0.95,
-                self.band_beat_intensity[1] > 0.95,
-                self.band_beat_intensity[2] > 0.95,
-                self.band_beat_intensity[3] > 0.95,
-                self.band_beat_intensity[4] > 0.95,
-                self.band_beat_intensity[5] > 0.95,
-                self.band_beat_intensity[6] > 0.95,
-            ], self.track_time);
-            self.energy_averages = self.rolling_energy.averages();
-            self.confidence_values = self.beat_confidence.confidence();
+            self.analysis.update(&mut audio, dt);
         }
+        let got_beat = self.analysis.got_beat;
 
-        // Track time + two-phase rank resolution
-        // Phase 1: sample 0-7s, lock at 7s (catches songs that start strong)
-        // Phase 2: sample 30-45s, reapply at 45s (catches slow ramp-ups)
-        self.track_time += dt;
-        let band_names = ["SUB", "BASS", "LMID", "MID", "UMID", "PRES", "BRIL"];
-
-        // Resolve ranks from current analysis state
-        let resolve = |energy: &RollingEnergy, conf: &BeatConfidence| -> [usize; 3] {
-            let dominant = energy.dominant_bands(3);
-            let confidence = conf.confidence();
-            let rank1 = *dominant.iter()
-                .max_by(|&&a, &&b| confidence[a].partial_cmp(&confidence[b]).unwrap())
-                .unwrap_or(&0);
-            let others: Vec<usize> = dominant.iter().filter(|&&b| b != rank1).copied().collect();
-            let rank2 = others.first().copied().unwrap_or(1);
-            let rank3 = others.get(1).copied().unwrap_or(2);
-            [rank1, rank2, rank3]
-        };
-
-        // Phase labels
-        if self.track_time < 7.0 {
-            self.toast_text = format!("SAMPLING {:.0}S", 7.0 - self.track_time);
-            self.toast_timer = 2.0;
-        } else if self.track_time >= 30.0 && self.track_time < 45.0 {
-            self.toast_text = format!("RESAMPLING {:.0}S", 45.0 - self.track_time);
-            self.toast_timer = 2.0;
-        }
-
-        // Phase 1: first lock at 7s
-        if !self.ranks_locked && self.track_time > 7.0 {
-            self.resolved_ranks = resolve(&self.rolling_energy, &self.beat_confidence);
-            self.ranks_locked = true;
-            let [r1, r2, r3] = self.resolved_ranks;
-            self.toast_text = format!("MAPPED: {} {} {}",
-                band_names[r1], band_names[r2], band_names[r3]);
-            self.toast_timer = 3.0;
-        }
-
-        // Phase 2: reapply at 45s after 15s of fresh sampling
-        if self.track_time > 45.0 && self.track_time - dt <= 45.0 {
-            let new_ranks = resolve(&self.rolling_energy, &self.beat_confidence);
-            if new_ranks != self.resolved_ranks {
-                self.resolved_ranks = new_ranks;
-                let [r1, r2, r3] = self.resolved_ranks;
-                self.toast_text = format!("REMAPPED: {} {} {}",
-                    band_names[r1], band_names[r2], band_names[r3]);
-                self.toast_timer = 3.0;
-            }
-        }
-
-        // Peak hold (slow decay — for visual indicator on FFT bars)
-        let peak_decay = dt as f32 * 0.4;
-        // Normalization ceiling (fast decay — adapts to current song section)
-        let ceil_decay = dt as f32 * 0.05;
-        for i in 0..7 {
-            // Visual peak
-            self.peak_bands[i] = if self.bands[i] > self.peak_bands[i] {
-                self.bands[i]
-            } else {
-                (self.peak_bands[i] - peak_decay).max(self.bands[i])
-            };
-            // Normalization ceiling — snaps up instantly, decays slowly toward current level
-            if self.bands[i] > self.norm_ceil[i] {
-                self.norm_ceil[i] = self.bands[i];
-            } else {
-                self.norm_ceil[i] = (self.norm_ceil[i] - ceil_decay).max(0.01);
-            }
-            // Normalize
-            self.bands_norm[i] = (self.bands[i] / self.norm_ceil[i]).min(1.0);
+        // Propagate analysis toast to world toast
+        if let Some((text, duration)) = self.analysis.toast.take() {
+            self.toast_text = text;
+            self.toast_timer = duration;
         }
 
         // (effect modules updated below after AudioFrame is built)
@@ -476,11 +323,11 @@ impl GameWorld {
         let by = (h - bh) / 2.0;
         if self.effect_flags.particle_beat_pulse {
             for band in 4..6 {
-                if self.band_beat_intensity[band] > 0.95 {
+                if self.analysis.band_beat_intensity[band] > 0.95 {
                     self.particles.spawn_beat_pulse(bx, by, bw, bh, 0.6);
                 }
             }
-            if got_beat && !self.prev_beat && self.band_beat_intensity[4..6].iter().all(|&b| b < 0.95) {
+            if got_beat && !self.prev_beat && self.analysis.band_beat_intensity[4..6].iter().all(|&b| b < 0.95) {
                 self.particles.spawn_beat_pulse(bx, by, bw, bh, 1.0);
             }
         }
@@ -571,16 +418,7 @@ impl GameWorld {
         self.level_up_flash = (self.level_up_flash - dt as f32 * 1.5).max(0.0);
 
         // Build AudioFrame BEFORE decay so effects see fresh beat triggers
-        self.audio_frame = AudioFrame {
-            bands: self.bands,
-            bands_norm: self.bands_norm,
-            peak_bands: self.peak_bands,
-            band_beats: self.band_beat_intensity,
-            centroid: self.centroid,
-            flux: self.flux,
-            danger: self.danger_level,
-            dt: dt as f32,
-        };
+        self.audio_frame = self.analysis.audio_frame(self.danger_level, dt as f32);
 
         // Update all effect modules + camera (guarded by effect_flags)
         use super::effects::AudioEffect;
@@ -630,9 +468,7 @@ impl GameWorld {
         if ef.camera_sway { self.camera.update(&self.audio_frame); }
 
         // Decay AFTER effects have consumed the frame
-        for i in 0..7 {
-            self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 8.0).max(0.0);
-        }
+        self.analysis.decay_beats(dt as f32);
 
         // T-spin flash decay
         self.t_spin_flash = (self.t_spin_flash - dt as f32 * 1.0).max(0.0);

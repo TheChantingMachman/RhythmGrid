@@ -7,6 +7,7 @@ pub mod renderer;
 pub mod world;
 pub mod app;
 pub mod audio_output;
+pub mod audio_analysis;
 pub mod particles;
 pub mod effects;
 pub mod camera;
