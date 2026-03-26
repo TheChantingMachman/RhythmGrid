@@ -26,8 +26,7 @@ fn push_text_embossed(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
 }
 
 /// Render a tetromino piece in world space using push_cube_3d, with 3-axis rotation.
-/// Cells are centered at (0,0), rotated by (ax, ay, az), then translated to `world_pos`.
-/// Uses the same bevels, glow, and lighting as board pieces.
+/// OIT handles transparent face ordering — no sorting or culling needed.
 fn render_preview_piece(
     verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     cells: &[(i32, i32)], color: [f32; 4], depth: f32, glow_boost: f32,
@@ -35,7 +34,6 @@ fn render_preview_piece(
 ) {
     if cells.is_empty() { return; }
 
-    // Compute piece center for centering
     let mut cx = 0.0f32;
     let mut cy = 0.0f32;
     for &(dr, dc) in cells {
@@ -46,63 +44,37 @@ fn render_preview_piece(
     cy /= cells.len() as f32;
 
     let start_vert = verts.len();
-    let start_idx_count = indices.len();
 
-    // Render each cell centered at origin
     for &(dr, dc) in cells {
         let col = dc as f32 - cx;
         let row = dr as f32 - cy;
         push_cube_3d(verts, indices, col, row, depth, color, glow_boost, 0, 0.0);
     }
 
-    // 3-axis rotation matrices (X, then Y, then Z)
+    // 3-axis rotation + translation
     let (sx, cx_r) = (angles[0].sin(), angles[0].cos());
     let (sy, cy_r) = (angles[1].sin(), angles[1].cos());
     let (sz, cz) = (angles[2].sin(), angles[2].cos());
 
-    let rotate = |p: [f32; 3]| -> [f32; 3] {
-        // Rotate around X
+    for v in &mut verts[start_vert..] {
+        let p = v.position;
         let y1 = p[1] * cx_r - p[2] * sx;
         let z1 = p[1] * sx + p[2] * cx_r;
-        // Rotate around Y
         let x2 = p[0] * cy_r + z1 * sy;
         let z2 = -p[0] * sy + z1 * cy_r;
-        // Rotate around Z
         let x3 = x2 * cz - y1 * sz;
         let y3 = x2 * sz + y1 * cz;
-        [x3, y3, z2]
-    };
+        v.position = [x3 + world_pos[0], y3 + world_pos[1], z2 + world_pos[2]];
 
-    // Transform all vertices
-    for v in &mut verts[start_vert..] {
-        let rotated = rotate(v.position);
-        v.position = [
-            rotated[0] + world_pos[0],
-            rotated[1] + world_pos[1],
-            rotated[2] + world_pos[2],
-        ];
-        v.normal = rotate(v.normal);
+        let n = v.normal;
+        let ny1 = n[1] * cx_r - n[2] * sx;
+        let nz1 = n[1] * sx + n[2] * cx_r;
+        let nx2 = n[0] * cy_r + nz1 * sy;
+        let nz2 = -n[0] * sy + nz1 * cy_r;
+        let nx3 = nx2 * cz - ny1 * sz;
+        let ny3 = nx2 * sz + ny1 * cz;
+        v.normal = [nx3, ny3, nz2];
     }
-
-    // Cull back-facing triangles (camera looks along -Z in world space).
-    // For each triangle, check if its face normal points toward the camera (nz > 0).
-    // Use the first vertex's normal as a proxy for the triangle's face direction.
-    let mut kept_indices = Vec::new();
-    let idx_slice = &indices[start_idx_count..];
-    let mut i = 0;
-    while i + 2 < idx_slice.len() {
-        let v0 = idx_slice[i] as usize;
-        let n = &verts[v0].normal;
-        // Keep triangle if its normal has a positive Z component (faces camera)
-        if n[2] > -0.1 {
-            kept_indices.push(idx_slice[i]);
-            kept_indices.push(idx_slice[i + 1]);
-            kept_indices.push(idx_slice[i + 2]);
-        }
-        i += 3;
-    }
-    indices.truncate(start_idx_count);
-    indices.extend_from_slice(&kept_indices);
 }
 
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)

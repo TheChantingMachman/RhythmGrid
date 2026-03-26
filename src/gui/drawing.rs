@@ -114,17 +114,19 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
         let gz0 = z0 + depth * inset;
         let gz1 = z1 - depth * inset;
 
-        // HDR emissive color — white-shifted and boosted past 1.0 so bloom picks it up
-        let glow_mul = 1.2 + glow_boost * 0.5;
-        let wm = 0.3; // white mix
+        // HDR emissive color — tinted toward the piece color, subtle enough to
+        // read as a luminous core through OIT rather than a competing layer.
+        let glow_mul = 0.9 + glow_boost * 0.4;
+        let wm = 0.15; // reduced white mix — more colored, less blown-out
         let gc = [
             (color[0] * (1.0 - wm) + wm) * glow_mul,
             (color[1] * (1.0 - wm) + wm) * glow_mul,
             (color[2] * (1.0 - wm) + wm) * glow_mul,
-            0.7,
+            0.4, // lower opacity — blends subtly behind the outer shell
         ];
 
-        // Simple 6-face box (no bevels — inner core, not directly visible)
+        // Soft glow faces — each face uses soft particle UVs for radial falloff,
+        // creating a scattered/diffuse glow instead of a hard-edged inner box.
         let gfaces: &[([f32; 3], [[f32; 3]; 4])] = &[
             ([0.0, 0.0, 1.0],  [[gx0, gy0, gz1], [gx1, gy0, gz1], [gx1, gy1, gz1], [gx0, gy1, gz1]]),
             ([0.0, 0.0, -1.0], [[gx1, gy0, gz0], [gx0, gy0, gz0], [gx0, gy1, gz0], [gx1, gy1, gz0]]),
@@ -133,10 +135,11 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
             ([1.0, 0.0, 0.0],  [[gx1, gy0, gz1], [gx1, gy0, gz0], [gx1, gy1, gz0], [gx1, gy1, gz1]]),
             ([-1.0, 0.0, 0.0], [[gx0, gy0, gz0], [gx0, gy0, gz1], [gx0, gy1, gz1], [gx0, gy1, gz0]]),
         ];
+        let corner_uvs = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
         for (normal, corners) in gfaces {
             let base_idx = verts.len() as u32;
-            for &pos in corners {
-                verts.push(Vertex { position: pos, normal: *normal, color: gc, uv: [0.0, 0.0] });
+            for (ci, &pos) in corners.iter().enumerate() {
+                verts.push(Vertex { position: pos, normal: *normal, color: gc, uv: corner_uvs[ci] });
             }
             indices.extend_from_slice(&[base_idx, base_idx+1, base_idx+2, base_idx, base_idx+2, base_idx+3]);
         }

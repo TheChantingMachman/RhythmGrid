@@ -229,20 +229,173 @@ fn fs_bloom_composite(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+// OIT accumulation shader — same lighting as fs_main but outputs to two targets
+const OIT_SHADER: &str = r#"
+struct Uniforms { view_proj: mat4x4<f32>, camera_pos: vec4<f32> };
+@group(0) @binding(0) var<uniform> u: Uniforms;
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) world_pos: vec3<f32>,
+    @location(3) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec4<f32>, @location(3) uv: vec2<f32>) -> VertexOutput {
+    var out: VertexOutput;
+    out.clip_position = u.view_proj * vec4<f32>(position, 1.0);
+    out.color = color;
+    out.normal = normal;
+    out.world_pos = position;
+    out.uv = uv;
+    return out;
+}
+
+struct OitOutput {
+    @location(0) accum: vec4<f32>,
+    @location(1) revealage: vec4<f32>,
+};
+
+@fragment
+fn fs_oit(in: VertexOutput) -> OitOutput {
+    let n = normalize(in.normal);
+
+    // Soft particle: radial falloff
+    var base_color = in.color;
+    if (in.uv.x != 0.0 || in.uv.y != 0.0) {
+        let dist = length(in.uv);
+        if (dist > 1.0) { discard; }
+        let soft = 1.0 - dist * dist;
+        base_color = vec4<f32>(in.color.rgb, in.color.a * soft);
+    }
+
+    // Skip lighting for HUD elements
+    var lit = base_color;
+    if (!(n.z > 0.99 && in.world_pos.z < 0.1)) {
+        // Directional light
+        let light_dir = normalize(vec3<f32>(0.3, 0.5, 0.8));
+        let ambient = 0.25;
+        let ndotl = max(dot(n, light_dir), 0.0);
+        let diffuse = ndotl * 0.55;
+
+        let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
+        let half_dir = normalize(light_dir + view_dir);
+        let ndotv = max(dot(n, view_dir), 0.001);
+        let ndoth = max(dot(n, half_dir), 0.0);
+
+        // GGX specular
+        let roughness = 0.3;
+        let a = roughness * roughness;
+        let a2 = a * a;
+        let d = ndoth * ndoth * (a2 - 1.0) + 1.0;
+        let D = a2 / (3.14159 * d * d);
+        let k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+        let G = (ndotv / (ndotv * (1.0 - k) + k)) * (ndotl / (ndotl * (1.0 - k) + k));
+        let F = 0.04 + 0.96 * pow(1.0 - max(dot(n, half_dir), 0.0), 5.0);
+        let spec = D * G * F / max(4.0 * ndotv * ndotl, 0.001);
+
+        // Environment reflection
+        let refl = reflect(-view_dir, n);
+        let env_y = refl.y * 0.5 + 0.5;
+        let env_base = mix(
+            vec3<f32>(0.02, 0.02, 0.06),
+            vec3<f32>(0.15, 0.20, 0.35),
+            smoothstep(0.0, 1.0, env_y)
+        );
+        let horizon = exp(-16.0 * (env_y - 0.5) * (env_y - 0.5)) * vec3<f32>(0.12, 0.06, 0.02);
+        let env_color = env_base + horizon;
+        let env_fresnel = 0.04 + 0.96 * pow(1.0 - ndotv, 5.0);
+        let reflection = env_color * env_fresnel * 0.8;
+
+        let rim = pow(1.0 - ndotv, 4.0) * 0.10;
+        let rgb = base_color.rgb * (ambient + diffuse) + vec3<f32>(spec, spec, spec) + reflection + base_color.rgb * rim;
+        lit = vec4<f32>(rgb, base_color.a);
+    }
+
+    let alpha = lit.a;
+    // Depth-based weight using linear camera distance for better separation
+    // in our narrow depth range (camera at z~16, geometry at z~-3..1).
+    let cam_dist = length(u.camera_pos.xyz - in.world_pos);
+    let d_norm = clamp(cam_dist / 40.0, 0.0, 1.0); // normalize to ~0-1 range
+    let w = clamp(alpha * max(1e-2, 3e3 * pow(1.0 - d_norm, 4.0)), 1e-2, 3e3);
+
+    var out: OitOutput;
+    out.accum = vec4<f32>(lit.rgb * alpha * w, alpha * w);
+    out.revealage = vec4<f32>(alpha, 0.0, 0.0, 0.0);
+    return out;
+}
+"#;
+
+// OIT composite shader — blends accumulated transparency over the opaque scene
+const OIT_COMPOSITE_SHADER: &str = r#"
+@group(0) @binding(0) var accum_tex: texture_2d<f32>;
+@group(0) @binding(1) var reveal_tex: texture_2d<f32>;
+@group(0) @binding(2) var tex_sampler: sampler;
+
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_full(@builtin(vertex_index) idx: u32) -> VsOut {
+    var pos = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    var uv = array<vec2<f32>, 3>(
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(2.0, 1.0),
+        vec2<f32>(0.0, -1.0),
+    );
+    var out: VsOut;
+    out.pos = vec4<f32>(pos[idx], 0.0, 1.0);
+    out.uv = uv[idx];
+    return out;
+}
+
+@fragment
+fn fs_oit_composite(in: VsOut) -> @location(0) vec4<f32> {
+    let accum = textureSample(accum_tex, tex_sampler, in.uv);
+    let revealage = textureSample(reveal_tex, tex_sampler, in.uv).r;
+
+    // If no transparent fragments were written, revealage stays at 1.0 (fully transparent)
+    if (revealage >= 0.999) {
+        discard;
+    }
+
+    // Average color = accumulated premultiplied color / accumulated weight
+    let avg_color = accum.rgb / max(accum.a, 1e-5);
+
+    // Output with standard alpha blending over the opaque scene
+    return vec4<f32>(avg_color, 1.0 - revealage);
+}
+"#;
+
 const SAMPLE_COUNT: u32 = 4;
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const REVEALAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
 pub struct GpuState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    scene_pipeline: wgpu::RenderPipeline,         // opaque with depth write
-    scene_pipeline_transparent: wgpu::RenderPipeline, // depth read, no write
-    scene_pipeline_no_depth: wgpu::RenderPipeline, // HUD overlay, no depth
+    scene_pipeline: wgpu::RenderPipeline,          // opaque with depth write
+    oit_accum_pipeline: wgpu::RenderPipeline,       // OIT accumulation (dual targets)
+    oit_composite_pipeline: wgpu::RenderPipeline,   // OIT compositing (fullscreen quad)
+    scene_pipeline_no_depth: wgpu::RenderPipeline,  // HUD overlay, no depth
     msaa_texture: wgpu::TextureView,
     scene_texture: wgpu::TextureView,
     depth_texture: wgpu::TextureView,
+    oit_accum_msaa: wgpu::TextureView,
+    oit_accum_resolve: wgpu::TextureView,
+    oit_reveal_msaa: wgpu::TextureView,
+    oit_reveal_resolve: wgpu::TextureView,
+    oit_composite_bgl: wgpu::BindGroupLayout,
     bloom_pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     bloom_bind_group_layout: wgpu::BindGroupLayout,
@@ -392,19 +545,55 @@ impl GpuState {
             multiview: None, cache: None,
         });
 
-        // Transparent pipeline — depth read but no write + MSAA
-        let scene_pipeline_transparent = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scene_transparent"),
+        // OIT accumulation pipeline — dual render targets, depth read-only
+        let oit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("oit_shader"), source: wgpu::ShaderSource::Wgsl(OIT_SHADER.into()),
+        });
+        let oit_accum_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("oit_accum"),
             layout: Some(&scene_layout),
             vertex: wgpu::VertexState {
-                module: &scene_shader, entry_point: Some("vs_main"),
+                module: &oit_shader, entry_point: Some("vs_main"),
                 buffers: &[Vertex::desc()], compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &scene_shader, entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: HDR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL,
-                })],
+                module: &oit_shader, entry_point: Some("fs_oit"),
+                targets: &[
+                    // Target 0: accumulation (additive blend)
+                    Some(wgpu::ColorTargetState {
+                        format: HDR_FORMAT,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    // Target 1: revealage (multiplicative: dst *= (1 - src))
+                    Some(wgpu::ColorTargetState {
+                        format: REVEALAGE_FORMAT,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
@@ -412,6 +601,63 @@ impl GpuState {
                 depth_write_enabled: false,
                 ..depth_stencil_state
             }),
+            multisample: msaa_state,
+            multiview: None, cache: None,
+        });
+
+        // OIT composite pipeline — fullscreen quad, blends OIT result over opaque scene
+        let oit_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("oit_composite_shader"), source: wgpu::ShaderSource::Wgsl(OIT_COMPOSITE_SHADER.into()),
+        });
+        let oit_composite_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("oit_composite_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let oit_composite_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None, bind_group_layouts: &[&oit_composite_bgl], push_constant_ranges: &[],
+        });
+        let oit_composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("oit_composite"),
+            layout: Some(&oit_composite_layout),
+            vertex: wgpu::VertexState {
+                module: &oit_composite_shader, entry_point: Some("vs_full"),
+                buffers: &[], compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &oit_composite_shader, entry_point: Some("fs_oit_composite"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: HDR_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
             multisample: msaa_state,
             multiview: None, cache: None,
         });
@@ -466,6 +712,8 @@ impl GpuState {
         let msaa_texture = Self::create_msaa_texture(&device, &config);
         let scene_texture = Self::create_render_texture(&device, &config);
         let depth_texture = Self::create_depth_texture(&device, &config);
+        let (oit_accum_msaa, oit_accum_resolve) = Self::create_oit_accum_textures(&device, &config);
+        let (oit_reveal_msaa, oit_reveal_resolve) = Self::create_oit_reveal_textures(&device, &config);
 
         let bloom_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("bloom_uniforms"),
@@ -475,8 +723,10 @@ impl GpuState {
 
         GpuState {
             surface, device, queue, config,
-            scene_pipeline, scene_pipeline_transparent, scene_pipeline_no_depth,
+            scene_pipeline, oit_accum_pipeline, oit_composite_pipeline, scene_pipeline_no_depth,
             msaa_texture, scene_texture, depth_texture,
+            oit_accum_msaa, oit_accum_resolve, oit_reveal_msaa, oit_reveal_resolve,
+            oit_composite_bgl,
             bloom_pipeline, sampler, bloom_bind_group_layout: bind_group_layout,
             bloom_uniform_buffer, uniform_buffer, scene_bind_group,
         }
@@ -513,6 +763,38 @@ impl GpuState {
         }).create_view(&Default::default())
     }
 
+    fn create_oit_accum_textures(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> (wgpu::TextureView, wgpu::TextureView) {
+        let size = wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 };
+        let msaa = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("oit_accum_msaa"), size, mip_level_count: 1, sample_count: SAMPLE_COUNT,
+            dimension: wgpu::TextureDimension::D2, format: HDR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT, view_formats: &[],
+        }).create_view(&Default::default());
+        let resolve = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("oit_accum_resolve"), size, mip_level_count: 1, sample_count: 1,
+            dimension: wgpu::TextureDimension::D2, format: HDR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        }).create_view(&Default::default());
+        (msaa, resolve)
+    }
+
+    fn create_oit_reveal_textures(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> (wgpu::TextureView, wgpu::TextureView) {
+        let size = wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 };
+        let msaa = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("oit_reveal_msaa"), size, mip_level_count: 1, sample_count: SAMPLE_COUNT,
+            dimension: wgpu::TextureDimension::D2, format: REVEALAGE_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT, view_formats: &[],
+        }).create_view(&Default::default());
+        let resolve = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("oit_reveal_resolve"), size, mip_level_count: 1, sample_count: 1,
+            dimension: wgpu::TextureDimension::D2, format: REVEALAGE_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        }).create_view(&Default::default());
+        (msaa, resolve)
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.config.width = width.max(1);
         self.config.height = height.max(1);
@@ -520,6 +802,12 @@ impl GpuState {
         self.msaa_texture = Self::create_msaa_texture(&self.device, &self.config);
         self.scene_texture = Self::create_render_texture(&self.device, &self.config);
         self.depth_texture = Self::create_depth_texture(&self.device, &self.config);
+        let (am, ar) = Self::create_oit_accum_textures(&self.device, &self.config);
+        self.oit_accum_msaa = am;
+        self.oit_accum_resolve = ar;
+        let (rm, rr) = Self::create_oit_reveal_textures(&self.device, &self.config);
+        self.oit_reveal_msaa = rm;
+        self.oit_reveal_resolve = rr;
     }
 
     pub fn aspect_ratio(&self) -> f32 {
@@ -607,20 +895,32 @@ impl GpuState {
             self.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        // Pass 2: Transparent 3D scene (depth read ON, write OFF)
+        // Pass 2: OIT Accumulation (transparent geometry → accum + revealage targets)
         if !transparent_indices.is_empty() {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("scene_transparent"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.msaa_texture,
-                        resolve_target: Some(&self.scene_texture),
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
+                    label: Some("oit_accum"),
+                    color_attachments: &[
+                        // Target 0: accumulation (clear to black/zero)
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.oit_accum_msaa,
+                            resolve_target: Some(&self.oit_accum_resolve),
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                        // Target 1: revealage (clear to white = fully transparent)
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.oit_reveal_msaa,
+                            resolve_target: Some(&self.oit_reveal_resolve),
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                    ],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &self.depth_texture,
                         depth_ops: Some(wgpu::Operations {
@@ -631,11 +931,42 @@ impl GpuState {
                     }),
                     ..Default::default()
                 });
-                pass.set_pipeline(&self.scene_pipeline_transparent);
+                pass.set_pipeline(&self.oit_accum_pipeline);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
                 pass.set_vertex_buffer(0, trans_vb.slice(..));
                 pass.set_index_buffer(trans_ib.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..transparent_indices.len() as u32, 0, 0..1);
+            }
+            self.queue.submit(std::iter::once(encoder.finish()));
+
+            // Pass 2.5: OIT Composite (blend OIT result over opaque scene)
+            let oit_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("oit_composite_bg"),
+                layout: &self.oit_composite_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.oit_accum_resolve) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.oit_reveal_resolve) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                ],
+            });
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("oit_composite"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.msaa_texture,
+                        resolve_target: Some(&self.scene_texture),
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load, // preserve opaque scene
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.oit_composite_pipeline);
+                pass.set_bind_group(0, &oit_bind_group, &[]);
+                pass.draw(0..3, 0..1);
             }
             self.queue.submit(std::iter::once(encoder.finish()));
         }
