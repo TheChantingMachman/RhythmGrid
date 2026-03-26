@@ -308,6 +308,171 @@ fn fs_oit_composite(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Reusable GPU buffer pair (vertex + index) that grows as needed.
+/// Avoids per-frame allocation by reusing buffers when capacity is sufficient.
+struct GpuBufferPair {
+    vertex: wgpu::Buffer,
+    index: wgpu::Buffer,
+    vertex_capacity: usize, // in bytes
+    index_capacity: usize,  // in bytes
+}
+
+impl GpuBufferPair {
+    fn new(device: &wgpu::Device, label: &str, initial_verts: usize, initial_indices: usize) -> Self {
+        let vb_size = (initial_verts * std::mem::size_of::<Vertex>()).max(16);
+        let ib_size = (initial_indices * std::mem::size_of::<u32>()).max(16);
+        GpuBufferPair {
+            vertex: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("{}_vb", label)),
+                size: vb_size as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            index: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("{}_ib", label)),
+                size: ib_size as u64,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            vertex_capacity: vb_size,
+            index_capacity: ib_size,
+        }
+    }
+
+    /// Upload data, reallocating if capacity is exceeded.
+    fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, verts: &[Vertex], indices: &[u32]) {
+        let vb_bytes = bytemuck::cast_slice::<Vertex, u8>(verts);
+        let ib_bytes = bytemuck::cast_slice::<u32, u8>(indices);
+
+        if vb_bytes.len() > self.vertex_capacity {
+            self.vertex_capacity = (vb_bytes.len() * 3 / 2).max(1024); // grow by 1.5x
+            self.vertex = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.vertex_capacity as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        if ib_bytes.len() > self.index_capacity {
+            self.index_capacity = (ib_bytes.len() * 3 / 2).max(512);
+            self.index = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.index_capacity as u64,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+
+        if !vb_bytes.is_empty() { queue.write_buffer(&self.vertex, 0, vb_bytes); }
+        if !ib_bytes.is_empty() { queue.write_buffer(&self.index, 0, ib_bytes); }
+    }
+}
+
+/// A single fullscreen post-processing pass (e.g., bloom, vignette, chromatic aberration).
+struct PostProcessPass {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+}
+
+/// Chain of post-processing passes with ping-pong textures.
+/// Reads from scene_texture, applies passes sequentially, final pass writes to surface.
+struct PostProcessChain {
+    passes: Vec<PostProcessPass>,
+    bind_group_layout: wgpu::BindGroupLayout,
+    // Ping-pong intermediate texture (only needed with 2+ passes)
+    ping_texture: wgpu::TextureView,
+}
+
+impl PostProcessChain {
+    fn create_ping_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::TextureView {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("postprocess_ping"),
+            size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: HDR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        }).create_view(&Default::default())
+    }
+
+    /// Execute all passes. Reads from `scene_texture`, writes final result to `surface_view`.
+    fn execute(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        sampler: &wgpu::Sampler,
+        scene_texture: &wgpu::TextureView,
+        surface_view: &wgpu::TextureView,
+    ) {
+        let n = self.passes.len();
+        if n == 0 { return; }
+
+        for (i, pass) in self.passes.iter().enumerate() {
+            let is_last = i == n - 1;
+            // Input texture: scene_texture for first pass, ping_texture for subsequent
+            let input = if i == 0 { scene_texture } else { &self.ping_texture };
+            // Output: surface_view for last pass, ping_texture for intermediate
+            // (For single-pass chains, this reads scene_texture and writes to surface directly)
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(input) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+                    wgpu::BindGroupEntry { binding: 2, resource: pass.uniform_buffer.as_entire_binding() },
+                ],
+            });
+
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                if is_last {
+                    // Final pass writes to surface (no MSAA, sRGB format)
+                    let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("postprocess_final"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: surface_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    rp.set_pipeline(&pass.pipeline);
+                    rp.set_bind_group(0, &bind_group, &[]);
+                    rp.draw(0..3, 0..1);
+                } else {
+                    // Intermediate pass writes to ping texture (HDR format)
+                    let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("postprocess_intermediate"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.ping_texture,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    rp.set_pipeline(&pass.pipeline);
+                    rp.set_bind_group(0, &bind_group, &[]);
+                    rp.draw(0..3, 0..1);
+                }
+            }
+            queue.submit(std::iter::once(encoder.finish()));
+        }
+    }
+
+    fn resize(&mut self, device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) {
+        self.ping_texture = Self::create_ping_texture(device, config);
+    }
+}
+
 const SAMPLE_COUNT: u32 = 4;
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const REVEALAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
@@ -329,12 +494,14 @@ pub struct GpuState {
     oit_reveal_msaa: wgpu::TextureView,
     oit_reveal_resolve: wgpu::TextureView,
     oit_composite_bgl: wgpu::BindGroupLayout,
-    bloom_pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
-    bloom_bind_group_layout: wgpu::BindGroupLayout,
-    bloom_uniform_buffer: wgpu::Buffer,
+    post_process: PostProcessChain,
     uniform_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
+    // Persistent GPU buffers — reused across frames, grown as needed
+    opaque_bufs: GpuBufferPair,
+    transparent_bufs: GpuBufferPair,
+    hud_bufs: GpuBufferPair,
 }
 
 impl GpuState {
@@ -648,11 +815,24 @@ impl GpuState {
         let (oit_accum_msaa, oit_accum_resolve) = Self::create_oit_accum_textures(&device, &config);
         let (oit_reveal_msaa, oit_reveal_resolve) = Self::create_oit_reveal_textures(&device, &config);
 
+        // Post-process chain (bloom is the first and currently only pass)
         let bloom_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("bloom_uniforms"),
             contents: bytemuck::cast_slice(&[1.0f32, 1.0, 1.0, 1.0]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let post_process = PostProcessChain {
+            passes: vec![PostProcessPass {
+                pipeline: bloom_pipeline,
+                uniform_buffer: bloom_uniform_buffer,
+            }],
+            bind_group_layout: bind_group_layout,
+            ping_texture: PostProcessChain::create_ping_texture(&device, &config),
+        };
+
+        let opaque_bufs = GpuBufferPair::new(&device, "opaque", 4096, 8192);
+        let transparent_bufs = GpuBufferPair::new(&device, "transparent", 8192, 16384);
+        let hud_bufs = GpuBufferPair::new(&device, "hud", 4096, 8192);
 
         GpuState {
             surface, device, queue, config,
@@ -660,8 +840,8 @@ impl GpuState {
             msaa_texture, scene_texture, depth_texture,
             oit_accum_msaa, oit_accum_resolve, oit_reveal_msaa, oit_reveal_resolve,
             oit_composite_bgl,
-            bloom_pipeline, sampler, bloom_bind_group_layout: bind_group_layout,
-            bloom_uniform_buffer, uniform_buffer, scene_bind_group,
+            sampler, post_process, uniform_buffer, scene_bind_group,
+            opaque_bufs, transparent_bufs, hud_bufs,
         }
     }
 
@@ -741,6 +921,7 @@ impl GpuState {
         let (rm, rr) = Self::create_oit_reveal_textures(&self.device, &self.config);
         self.oit_reveal_msaa = rm;
         self.oit_reveal_resolve = rr;
+        self.post_process.resize(&self.device, &self.config);
     }
 
     pub fn aspect_ratio(&self) -> f32 {
@@ -757,12 +938,15 @@ impl GpuState {
 
     pub fn set_color_grade(&self, grade: [f32; 3]) {
         let data = [grade[0], grade[1], grade[2], 1.0f32];
-        self.queue.write_buffer(&self.bloom_uniform_buffer, 0, bytemuck::cast_slice(&data));
+        // Write to the bloom pass uniform buffer (first pass in the chain)
+        if let Some(bloom_pass) = self.post_process.passes.first() {
+            self.queue.write_buffer(&bloom_pass.uniform_buffer, 0, bytemuck::cast_slice(&data));
+        }
     }
 
     /// Render scene (opaque + transparent 3D) and HUD (2D overlay).
     /// Call update_uniforms with the 3D camera before this.
-    pub fn render(&self,
+    pub fn render(&mut self,
                   opaque_verts: &[Vertex], opaque_indices: &[u32],
                   transparent_verts: &[Vertex], transparent_indices: &[u32],
                   hud_verts: &[Vertex], hud_indices: &[u32]) {
@@ -772,24 +956,10 @@ impl GpuState {
         };
         let surface_view = output.texture.create_view(&Default::default());
 
-        let opaque_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(opaque_verts), usage: wgpu::BufferUsages::VERTEX,
-        });
-        let opaque_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(opaque_indices), usage: wgpu::BufferUsages::INDEX,
-        });
-        let trans_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(transparent_verts), usage: wgpu::BufferUsages::VERTEX,
-        });
-        let trans_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(transparent_indices), usage: wgpu::BufferUsages::INDEX,
-        });
-        let hud_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(hud_verts), usage: wgpu::BufferUsages::VERTEX,
-        });
-        let hud_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(hud_indices), usage: wgpu::BufferUsages::INDEX,
-        });
+        // Upload geometry to persistent GPU buffers (grown as needed, reused across frames)
+        self.opaque_bufs.upload(&self.device, &self.queue, opaque_verts, opaque_indices);
+        self.transparent_bufs.upload(&self.device, &self.queue, transparent_verts, transparent_indices);
+        self.hud_bufs.upload(&self.device, &self.queue, hud_verts, hud_indices);
 
         let depth_attachment = wgpu::RenderPassDepthStencilAttachment {
             view: &self.depth_texture,
@@ -820,8 +990,8 @@ impl GpuState {
                 pass.set_pipeline(&self.scene_pipeline);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
                 if !opaque_indices.is_empty() {
-                    pass.set_vertex_buffer(0, opaque_vb.slice(..));
-                    pass.set_index_buffer(opaque_ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.set_vertex_buffer(0, self.opaque_bufs.vertex.slice(..));
+                    pass.set_index_buffer(self.opaque_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..opaque_indices.len() as u32, 0, 0..1);
                 }
             }
@@ -866,8 +1036,8 @@ impl GpuState {
                 });
                 pass.set_pipeline(&self.oit_accum_pipeline);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
-                pass.set_vertex_buffer(0, trans_vb.slice(..));
-                pass.set_index_buffer(trans_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.set_vertex_buffer(0, self.transparent_bufs.vertex.slice(..));
+                pass.set_index_buffer(self.transparent_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..transparent_indices.len() as u32, 0, 0..1);
             }
             self.queue.submit(std::iter::once(encoder.finish()));
@@ -925,44 +1095,18 @@ impl GpuState {
                 // Full surface — no viewport restriction, background fills to edges
                 pass.set_pipeline(&self.scene_pipeline_no_depth);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
-                pass.set_vertex_buffer(0, hud_vb.slice(..));
-                pass.set_index_buffer(hud_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.set_vertex_buffer(0, self.hud_bufs.vertex.slice(..));
+                pass.set_index_buffer(self.hud_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..hud_indices.len() as u32, 0, 0..1);
             }
             self.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        // Pass 3: Bloom composite — sample scene_texture → surface
-        {
-            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None, layout: &self.bloom_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.scene_texture) },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
-                    wgpu::BindGroupEntry { binding: 2, resource: self.bloom_uniform_buffer.as_entire_binding() },
-                ],
-            });
-            let mut encoder = self.device.create_command_encoder(&Default::default());
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("bloom_composite"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &surface_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    ..Default::default()
-                });
-                pass.set_pipeline(&self.bloom_pipeline);
-                pass.set_bind_group(0, &bind_group, &[]);
-                pass.draw(0..3, 0..1);
-            }
-            self.queue.submit(std::iter::once(encoder.finish()));
-        }
+        // Post-process chain (bloom + any future effects) → surface
+        self.post_process.execute(
+            &self.device, &self.queue, &self.sampler,
+            &self.scene_texture, &surface_view,
+        );
 
         output.present();
     }

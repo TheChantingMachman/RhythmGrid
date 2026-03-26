@@ -119,7 +119,7 @@ impl ApplicationHandler for App {
                     gpu.set_color_grade(self.world.color_grade);
                 }
                 let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
-                if let Some(gpu) = &self.gpu {
+                if let Some(gpu) = &mut self.gpu {
                     gpu.render(&ov, &oi, &tv, &ti, &hv, &hi);
                 }
                 if let Some(w) = &self.window {
