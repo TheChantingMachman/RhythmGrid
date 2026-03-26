@@ -1,6 +1,6 @@
 // @spec-tags: core,game,bugfix
-// @invariants: After move_horizontal/rotate succeeds during active lock delay, recheck is_valid_position at row+1; if space below exists set lock_delay_active=false without touching resets or accumulator; recheck is guarded by lock_delay_active; recheck runs even when resets are exhausted
-// @build: 94
+// @invariants: After move_horizontal/rotate succeeds during active lock delay, recheck is_valid_position at row+1; if space below exists set lock_delay_active=false without touching resets or accumulator; recheck is guarded by lock_delay_active; recheck runs even when resets are exhausted; gravity success path (PieceMoved) zeroes lock_delay_resets; gravity failure path (lock delay activation) does NOT zero lock_delay_resets; resets accumulate across recheck deactivation/reactivation cycles
+// @build: 95
 
 use rhythm_grid::game::{
     tick, GameSession, GameState, TickResult, ActivePiece,
@@ -280,4 +280,96 @@ fn move_horizontal_recheck_runs_even_when_resets_exhausted() {
         !session.lock_delay_active,
         "lock_delay_active must be false: recheck must run even when resets are exhausted"
     );
+}
+
+// --- Test 11 ---
+
+#[test]
+fn gravity_success_zeroes_lock_delay_resets() {
+    let mut session = GameSession::new();
+    session.lock_delay_resets = 5; // leftover from previous cycle
+    // Piece at default spawn position — can fall
+    let result = tick(&mut session, 1.0); // gravity fires, move_down succeeds
+    assert_eq!(result, TickResult::PieceMoved);
+    assert_eq!(session.lock_delay_resets, 0, "gravity success must zero resets");
+}
+
+// --- Test 12 ---
+
+#[test]
+fn activation_preserves_nonzero_lock_delay_resets() {
+    let mut session = GameSession::new();
+    session.lock_delay_resets = 3;
+    session.active_piece = ActivePiece {
+        piece_type: TetrominoType::I,
+        rotation: 0,
+        row: 19,
+        col: 4,
+    };
+    tick(&mut session, 1.0); // gravity fires, move_down fails → lock delay activates
+    assert!(session.lock_delay_active);
+    assert_eq!(session.lock_delay_resets, 3, "activation must NOT zero resets");
+}
+
+// --- Test 13 ---
+
+#[test]
+fn resets_accumulate_across_recheck_deactivation_reactivation() {
+    let mut session = setup_i_piece_on_partial_ledge();
+
+    // Cycle 1: activate lock delay
+    tick(&mut session, 1.0); // gravity fires, move_down fails → lock_delay_active=true
+    assert!(session.lock_delay_active);
+    assert_eq!(session.lock_delay_resets, 0);
+
+    // Move off ledge: timer reset fires (resets→1), recheck deactivates
+    let moved = session.move_horizontal(-5);
+    assert!(moved);
+    assert!(!session.lock_delay_active);
+    assert_eq!(session.lock_delay_resets, 1, "one reset from first cycle");
+
+    // Move back onto ledge area
+    let moved_back = session.move_horizontal(5);
+    assert!(moved_back);
+
+    // Cycle 2: gravity fires again, move_down fails → reactivate
+    tick(&mut session, 1.0);
+    assert!(session.lock_delay_active);
+    assert_eq!(session.lock_delay_resets, 1, "resets preserved across reactivation");
+
+    // Move off ledge again: timer reset fires (resets→2), recheck deactivates
+    let moved2 = session.move_horizontal(-5);
+    assert!(moved2);
+    assert!(!session.lock_delay_active);
+    assert_eq!(session.lock_delay_resets, 2, "resets accumulated across two cycles");
+}
+
+// --- Test 14 ---
+
+#[test]
+fn gravity_success_resets_counter_prevents_circumvention() {
+    let mut session = GameSession::new();
+    session.lock_delay_resets = 10; // accumulated resets
+    // Piece at spawn position, can fall
+    let result = tick(&mut session, 1.0);
+    assert_eq!(result, TickResult::PieceMoved);
+    assert_eq!(session.lock_delay_resets, 0, "gravity success must zero resets to prevent circumvention");
+}
+
+// --- Test 15 ---
+
+#[test]
+fn lock_delay_expiry_still_zeroes_resets() {
+    let mut session = GameSession::new();
+    session.active_piece = ActivePiece {
+        piece_type: TetrominoType::I,
+        rotation: 0,
+        row: 19,
+        col: 4,
+    };
+    tick(&mut session, 1.0); // lock delay activates
+    session.lock_delay_resets = 5; // simulate accumulated resets
+    let result = tick(&mut session, 0.4); // lock delay expires
+    assert!(matches!(result, TickResult::PieceLocked { .. }));
+    assert_eq!(session.lock_delay_resets, 0, "expiry cleanup must zero resets");
 }
