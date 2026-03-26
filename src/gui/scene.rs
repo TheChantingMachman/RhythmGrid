@@ -25,6 +25,86 @@ fn push_text_embossed(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     push_text(verts, indices, x, y, text, color, scale);
 }
 
+/// Render a tetromino piece in world space using push_cube_3d, with 3-axis rotation.
+/// Cells are centered at (0,0), rotated by (ax, ay, az), then translated to `world_pos`.
+/// Uses the same bevels, glow, and lighting as board pieces.
+fn render_preview_piece(
+    verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+    cells: &[(i32, i32)], color: [f32; 4], depth: f32, glow_boost: f32,
+    world_pos: [f32; 3], angles: [f32; 3],
+) {
+    if cells.is_empty() { return; }
+
+    // Compute piece center for centering
+    let mut cx = 0.0f32;
+    let mut cy = 0.0f32;
+    for &(dr, dc) in cells {
+        cx += dc as f32 + 0.5;
+        cy += dr as f32 + 0.5;
+    }
+    cx /= cells.len() as f32;
+    cy /= cells.len() as f32;
+
+    let start_vert = verts.len();
+    let start_idx_count = indices.len();
+
+    // Render each cell centered at origin
+    for &(dr, dc) in cells {
+        let col = dc as f32 - cx;
+        let row = dr as f32 - cy;
+        push_cube_3d(verts, indices, col, row, depth, color, glow_boost, 0, 0.0);
+    }
+
+    // 3-axis rotation matrices (X, then Y, then Z)
+    let (sx, cx_r) = (angles[0].sin(), angles[0].cos());
+    let (sy, cy_r) = (angles[1].sin(), angles[1].cos());
+    let (sz, cz) = (angles[2].sin(), angles[2].cos());
+
+    let rotate = |p: [f32; 3]| -> [f32; 3] {
+        // Rotate around X
+        let y1 = p[1] * cx_r - p[2] * sx;
+        let z1 = p[1] * sx + p[2] * cx_r;
+        // Rotate around Y
+        let x2 = p[0] * cy_r + z1 * sy;
+        let z2 = -p[0] * sy + z1 * cy_r;
+        // Rotate around Z
+        let x3 = x2 * cz - y1 * sz;
+        let y3 = x2 * sz + y1 * cz;
+        [x3, y3, z2]
+    };
+
+    // Transform all vertices
+    for v in &mut verts[start_vert..] {
+        let rotated = rotate(v.position);
+        v.position = [
+            rotated[0] + world_pos[0],
+            rotated[1] + world_pos[1],
+            rotated[2] + world_pos[2],
+        ];
+        v.normal = rotate(v.normal);
+    }
+
+    // Cull back-facing triangles (camera looks along -Z in world space).
+    // For each triangle, check if its face normal points toward the camera (nz > 0).
+    // Use the first vertex's normal as a proxy for the triangle's face direction.
+    let mut kept_indices = Vec::new();
+    let idx_slice = &indices[start_idx_count..];
+    let mut i = 0;
+    while i + 2 < idx_slice.len() {
+        let v0 = idx_slice[i] as usize;
+        let n = &verts[v0].normal;
+        // Keep triangle if its normal has a positive Z component (faces camera)
+        if n[2] > -0.1 {
+            kept_indices.push(idx_slice[i]);
+            kept_indices.push(idx_slice[i + 1]);
+            kept_indices.push(idx_slice[i + 2]);
+        }
+        i += 3;
+    }
+    indices.truncate(start_idx_count);
+    indices.extend_from_slice(&kept_indices);
+}
+
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)
 /// Returns (opaque_scene, transparent_scene, hud) geometry.
 pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
@@ -118,6 +198,32 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             (0.0, cube_depth)
         };
         push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, active_depth, color, active_glow, 0, 0.0);
+    }
+
+    // Next piece preview (world-space, right of board)
+    {
+        let next_color = rgba_to_f32(world.themed_piece_color(world.render_next.type_index));
+        let band = (world.render_next.type_index as usize) % 7;
+        let glow = if ef.cube_glow { world.bands_norm[band] * 1.0 } else { 0.0 };
+        render_preview_piece(
+            &mut tv, &mut ti,
+            &world.render_next.cells, next_color, cube_depth, glow,
+            [13.0, -2.5, 0.0],
+            [world.preview_angle * 0.3, world.preview_angle * 0.7, world.preview_angle * 0.15],
+        );
+    }
+
+    // Held piece preview (world-space, left of board)
+    if let Some(ref held) = world.render_held {
+        let held_color = rgba_to_f32(world.themed_piece_color(held.type_index));
+        let band = (held.type_index as usize) % 7;
+        let glow = if ef.cube_glow { world.bands_norm[band] * 1.0 } else { 0.0 };
+        render_preview_piece(
+            &mut tv, &mut ti,
+            &held.cells, held_color, cube_depth, glow,
+            [-3.0, -2.5, 0.0],
+            [world.preview_angle * 0.2, world.preview_angle * 0.5, 0.0],
+        );
     }
 
     // Hard drop trails — translucent streaks from start to landing
@@ -449,179 +555,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     // --- Fadeable HUD elements (affected by hud_opacity) ---
 
-    let np_x = w - 120.0;
-    let np_y = 12.0;
-
-    // Mark where preview piece starts (won't be faded)
-    let preview_start_vert = verts.len();
-    let next_cells = world.render_next.cells;
-    let next_color = rgba_to_f32(world.themed_piece_color(world.render_next.type_index));
-    // Correct preview scale for window aspect ratio
-    let theme_aspect = w / h;
-    let aspect_corr = theme_aspect / world.window_aspect;
-    let preview_scale = 36.0;
-    let cube_half = 0.42;
-    let preview_cx = np_x + 54.0;
-    let preview_cy = np_y + 52.0;
-
-    // 3-axis rotation
-    let ax = world.preview_angle * 0.3;
-    let ay = world.preview_angle * 0.7;
-    let az = world.preview_angle * 0.15;
-    let (sx_r, cx_r) = (ax.sin(), ax.cos());
-    let (sy, cy) = (ay.sin(), ay.cos());
-    let (sz, cz) = (az.sin(), az.cos());
-
-    let mut center = [0.0f32; 3];
-    for &(dr, dc) in &next_cells {
-        center[0] += dc as f32;
-        center[1] += dr as f32;
-    }
-    center[0] /= next_cells.len() as f32;
-    center[1] /= next_cells.len() as f32;
-
-    for &(dr, dc) in &next_cells {
-        let local_x = dc as f32 - center[0];
-        let local_y = dr as f32 - center[1];
-        let corners_local: [[f32; 3]; 8] = [
-            [local_x - cube_half, local_y - cube_half, -cube_half],
-            [local_x + cube_half, local_y - cube_half, -cube_half],
-            [local_x + cube_half, local_y + cube_half, -cube_half],
-            [local_x - cube_half, local_y + cube_half, -cube_half],
-            [local_x - cube_half, local_y - cube_half, cube_half],
-            [local_x + cube_half, local_y - cube_half, cube_half],
-            [local_x + cube_half, local_y + cube_half, cube_half],
-            [local_x - cube_half, local_y + cube_half, cube_half],
-        ];
-
-        let mut projected = [[0.0f32; 2]; 8];
-        for (i, c) in corners_local.iter().enumerate() {
-            let y1 = c[1] * cx_r - c[2] * sx_r;
-            let z1 = c[1] * sx_r + c[2] * cx_r;
-            let x2 = c[0] * cy + z1 * sy;
-            let z2 = -c[0] * sy + z1 * cy;
-            let x3 = x2 * cz - y1 * sz;
-            let y3 = x2 * sz + y1 * cz;
-            let persp = 4.0 / (4.0 + z2 * 0.3);
-            projected[i] = [
-                preview_cx + x3 * preview_scale * persp * aspect_corr,
-                preview_cy + y3 * preview_scale * persp,
-            ];
-        }
-
-        let faces: &[([usize; 4], [f32; 3])] = &[
-            ([4, 5, 6, 7], [0.0, 0.0, 1.0]),
-            ([5, 1, 2, 6], [1.0, 0.0, 0.0]),
-            ([0, 1, 5, 4], [0.0, -1.0, 0.0]),
-            ([0, 3, 7, 4], [-1.0, 0.0, 0.0]),
-            ([3, 2, 6, 7], [0.0, 1.0, 0.0]),
-            ([0, 1, 2, 3], [0.0, 0.0, -1.0]),
-        ];
-
-        let mut face_order: Vec<(usize, f32)> = faces.iter().enumerate().map(|(i, (_, n))| {
-            let _ny1 = n[1] * cx_r - n[2] * sx_r;
-            let nz1 = n[1] * sx_r + n[2] * cx_r;
-            let nz2 = -n[0] * sy + nz1 * cy;
-            (i, nz2)
-        }).collect();
-        face_order.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-
-        for &(fi, nz) in &face_order {
-            if nz < 0.0 { continue; }
-            let (ci, _normal) = &faces[fi];
-            let shade = 0.4 + nz * 0.6;
-            let fc = [next_color[0] * shade, next_color[1] * shade, next_color[2] * shade, next_color[3]];
-
-            let base = verts.len() as u32;
-            for &idx in ci {
-                let px = projected[idx];
-                let (nx, ny) = px_to_ndc(px[0], px[1], w, h);
-                verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc, uv: [0.0, 0.0] });
-            }
-            indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-        }
-    }
-
-    // Held piece preview (top-left, mirrors next piece position)
-    if let Some(ref held) = world.render_held {
-        let held_cells = held.cells;
-        let held_color = rgba_to_f32(world.themed_piece_color(held.type_index));
-        let held_cx = 66.0;
-        let held_cy = np_y + 52.0;
-        let held_scale = 36.0;
-
-        let mut held_center = [0.0f32; 3];
-        for &(dr, dc) in &held_cells {
-            held_center[0] += dc as f32;
-            held_center[1] += dr as f32;
-        }
-        held_center[0] /= held_cells.len() as f32;
-        held_center[1] /= held_cells.len() as f32;
-
-        // Slower rotation than next piece
-        let hax = world.preview_angle * 0.2;
-        let hay = world.preview_angle * 0.5;
-        let (hsx, hcx) = (hax.sin(), hax.cos());
-        let (hsy, hcy) = (hay.sin(), hay.cos());
-
-        for &(dr, dc) in &held_cells {
-            let lx = dc as f32 - held_center[0];
-            let ly = dr as f32 - held_center[1];
-            let corners: [[f32; 3]; 8] = [
-                [lx - cube_half, ly - cube_half, -cube_half],
-                [lx + cube_half, ly - cube_half, -cube_half],
-                [lx + cube_half, ly + cube_half, -cube_half],
-                [lx - cube_half, ly + cube_half, -cube_half],
-                [lx - cube_half, ly - cube_half, cube_half],
-                [lx + cube_half, ly - cube_half, cube_half],
-                [lx + cube_half, ly + cube_half, cube_half],
-                [lx - cube_half, ly + cube_half, cube_half],
-            ];
-            let mut proj = [[0.0f32; 2]; 8];
-            for (i, c) in corners.iter().enumerate() {
-                let y1 = c[1] * hcx - c[2] * hsx;
-                let z1 = c[1] * hsx + c[2] * hcx;
-                let x2 = c[0] * hcy + z1 * hsy;
-                let z2 = -c[0] * hsy + z1 * hcy;
-                let persp = 4.0 / (4.0 + z2 * 0.3);
-                proj[i] = [
-                    held_cx + x2 * held_scale * persp * aspect_corr,
-                    held_cy + y1 * held_scale * persp,
-                ];
-            }
-            let faces: &[([usize; 4], [f32; 3])] = &[
-                ([4, 5, 6, 7], [0.0, 0.0, 1.0]),
-                ([5, 1, 2, 6], [1.0, 0.0, 0.0]),
-                ([0, 1, 5, 4], [0.0, -1.0, 0.0]),
-                ([0, 3, 7, 4], [-1.0, 0.0, 0.0]),
-                ([3, 2, 6, 7], [0.0, 1.0, 0.0]),
-                ([0, 1, 2, 3], [0.0, 0.0, -1.0]),
-            ];
-            let mut fo: Vec<(usize, f32)> = faces.iter().enumerate().map(|(i, (_, n))| {
-                let nz1 = n[1] * hsx + n[2] * hcx;
-                let nz2 = -n[0] * hsy + nz1 * hcy;
-                (i, nz2)
-            }).collect();
-            fo.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            for &(fi, nz) in &fo {
-                if nz < 0.0 { continue; }
-                let (ci, _) = &faces[fi];
-                let shade = 0.4 + nz * 0.6;
-                let fc = [held_color[0] * shade, held_color[1] * shade, held_color[2] * shade, held_color[3]];
-                let base = verts.len() as u32;
-                for &idx in ci {
-                    let px = proj[idx];
-                    let (nx, ny) = px_to_ndc(px[0], px[1], w, h);
-                    verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc, uv: [0.0, 0.0] });
-                }
-                indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-            }
-        }
-    }
-
-    let preview_end_vert = verts.len();
-
-    // Hold label (top-left, above held piece preview)
+    // Hold label (top-left)
     push_text(&mut verts, &mut indices, 12.0, 12.0, "HOLD", dim_col, 1.0);
 
     // Score / Level / Lines (left side, below held piece area)
@@ -749,7 +683,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         push_text_embossed(&mut verts, &mut indices, px, pa_y + 296.0,
                   &format!("VOL  {:.0}%", vol * 100.0), text_col, 2.0);
         // Theme
-        let theme_names = ["DEFAULT", "WATER", "SPACE", "DEBUG"];
+        let theme_names = ["DEFAULT", "WATER", "SPACE", "FLOW", "DEBUG"];
         let theme_name = theme_names.get(world.theme_index).unwrap_or(&"DEFAULT");
         push_text_embossed(&mut verts, &mut indices, px, pa_y + 322.0,
                   &format!("THEME  {}", theme_name), text_col, 2.0);
@@ -759,16 +693,12 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     // Particles (always visible, not affected by HUD fade)
     world.particles.render(&mut verts, &mut indices);
 
-    // Apply HUD opacity — skip preview piece and particles
+    // Apply HUD opacity (skip particles — they're always visible)
     let opacity = world.hud_opacity;
     if opacity < 0.99 {
         let particle_verts = world.particles.particles.len() * 4;
         let hud_vert_count = verts.len().saturating_sub(particle_verts);
-        for (i, v) in verts[..hud_vert_count].iter_mut().enumerate() {
-            // Skip preview piece vertices (always visible)
-            if i >= preview_start_vert && i < preview_end_vert {
-                continue;
-            }
+        for v in verts[..hud_vert_count].iter_mut() {
             v.color[3] *= opacity;
         }
     }
@@ -782,7 +712,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             || world.toast_text.starts_with("RESAMPLING")
             || world.toast_text.starts_with("REMAPPED")
             || world.toast_text.starts_with("ANALYZING");
-        let show = if is_analysis { world.theme_index == 3 } else { true }; // 2 = debug
+        let show = if is_analysis { world.theme_index == 4 } else { true }; // 2 = debug
         if show {
             let ta = (world.toast_timer.min(1.0) * 200.0) as u8;
             push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
@@ -806,7 +736,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     // Debug analysis dashboard (debug theme only, always visible)
-    if world.theme_index == 3 {
+    if world.theme_index == 4 {
         let band_names = ["SB", "BA", "LM", "MI", "UM", "PR", "BR"];
         let dx = 12.0;
         let dy = 210.0;
