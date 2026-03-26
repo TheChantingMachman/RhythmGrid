@@ -308,6 +308,66 @@ fn fs_oit_composite(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Reusable GPU buffer pair (vertex + index) that grows as needed.
+/// Avoids per-frame allocation by reusing buffers when capacity is sufficient.
+struct GpuBufferPair {
+    vertex: wgpu::Buffer,
+    index: wgpu::Buffer,
+    vertex_capacity: usize, // in bytes
+    index_capacity: usize,  // in bytes
+}
+
+impl GpuBufferPair {
+    fn new(device: &wgpu::Device, label: &str, initial_verts: usize, initial_indices: usize) -> Self {
+        let vb_size = (initial_verts * std::mem::size_of::<Vertex>()).max(16);
+        let ib_size = (initial_indices * std::mem::size_of::<u32>()).max(16);
+        GpuBufferPair {
+            vertex: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("{}_vb", label)),
+                size: vb_size as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            index: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("{}_ib", label)),
+                size: ib_size as u64,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            vertex_capacity: vb_size,
+            index_capacity: ib_size,
+        }
+    }
+
+    /// Upload data, reallocating if capacity is exceeded.
+    fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, verts: &[Vertex], indices: &[u32]) {
+        let vb_bytes = bytemuck::cast_slice::<Vertex, u8>(verts);
+        let ib_bytes = bytemuck::cast_slice::<u32, u8>(indices);
+
+        if vb_bytes.len() > self.vertex_capacity {
+            self.vertex_capacity = (vb_bytes.len() * 3 / 2).max(1024); // grow by 1.5x
+            self.vertex = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.vertex_capacity as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        if ib_bytes.len() > self.index_capacity {
+            self.index_capacity = (ib_bytes.len() * 3 / 2).max(512);
+            self.index = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.index_capacity as u64,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+
+        if !vb_bytes.is_empty() { queue.write_buffer(&self.vertex, 0, vb_bytes); }
+        if !ib_bytes.is_empty() { queue.write_buffer(&self.index, 0, ib_bytes); }
+    }
+}
+
 const SAMPLE_COUNT: u32 = 4;
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const REVEALAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
@@ -335,6 +395,10 @@ pub struct GpuState {
     bloom_uniform_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
+    // Persistent GPU buffers — reused across frames, grown as needed
+    opaque_bufs: GpuBufferPair,
+    transparent_bufs: GpuBufferPair,
+    hud_bufs: GpuBufferPair,
 }
 
 impl GpuState {
@@ -654,6 +718,10 @@ impl GpuState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let opaque_bufs = GpuBufferPair::new(&device, "opaque", 4096, 8192);
+        let transparent_bufs = GpuBufferPair::new(&device, "transparent", 8192, 16384);
+        let hud_bufs = GpuBufferPair::new(&device, "hud", 4096, 8192);
+
         GpuState {
             surface, device, queue, config,
             scene_pipeline, oit_accum_pipeline, oit_composite_pipeline, scene_pipeline_no_depth,
@@ -662,6 +730,7 @@ impl GpuState {
             oit_composite_bgl,
             bloom_pipeline, sampler, bloom_bind_group_layout: bind_group_layout,
             bloom_uniform_buffer, uniform_buffer, scene_bind_group,
+            opaque_bufs, transparent_bufs, hud_bufs,
         }
     }
 
@@ -762,7 +831,7 @@ impl GpuState {
 
     /// Render scene (opaque + transparent 3D) and HUD (2D overlay).
     /// Call update_uniforms with the 3D camera before this.
-    pub fn render(&self,
+    pub fn render(&mut self,
                   opaque_verts: &[Vertex], opaque_indices: &[u32],
                   transparent_verts: &[Vertex], transparent_indices: &[u32],
                   hud_verts: &[Vertex], hud_indices: &[u32]) {
@@ -772,24 +841,10 @@ impl GpuState {
         };
         let surface_view = output.texture.create_view(&Default::default());
 
-        let opaque_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(opaque_verts), usage: wgpu::BufferUsages::VERTEX,
-        });
-        let opaque_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(opaque_indices), usage: wgpu::BufferUsages::INDEX,
-        });
-        let trans_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(transparent_verts), usage: wgpu::BufferUsages::VERTEX,
-        });
-        let trans_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(transparent_indices), usage: wgpu::BufferUsages::INDEX,
-        });
-        let hud_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(hud_verts), usage: wgpu::BufferUsages::VERTEX,
-        });
-        let hud_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None, contents: bytemuck::cast_slice(hud_indices), usage: wgpu::BufferUsages::INDEX,
-        });
+        // Upload geometry to persistent GPU buffers (grown as needed, reused across frames)
+        self.opaque_bufs.upload(&self.device, &self.queue, opaque_verts, opaque_indices);
+        self.transparent_bufs.upload(&self.device, &self.queue, transparent_verts, transparent_indices);
+        self.hud_bufs.upload(&self.device, &self.queue, hud_verts, hud_indices);
 
         let depth_attachment = wgpu::RenderPassDepthStencilAttachment {
             view: &self.depth_texture,
@@ -820,8 +875,8 @@ impl GpuState {
                 pass.set_pipeline(&self.scene_pipeline);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
                 if !opaque_indices.is_empty() {
-                    pass.set_vertex_buffer(0, opaque_vb.slice(..));
-                    pass.set_index_buffer(opaque_ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.set_vertex_buffer(0, self.opaque_bufs.vertex.slice(..));
+                    pass.set_index_buffer(self.opaque_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..opaque_indices.len() as u32, 0, 0..1);
                 }
             }
@@ -866,8 +921,8 @@ impl GpuState {
                 });
                 pass.set_pipeline(&self.oit_accum_pipeline);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
-                pass.set_vertex_buffer(0, trans_vb.slice(..));
-                pass.set_index_buffer(trans_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.set_vertex_buffer(0, self.transparent_bufs.vertex.slice(..));
+                pass.set_index_buffer(self.transparent_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..transparent_indices.len() as u32, 0, 0..1);
             }
             self.queue.submit(std::iter::once(encoder.finish()));
@@ -925,8 +980,8 @@ impl GpuState {
                 // Full surface — no viewport restriction, background fills to edges
                 pass.set_pipeline(&self.scene_pipeline_no_depth);
                 pass.set_bind_group(0, &self.scene_bind_group, &[]);
-                pass.set_vertex_buffer(0, hud_vb.slice(..));
-                pass.set_index_buffer(hud_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.set_vertex_buffer(0, self.hud_bufs.vertex.slice(..));
+                pass.set_index_buffer(self.hud_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..hud_indices.len() as u32, 0, 0..1);
             }
             self.queue.submit(std::iter::once(encoder.finish()));
