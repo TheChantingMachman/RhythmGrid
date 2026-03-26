@@ -6,7 +6,9 @@ use winit::window::Window;
 
 use super::drawing::Vertex;
 
-const SCENE_SHADER: &str = r#"
+// Shared WGSL: uniforms, vertex IO, vertex shader, and lighting function.
+// Used by both the opaque scene shader and the OIT accumulation shader.
+const SHARED_WGSL: &str = r#"
 struct Uniforms { view_proj: mat4x4<f32>, camera_pos: vec4<f32> };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
@@ -29,15 +31,15 @@ fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @lo
     return out;
 }
 
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+// Compute lit color for a fragment. Handles soft particles, HUD bypass, and full PBR lighting.
+fn compute_lit_color(in: VertexOutput) -> vec4<f32> {
     let n = normalize(in.normal);
 
     // Soft particle: radial falloff from quad center (uv = -1..1)
     if (in.uv.x != 0.0 || in.uv.y != 0.0) {
         let dist = length(in.uv);
         if (dist > 1.0) { discard; }
-        let soft = 1.0 - dist * dist; // quadratic falloff — bright center, soft edges
+        let soft = 1.0 - dist * dist;
         return vec4<f32>(in.color.rgb, in.color.a * soft);
     }
 
@@ -69,26 +71,32 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let F = 0.04 + 0.96 * pow(1.0 - max(dot(n, half_dir), 0.0), 5.0);
     let spec = D * G * F / max(4.0 * ndotv * ndotl, 0.001);
 
-    // Environment reflection — procedural gradient sampled by reflection vector
+    // Environment reflection
     let refl = reflect(-view_dir, n);
-    let env_y = refl.y * 0.5 + 0.5; // 0=down, 1=up
+    let env_y = refl.y * 0.5 + 0.5;
     let env_base = mix(
-        vec3<f32>(0.02, 0.02, 0.06),  // dark floor
-        vec3<f32>(0.15, 0.20, 0.35),  // bright sky
+        vec3<f32>(0.02, 0.02, 0.06),
+        vec3<f32>(0.15, 0.20, 0.35),
         smoothstep(0.0, 1.0, env_y)
     );
-    // Warm horizon band
     let horizon = exp(-16.0 * (env_y - 0.5) * (env_y - 0.5)) * vec3<f32>(0.12, 0.06, 0.02);
     let env_color = env_base + horizon;
-    // Blend by fresnel — edges reflect more (dielectric)
     let env_fresnel = 0.04 + 0.96 * pow(1.0 - ndotv, 5.0);
     let reflection = env_color * env_fresnel * 0.8;
 
-    // Subtle rim light — artistic edge glow independent of light direction
+    // Subtle rim light
     let rim = pow(1.0 - ndotv, 4.0) * 0.10;
 
     let lit = in.color.rgb * (ambient + diffuse) + vec3<f32>(spec, spec, spec) + reflection;
     return vec4<f32>(lit + in.color.rgb * rim, in.color.a);
+}
+"#;
+
+// Opaque scene fragment shader — just calls the shared lighting function.
+const SCENE_SHADER: &str = r#"
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return compute_lit_color(in);
 }
 "#;
 
@@ -229,30 +237,8 @@ fn fs_bloom_composite(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
-// OIT accumulation shader — same lighting as fs_main but outputs to two targets
+// OIT accumulation fragment shader — uses shared lighting, adds OIT weighting.
 const OIT_SHADER: &str = r#"
-struct Uniforms { view_proj: mat4x4<f32>, camera_pos: vec4<f32> };
-@group(0) @binding(0) var<uniform> u: Uniforms;
-
-struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
-    @location(0) color: vec4<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) world_pos: vec3<f32>,
-    @location(3) uv: vec2<f32>,
-};
-
-@vertex
-fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec4<f32>, @location(3) uv: vec2<f32>) -> VertexOutput {
-    var out: VertexOutput;
-    out.clip_position = u.view_proj * vec4<f32>(position, 1.0);
-    out.color = color;
-    out.normal = normal;
-    out.world_pos = position;
-    out.uv = uv;
-    return out;
-}
-
 struct OitOutput {
     @location(0) accum: vec4<f32>,
     @location(1) revealage: vec4<f32>,
@@ -260,65 +246,12 @@ struct OitOutput {
 
 @fragment
 fn fs_oit(in: VertexOutput) -> OitOutput {
-    let n = normalize(in.normal);
-
-    // Soft particle: radial falloff
-    var base_color = in.color;
-    if (in.uv.x != 0.0 || in.uv.y != 0.0) {
-        let dist = length(in.uv);
-        if (dist > 1.0) { discard; }
-        let soft = 1.0 - dist * dist;
-        base_color = vec4<f32>(in.color.rgb, in.color.a * soft);
-    }
-
-    // Skip lighting for HUD elements
-    var lit = base_color;
-    if (!(n.z > 0.99 && in.world_pos.z < 0.1)) {
-        // Directional light
-        let light_dir = normalize(vec3<f32>(0.3, 0.5, 0.8));
-        let ambient = 0.25;
-        let ndotl = max(dot(n, light_dir), 0.0);
-        let diffuse = ndotl * 0.55;
-
-        let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
-        let half_dir = normalize(light_dir + view_dir);
-        let ndotv = max(dot(n, view_dir), 0.001);
-        let ndoth = max(dot(n, half_dir), 0.0);
-
-        // GGX specular
-        let roughness = 0.3;
-        let a = roughness * roughness;
-        let a2 = a * a;
-        let d = ndoth * ndoth * (a2 - 1.0) + 1.0;
-        let D = a2 / (3.14159 * d * d);
-        let k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-        let G = (ndotv / (ndotv * (1.0 - k) + k)) * (ndotl / (ndotl * (1.0 - k) + k));
-        let F = 0.04 + 0.96 * pow(1.0 - max(dot(n, half_dir), 0.0), 5.0);
-        let spec = D * G * F / max(4.0 * ndotv * ndotl, 0.001);
-
-        // Environment reflection
-        let refl = reflect(-view_dir, n);
-        let env_y = refl.y * 0.5 + 0.5;
-        let env_base = mix(
-            vec3<f32>(0.02, 0.02, 0.06),
-            vec3<f32>(0.15, 0.20, 0.35),
-            smoothstep(0.0, 1.0, env_y)
-        );
-        let horizon = exp(-16.0 * (env_y - 0.5) * (env_y - 0.5)) * vec3<f32>(0.12, 0.06, 0.02);
-        let env_color = env_base + horizon;
-        let env_fresnel = 0.04 + 0.96 * pow(1.0 - ndotv, 5.0);
-        let reflection = env_color * env_fresnel * 0.8;
-
-        let rim = pow(1.0 - ndotv, 4.0) * 0.10;
-        let rgb = base_color.rgb * (ambient + diffuse) + vec3<f32>(spec, spec, spec) + reflection + base_color.rgb * rim;
-        lit = vec4<f32>(rgb, base_color.a);
-    }
-
+    let lit = compute_lit_color(in);
     let alpha = lit.a;
-    // Depth-based weight using linear camera distance for better separation
-    // in our narrow depth range (camera at z~16, geometry at z~-3..1).
+
+    // Depth-based weight using linear camera distance
     let cam_dist = length(u.camera_pos.xyz - in.world_pos);
-    let d_norm = clamp(cam_dist / 40.0, 0.0, 1.0); // normalize to ~0-1 range
+    let d_norm = clamp(cam_dist / 40.0, 0.0, 1.0);
     let w = clamp(alpha * max(1e-2, 3e3 * pow(1.0 - d_norm, 4.0)), 1e-2, 3e3);
 
     var out: OitOutput;
@@ -505,7 +438,7 @@ impl GpuState {
 
         // Scene pipeline (with MSAA + uniform)
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("scene_shader"), source: wgpu::ShaderSource::Wgsl(SCENE_SHADER.into()),
+            label: Some("scene_shader"), source: wgpu::ShaderSource::Wgsl(format!("{}{}", SHARED_WGSL, SCENE_SHADER).into()),
         });
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None, bind_group_layouts: &[&scene_bind_group_layout], push_constant_ranges: &[],
@@ -547,7 +480,7 @@ impl GpuState {
 
         // OIT accumulation pipeline — dual render targets, depth read-only
         let oit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("oit_shader"), source: wgpu::ShaderSource::Wgsl(OIT_SHADER.into()),
+            label: Some("oit_shader"), source: wgpu::ShaderSource::Wgsl(format!("{}{}", SHARED_WGSL, OIT_SHADER).into()),
         });
         let oit_accum_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("oit_accum"),
