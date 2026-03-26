@@ -10,6 +10,7 @@ pub mod audio_output;
 pub mod audio_analysis;
 pub mod effect_manager;
 pub mod animations;
+mod dashboard;
 pub mod particles;
 pub mod effects;
 pub mod camera;
