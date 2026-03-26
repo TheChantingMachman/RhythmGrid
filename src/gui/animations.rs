@@ -48,7 +48,7 @@ pub struct SettleCell {
 }
 
 pub const LINE_CLEAR_DURATION: f32 = 0.4;
-pub const SHATTER_DURATION: f32 = 0.6;
+pub const SHATTER_DURATION: f32 = 0.3;
 pub const DROP_TRAIL_DURATION: f32 = 0.2;
 pub const SETTLE_DURATION: f32 = 0.15;
 
@@ -104,7 +104,7 @@ impl Animations {
             frag.timer -= dt;
             frag.x += frag.vx * dt;
             frag.y += frag.vy * dt;
-            frag.vy += 8.0 * dt; // gravity
+            frag.vy += 4.0 * dt; // gravity (halved)
             frag.vx *= 0.97;     // drag
         }
         self.shatter_fragments.retain(|f| f.timer > 0.0);
@@ -146,11 +146,11 @@ impl Animations {
             for col in 0..WIDTH as i32 {
                 let cx = col as f32 + 0.5;
                 let cy = row as f32 + 0.5;
-                let frags = 3 + (pseudo(&mut seed) * 2.0) as u32;
+                let frags = 30 + (pseudo(&mut seed) * 10.0) as u32;
                 for _ in 0..frags {
                     let angle = pseudo(&mut seed) * std::f32::consts::TAU;
-                    let speed = 2.0 + pseudo(&mut seed) * 4.0;
-                    let size = 0.1 + pseudo(&mut seed) * 0.2;
+                    let speed = 3.0 + pseudo(&mut seed) * 6.0;
+                    let size = 0.019 + pseudo(&mut seed) * 0.037;
                     self.shatter_fragments.push(ShatterFragment {
                         x: cx, y: cy,
                         vx: angle.cos() * speed,

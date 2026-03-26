@@ -227,17 +227,23 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     // 3D Music Dashboard (volume, transport, folder, FFT visualizer)
     super::dashboard::build_dashboard(&mut tv, &mut ti, world, gw, gh);
 
-    // Shatter fragments — scattered mini-cubes from line clears
+    // Shatter fragments — soft glowing particles from line clears
     if ef.clearing_flash {
+        let normal = [0.0f32, 0.0, 1.0];
         for frag in &world.anims.shatter_fragments {
             let life = (frag.timer / frag.max_life).clamp(0.0, 1.0);
-            let alpha = life * life; // quadratic fade
+            let alpha = life * life;
             if alpha < 0.01 { continue; }
-            let s = frag.size * (0.5 + life * 0.5); // shrink as they die
+            let s = frag.size * (0.5 + life * 0.5);
             let color = [frag.color[0], frag.color[1], frag.color[2], alpha * frag.color[3]];
-            push_slab_3d(&mut tv, &mut ti,
-                frag.x - s * 0.5, frag.y - s * 0.5,
-                s, s, s * 0.5, color);
+            let z = 0.3;
+            // Soft circle billboard with UV radial falloff
+            let base = tv.len() as u32;
+            tv.push(Vertex { position: [frag.x - s, -frag.y - s, z], normal, color, uv: [-1.0, -1.0] });
+            tv.push(Vertex { position: [frag.x + s, -frag.y - s, z], normal, color, uv: [ 1.0, -1.0] });
+            tv.push(Vertex { position: [frag.x + s, -frag.y + s, z], normal, color, uv: [ 1.0,  1.0] });
+            tv.push(Vertex { position: [frag.x - s, -frag.y + s, z], normal, color, uv: [-1.0,  1.0] });
+            ti.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
         }
     }
 
