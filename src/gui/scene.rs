@@ -26,8 +26,8 @@ fn push_text_embossed(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
 }
 
 /// Render a tetromino piece in world space using push_cube_3d, with 3-axis rotation.
-/// Cells are centered at (0,0), rotated by (ax, ay, az), then translated to `world_pos`.
-/// Uses the same bevels, glow, and lighting as board pieces.
+/// Cells sorted back-to-front. Within each cell, outer shell vertices are nudged toward
+/// the camera along their face normal so they naturally composite over the inner glow.
 fn render_preview_piece(
     verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     cells: &[(i32, i32)], color: [f32; 4], depth: f32, glow_boost: f32,
@@ -35,74 +35,117 @@ fn render_preview_piece(
 ) {
     if cells.is_empty() { return; }
 
-    // Compute piece center for centering
-    let mut cx = 0.0f32;
-    let mut cy = 0.0f32;
-    for &(dr, dc) in cells {
-        cx += dc as f32 + 0.5;
-        cy += dr as f32 + 0.5;
-    }
-    cx /= cells.len() as f32;
-    cy /= cells.len() as f32;
-
-    let start_vert = verts.len();
-    let start_idx_count = indices.len();
-
-    // Render each cell centered at origin
-    for &(dr, dc) in cells {
-        let col = dc as f32 - cx;
-        let row = dr as f32 - cy;
-        push_cube_3d(verts, indices, col, row, depth, color, glow_boost, 0, 0.0);
-    }
-
-    // 3-axis rotation matrices (X, then Y, then Z)
+    // 3-axis rotation
     let (sx, cx_r) = (angles[0].sin(), angles[0].cos());
     let (sy, cy_r) = (angles[1].sin(), angles[1].cos());
     let (sz, cz) = (angles[2].sin(), angles[2].cos());
 
     let rotate = |p: [f32; 3]| -> [f32; 3] {
-        // Rotate around X
         let y1 = p[1] * cx_r - p[2] * sx;
         let z1 = p[1] * sx + p[2] * cx_r;
-        // Rotate around Y
         let x2 = p[0] * cy_r + z1 * sy;
         let z2 = -p[0] * sy + z1 * cy_r;
-        // Rotate around Z
         let x3 = x2 * cz - y1 * sz;
         let y3 = x2 * sz + y1 * cz;
         [x3, y3, z2]
     };
 
-    // Transform all vertices
-    for v in &mut verts[start_vert..] {
-        let rotated = rotate(v.position);
-        v.position = [
-            rotated[0] + world_pos[0],
-            rotated[1] + world_pos[1],
-            rotated[2] + world_pos[2],
-        ];
-        v.normal = rotate(v.normal);
+    // Compute piece center
+    let mut pcx = 0.0f32;
+    let mut pcy = 0.0f32;
+    for &(dr, dc) in cells {
+        pcx += dc as f32 + 0.5;
+        pcy += dr as f32 + 0.5;
     }
+    pcx /= cells.len() as f32;
+    pcy /= cells.len() as f32;
 
-    // Cull back-facing triangles (camera looks along -Z in world space).
-    // For each triangle, check if its face normal points toward the camera (nz > 0).
-    // Use the first vertex's normal as a proxy for the triangle's face direction.
-    let mut kept_indices = Vec::new();
-    let idx_slice = &indices[start_idx_count..];
-    let mut i = 0;
-    while i + 2 < idx_slice.len() {
-        let v0 = idx_slice[i] as usize;
-        let n = &verts[v0].normal;
-        // Keep triangle if its normal has a positive Z component (faces camera)
-        if n[2] > -0.1 {
-            kept_indices.push(idx_slice[i]);
-            kept_indices.push(idx_slice[i + 1]);
-            kept_indices.push(idx_slice[i + 2]);
+    // Inner glow: 6 faces × 2 tris = 12 tris (first geometry emitted by push_cube_3d)
+    let inner_glow_tris = if color[3] > 0.5 { 12 } else { 0 };
+
+    // Sort cells back-to-front by center Z after rotation
+    let mut sorted_cells: Vec<((i32, i32), f32)> = cells.iter().map(|&(dr, dc)| {
+        let local_center = [dc as f32 + 0.5 - pcx, -(dr as f32 + 0.5 - pcy), 0.0];
+        let rotated = rotate(local_center);
+        ((dr, dc), rotated[2])
+    }).collect();
+    sorted_cells.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    for &((dr, dc), _) in &sorted_cells {
+        let col = dc as f32 - pcx;
+        let row = dr as f32 - pcy;
+
+        let mut cell_verts = Vec::new();
+        let mut cell_indices = Vec::new();
+        push_cube_3d(&mut cell_verts, &mut cell_indices, col, row, depth, color, glow_boost, 0, 0.0);
+
+        // Transform all vertices
+        for v in &mut cell_verts {
+            let rotated = rotate(v.position);
+            v.position = [
+                rotated[0] + world_pos[0],
+                rotated[1] + world_pos[1],
+                rotated[2] + world_pos[2],
+            ];
+            v.normal = rotate(v.normal);
         }
-        i += 3;
+
+        // Sort face groups within this cell back-to-front.
+        // Classify each outer triangle by its dominant normal axis (which of the 6 cube
+        // faces it belongs to), group them, sort groups by face center Z, then emit
+        // inner glow first, then face groups back-to-front.
+        let base = verts.len() as u32;
+        verts.extend_from_slice(&cell_verts);
+
+        // Inner glow triangles — draw first in original order (behind outer shell)
+        let mut t = 0;
+        let mut tri_idx = 0;
+        while tri_idx < inner_glow_tris && t + 2 < cell_indices.len() {
+            indices.push(cell_indices[t] + base);
+            indices.push(cell_indices[t + 1] + base);
+            indices.push(cell_indices[t + 2] + base);
+            t += 3;
+            tri_idx += 1;
+        }
+
+        // Classify remaining triangles into 6 face groups by dominant normal axis
+        // 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z
+        let mut face_groups: [Vec<[u32; 3]>; 6] = Default::default();
+        while t + 2 < cell_indices.len() {
+            let v0 = cell_indices[t] as usize;
+            let n = cell_verts[v0].normal;
+            let (ax, ay, az) = (n[0].abs(), n[1].abs(), n[2].abs());
+            let group = if ax >= ay && ax >= az {
+                if n[0] > 0.0 { 0 } else { 1 }
+            } else if ay >= az {
+                if n[1] > 0.0 { 2 } else { 3 }
+            } else {
+                if n[2] > 0.0 { 4 } else { 5 }
+            };
+            face_groups[group].push([cell_indices[t] + base, cell_indices[t+1] + base, cell_indices[t+2] + base]);
+            t += 3;
+        }
+
+        // Sort face groups by their representative Z (center of the face direction after rotation)
+        // +X face center is at (+0.5, 0, 0) pre-rotation, etc.
+        let face_centers_local: [[f32; 3]; 6] = [
+            [0.5, 0.0, 0.0], [-0.5, 0.0, 0.0],
+            [0.0, 0.5, 0.0], [0.0, -0.5, 0.0],
+            [0.0, 0.0, 0.5], [0.0, 0.0, -0.5],
+        ];
+        let mut group_order: [(usize, f32); 6] = std::array::from_fn(|i| {
+            let rotated = rotate(face_centers_local[i]);
+            (i, rotated[2])
+        });
+        group_order.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Emit face groups back-to-front (lowest Z first)
+        for &(gi, _) in &group_order {
+            for tri in &face_groups[gi] {
+                indices.extend_from_slice(tri);
+            }
+        }
     }
-    indices.truncate(start_idx_count);
-    indices.extend_from_slice(&kept_indices);
 }
 
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)
