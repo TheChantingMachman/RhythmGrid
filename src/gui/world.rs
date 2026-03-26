@@ -13,13 +13,7 @@ use super::audio_output::{self, AudioState};
 use super::camera::CameraReactor;
 use super::drawing::{Vertex, rgba_to_f32};
 use super::effects::AudioFrame;
-use super::effects::beat_rings::BeatRings;
-use super::effects::hex_background::HexBackground;
-use super::effects::fft_visualizer::FftVisualizer;
-use super::effects::grid_lines::GridLines;
-use super::effects::fireworks::Fireworks;
 use super::effects::themes;
-use super::particles::ParticleSystem;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
 use super::theme::{DEFAULT_CAM_ANGLE, THEME};
 
@@ -33,23 +27,13 @@ pub struct GameWorld {
     pub audio: Arc<Mutex<AudioState>>,
     pub analysis: super::audio_analysis::AudioAnalysis,
     pub(super) t_spin_flash: f32, // 1.0 on t-spin, decays to 0
-    pub particles: ParticleSystem,
     pub(super) prev_beat: bool,
     pub(super) clearing_cells: Vec<ClearingCell>,
     pub(super) drop_trails: Vec<DropTrail>,
     pub(super) settle_cells: Vec<SettleCell>,
     pub(super) shatter_fragments: Vec<ShatterFragment>,
     pub(super) bg_rings: Vec<BgRing>, // legacy — kept for level-up rings
-    pub(super) beat_rings: BeatRings,
-    pub(super) hex_background: HexBackground,
-    pub(super) fft_vis: FftVisualizer,
-    pub(super) grid_lines: GridLines,
-    pub(super) fireworks: Fireworks,
-    pub(super) fire: super::effects::fire::Fire,
-    pub(super) starfield: super::effects::starfield::Starfield,
-    pub(super) aurora: super::effects::aurora::Aurora,
-    pub(super) flow_field: super::effects::flow_field::FlowField,
-    pub(super) effect_flags: themes::EffectFlags,
+    pub effects: super::effect_manager::EffectManager,
     pub(super) danger_level: f32,
     pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
     last_level: u32,
@@ -216,23 +200,13 @@ impl GameWorld {
             audio,
             analysis: super::audio_analysis::AudioAnalysis::new(),
             t_spin_flash: 0.0,
-            particles: ParticleSystem::new(),
             prev_beat: false,
             clearing_cells: Vec::new(),
             drop_trails: Vec::new(),
             settle_cells: Vec::new(),
             shatter_fragments: Vec::new(),
             bg_rings: Vec::new(),
-            beat_rings: BeatRings::new(theme.rings),
-            hex_background: HexBackground::new(theme.hex),
-            fft_vis: FftVisualizer::new(theme.fft),
-            grid_lines: GridLines::new(theme.grid),
-            fireworks: { let mut fw = Fireworks::new(); fw.bursts_only = theme.name == "Debug"; fw },
-            fire: super::effects::fire::Fire::new(),
-            starfield: super::effects::starfield::Starfield::new(),
-            aurora: super::effects::aurora::Aurora::new(),
-            flow_field: super::effects::flow_field::FlowField::new(),
-            effect_flags: theme.effects.clone(),
+            effects: super::effect_manager::EffectManager::new(&theme),
             piece_colors: theme.piece_colors,
             render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
             render_status: GameStatusRender {
@@ -292,7 +266,7 @@ impl GameWorld {
         // Audio analysis pipeline
         if let Ok(mut audio) = self.audio.try_lock() {
             if self.analysis.track_changed() {
-                self.fireworks.shell_cooldown = 3.0;
+                self.effects.on_track_change();
             }
             self.analysis.update(&mut audio, dt);
         }
@@ -321,20 +295,20 @@ impl GameWorld {
         let bh = h * 0.85;
         let bx = (w - bw) / 2.0;
         let by = (h - bh) / 2.0;
-        if self.effect_flags.particle_beat_pulse {
+        if self.effects.flags.particle_beat_pulse {
             for band in 4..6 {
                 if self.analysis.band_beat_intensity[band] > 0.95 {
-                    self.particles.spawn_beat_pulse(bx, by, bw, bh, 0.6);
+                    self.effects.particles.spawn_beat_pulse(bx, by, bw, bh, 0.6);
                 }
             }
             if got_beat && !self.prev_beat && self.analysis.band_beat_intensity[4..6].iter().all(|&b| b < 0.95) {
-                self.particles.spawn_beat_pulse(bx, by, bw, bh, 1.0);
+                self.effects.particles.spawn_beat_pulse(bx, by, bw, bh, 1.0);
             }
         }
         self.prev_beat = got_beat;
 
         // Update particles and line clear animations
-        self.particles.update(dt as f32);
+        self.effects.particles.update(dt as f32);
         // HUD auto-fade (1.5s delay, then fast fade)
         self.hud_fade_timer -= dt as f32;
         if self.hud_fade_timer <= 0.0 {
@@ -380,7 +354,7 @@ impl GameWorld {
         if current_level > self.last_level {
             self.hud_opacity = 1.0;
             self.hud_fade_timer = 2.0;
-            if self.effect_flags.level_up_rings {
+            if self.effects.flags.level_up_rings {
                 self.level_up_flash = 1.0;
             }
             // Spawn celebratory rings
@@ -399,11 +373,11 @@ impl GameWorld {
             let cx = w / 2.0;
             let cy = h / 2.0;
             for _ in 0..120 {
-                let angle = self.preview_angle + (self.particles.particles.len() as f32 * 0.7);
+                let angle = self.preview_angle + (self.effects.particles.particles.len() as f32 * 0.7);
                 let speed = 50.0 + (angle.sin().abs() * 80.0);
                 let vx = angle.cos() * speed;
                 let vy = angle.sin() * speed;
-                self.particles.particles.push(super::particles::Particle {
+                self.effects.particles.particles.push(super::particles::Particle {
                     x: cx + (angle * 3.0).cos() * 20.0,
                     y: cy + (angle * 3.0).sin() * 20.0,
                     vx, vy,
@@ -420,38 +394,12 @@ impl GameWorld {
         // Build AudioFrame BEFORE decay so effects see fresh beat triggers
         self.audio_frame = self.analysis.audio_frame(self.danger_level, dt as f32);
 
-        // Update all effect modules + camera (guarded by effect_flags)
-        use super::effects::AudioEffect;
-        let ef = &self.effect_flags;
-        // Set resolved band indices on effects before update
-        if ef.beat_rings {
-            self.beat_rings.trigger_band = self.resolve_rank(self.bindings.beat_rings);
-            self.beat_rings.update(&self.audio_frame);
-        }
-        if ef.hex_background { self.hex_background.update(&self.audio_frame); }
-        self.fft_vis.locked = self.fft_locked;
-        self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
-        if ef.fft_visualizer { self.fft_vis.update(&self.audio_frame); }
-        if ef.grid_lines {
-            self.grid_lines.distortion_enabled = ef.grid_distortion;
-            self.grid_lines.update(&self.audio_frame);
-        }
-        if ef.fireworks {
-            self.fireworks.trigger_band = Some(self.resolve_rank(self.bindings.fireworks));
-            self.fireworks.update(&self.audio_frame);
-        }
-        if ef.fire {
-            self.fire.update(&self.audio_frame);
-        }
-        if ef.starfield {
-            self.starfield.update(&self.audio_frame);
-        }
-        if ef.aurora {
-            self.aurora.update(&self.audio_frame);
-        }
-        if ef.flow_field {
-            self.flow_field.update(&self.audio_frame);
-            // Feed active piece positions to flow field
+        // Update all effect modules
+        let fft_lock_hovered = self.btn_hovered(ButtonId::FftLock);
+        self.effects.update(&self.audio_frame, &self.analysis, &self.bindings, dt, self.fft_locked, fft_lock_hovered);
+
+        // Feed active piece positions to flow field (depends on game state)
+        if self.effects.flags.flow_field {
             if self.session.state == GameState::Playing {
                 let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
                 let piece_world: Vec<(f32, f32)> = cells.iter().map(|&(dr, dc)| {
@@ -459,13 +407,14 @@ impl GameWorld {
                     let r = (self.session.active_piece.row + dr) as f32 + 0.5;
                     (c, r)
                 }).collect();
-                self.flow_field.set_piece_cells(piece_world);
+                self.effects.flow_field.set_piece_cells(piece_world);
             } else {
-                self.flow_field.set_piece_cells(Vec::new());
+                self.effects.flow_field.set_piece_cells(Vec::new());
             }
-            super::effects::flow_field::tick_particles(&mut self.flow_field, dt as f32);
         }
-        if ef.camera_sway { self.camera.update(&self.audio_frame); }
+
+        // Camera (not managed by EffectManager — depends on audio_frame directly)
+        if self.effects.flags.camera_sway { self.camera.update(&self.audio_frame); }
 
         // Decay AFTER effects have consumed the frame
         self.analysis.decay_beats(dt as f32);
@@ -525,20 +474,20 @@ impl GameWorld {
                     let cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
                     let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
                     let piece_row = pre_piece.row + max_dr;
-                    if self.effect_flags.line_clear_particles {
+                    if self.effects.flags.line_clear_particles {
                         self.spawn_line_clear_particles(lines_cleared, piece_row);
                     }
                     // Shatter fragments for cleared rows (tick path)
-                    if self.effect_flags.clearing_flash {
+                    if self.effects.flags.clearing_flash {
                         self.spawn_shatter_for_row_range(piece_row - lines_cleared as i32 + 1, lines_cleared);
                     }
-                    if self.effect_flags.camera_shake {
+                    if self.effects.flags.camera_shake {
                         self.camera.trigger_shake((lines_cleared as f32 * 0.3).min(1.0));
                     }
-                    if self.effect_flags.grid_distortion {
+                    if self.effects.flags.grid_distortion {
                         let cx = pre_piece.col as f32;
                         let cy = piece_row as f32;
-                        self.grid_lines.add_force(cx, cy, lines_cleared as f32 * 0.6);
+                        self.effects.grid_lines.add_force(cx, cy, lines_cleared as f32 * 0.6);
                     }
                 }
                 // Secondary game over check: if new piece spawned in vanish zone
@@ -617,19 +566,11 @@ impl GameWorld {
         ];
         self.theme_index = (self.theme_index + 1) % theme_fns.len();
         let theme = theme_fns[self.theme_index]();
-        self.effect_flags = theme.effects.clone();
+        self.effects.apply_theme(&theme);
         self.bindings = theme.bindings.clone();
         self.color_grade = theme.color_grade;
         self.piece_colors = theme.piece_colors;
-        self.beat_rings = BeatRings::new(theme.rings);
-        self.hex_background = HexBackground::new(theme.hex);
-        self.fft_vis = FftVisualizer::new(theme.fft);
-        self.grid_lines = GridLines::new(theme.grid);
         self.camera = CameraReactor::new(theme.camera);
-        self.particles.particles.clear();
-        self.flow_field = super::effects::flow_field::FlowField::new();
-        self.fireworks.shells_only = false;
-        self.fireworks.bursts_only = theme.name == "Debug";
         self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
         self.toast_timer = 2.0;
         self.save_settings();
@@ -797,23 +738,23 @@ impl GameWorld {
                         TickResult::PieceLocked { lines_cleared } => lines_cleared,
                         _ => 0,
                     };
-                    if lines > 0 && self.effect_flags.line_clear_particles {
+                    if lines > 0 && self.effects.flags.line_clear_particles {
                         self.spawn_line_clear_particles(lines, land_bottom);
                     }
-                    if self.effect_flags.camera_shake {
+                    if self.effects.flags.camera_shake {
                         self.camera.trigger_shake((0.2 + lines as f32 * 0.25).min(1.0));
                     }
-                    if self.effect_flags.flow_field {
+                    if self.effects.flags.flow_field {
                         // Shockwave at center of landing area
                         let drop_x = piece_col as f32 + 0.5;
                         let drop_y = land_bottom as f32 + 0.5;
                         let drop_dist = (land_row - start_row).max(0) as f32;
                         let intensity = 0.5 + (drop_dist / 20.0).min(1.0) * 0.5;
-                        self.flow_field.trigger_drop(drop_x, drop_y, intensity);
+                        self.effects.flow_field.trigger_drop(drop_x, drop_y, intensity);
                     }
-                    if self.effect_flags.grid_distortion {
+                    if self.effects.flags.grid_distortion {
                         let cx = self.session.active_piece.col as f32;
-                        self.grid_lines.add_force(cx, land_bottom as f32, 0.3 + lines as f32 * 0.4);
+                        self.effects.grid_lines.add_force(cx, land_bottom as f32, 0.3 + lines as f32 * 0.4);
                     }
                     // Secondary game over check for vanish zone spawn
                     if self.session.active_piece.row < 0 && self.session.state == GameState::Playing {
@@ -874,7 +815,7 @@ impl GameWorld {
             _ => [1.0, 0.3, 0.8, 1.0], // tetris — magenta burst
         };
         for _ in 0..lines {
-            self.particles.spawn_line_clear(top_y, clear_height, bx, bw, color);
+            self.effects.particles.spawn_line_clear(top_y, clear_height, bx, bw, color);
         }
     }
 

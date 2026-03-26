@@ -93,9 +93,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     // Background geometry (transparent — behind everything)
     build_background(&mut tv, &mut ti, world, gw, gh);
 
-    // Fireworks (transparent, behind board)
+    // Background effects (transparent, behind board)
     {
-        use super::effects::AudioEffect;
         let fx_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
             win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
@@ -103,25 +102,11 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: world.hud_opacity,
         };
-        if world.effect_flags.fireworks {
-            world.fireworks.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.fire {
-            world.fire.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.starfield {
-            world.starfield.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.aurora {
-            world.aurora.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.flow_field {
-            world.flow_field.render(&mut tv, &mut ti, &fx_ctx);
-        }
+        world.effects.render_background(&mut tv, &mut ti, &fx_ctx);
     }
 
     // Occupied cells — glow per piece type, pulse from dynamic rank analysis
-    let ef = &world.effect_flags;
+    let ef = &world.effects.flags;
     let pulse_band = world.resolve_rank(world.bindings.board_pulse);
     let glow_band = world.resolve_rank(world.bindings.cube_glow);
     for cell in &world.render_board.occupied {
@@ -227,9 +212,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Grid lines (effect module)
-    if ef.grid_lines {
-        use super::effects::AudioEffect;
+    // Grid lines (effect module — renders to opaque pass)
+    {
         let grid_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
             win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
@@ -237,7 +221,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: world.hud_opacity,
         };
-        world.grid_lines.render(&mut sv, &mut si, &grid_ctx);
+        world.effects.render_grid(&mut sv, &mut si, &grid_ctx);
     }
 
     // --- 3D Music Dashboard ---
@@ -425,9 +409,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         ], 0.0, 0.2, col);
     }
 
-    // FFT visualizer (effect module)
+    // FFT visualizer (rendered via effect manager with dashboard HUD opacity)
     if ef.fft_visualizer {
-        use super::effects::AudioEffect;
         let fft_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
             win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
@@ -435,7 +418,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: hud_a,
         };
-        world.fft_vis.render(&mut tv, &mut ti, &fft_ctx);
+        use super::effects::AudioEffect;
+        world.effects.fft_vis.render(&mut tv, &mut ti, &fft_ctx);
     }
 
     // Shatter fragments — scattered mini-cubes from line clears
@@ -468,20 +452,10 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
         preview_angle: world.preview_angle,
         hud_opacity: world.hud_opacity,
     };
-    use super::effects::AudioEffect;
-
-    // Hex background (effect module)
-    if world.effect_flags.hex_background {
-        world.hex_background.render(sv, si, &ctx);
-    }
-
-    // Beat rings (effect module)
-    if world.effect_flags.beat_rings {
-        world.beat_rings.render(sv, si, &ctx);
-    }
+    world.effects.render_dashboard(sv, si, &ctx);
 
     // Legacy level-up rings (still inline)
-    if !world.effect_flags.level_up_rings { return; }
+    if !world.effects.flags.level_up_rings { return; }
     let ring_cx = gw / 2.0;
     let ring_cy = -gh / 2.0;
     let ring_z = -1.0;
@@ -518,7 +492,7 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
 fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     let mut verts = Vec::new();
     let mut indices = Vec::new();
-    let ef = &world.effect_flags;
+    let ef = &world.effects.flags;
     let t = &THEME;
     let w = t.win_w as f32;
     let h = t.win_h as f32;
@@ -663,12 +637,12 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     // Particles (always visible, not affected by HUD fade)
-    world.particles.render(&mut verts, &mut indices);
+    world.effects.render_particles(&mut verts, &mut indices);
 
     // Apply HUD opacity (skip particles — they're always visible)
     let opacity = world.hud_opacity;
     if opacity < 0.99 {
-        let particle_verts = world.particles.particles.len() * 4;
+        let particle_verts = world.effects.particles.particles.len() * 4;
         let hud_vert_count = verts.len().saturating_sub(particle_verts);
         for v in verts[..hud_vert_count].iter_mut() {
             v.color[3] *= opacity;
