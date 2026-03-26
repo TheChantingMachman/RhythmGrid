@@ -4,9 +4,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
+use std::io::Cursor;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rhythm_grid::audio::{fft_bands, spectral_centroid, generate_procedural, BeatDetector, MultiBeatDetector, SpectralFluxDetector, StreamingDecoder, DEFAULT_BPM};
+use rhythm_grid::audio::{fft_bands, spectral_centroid, BeatDetector, MultiBeatDetector, SpectralFluxDetector, StreamingDecoder};
 use rhythm_grid::music::{scan_folder, Playlist};
+
+const DEFAULT_TRACK: &[u8] = include_bytes!("../../assets/default_track.ogg");
+const DEFAULT_TRACK_NAME: &str = "Neon Underworld";
 
 /// Shared state between the audio thread and the game loop.
 pub struct AudioState {
@@ -237,6 +241,109 @@ fn stream_decode_track(
     true
 }
 
+/// Stream-decode from an in-memory byte slice (e.g. embedded asset).
+fn stream_decode_bytes(
+    data: &'static [u8],
+    extension: &str,
+    target_sample_rate: u32,
+    buffer: &Arc<Mutex<SampleBuffer>>,
+    state: &Arc<Mutex<AudioState>>,
+) -> bool {
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::probe::Hint;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::audio::SampleBuffer as SymphSampleBuffer;
+
+    let cursor = Cursor::new(data);
+    let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+    let mut hint = Hint::new();
+    hint.with_extension(extension);
+
+    let probed = match symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+    {
+        Ok(p) => p,
+        Err(e) => { eprintln!("Failed to probe embedded track: {}", e); return false; }
+    };
+
+    let mut format = probed.format;
+    let track = match format.tracks().iter()
+        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+    {
+        Some(t) => t,
+        None => { eprintln!("No audio track in embedded data"); return false; }
+    };
+
+    let track_id = track.id;
+    let src_rate = track.codec_params.sample_rate.unwrap_or(44100);
+    let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
+
+    let mut decoder = match symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+    {
+        Ok(d) => d,
+        Err(e) => { eprintln!("Failed to create decoder for embedded track: {}", e); return false; }
+    };
+
+    let needs_resample = src_rate != target_sample_rate;
+
+    if let Ok(mut buf) = buffer.lock() {
+        buf.channels = channels;
+    }
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(_) => break,
+        };
+        if packet.track_id() != track_id { continue; }
+
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        let spec = *decoded.spec();
+        let n_frames = decoded.capacity();
+        let mut sample_buf = SymphSampleBuffer::<f32>::new(n_frames as u64, spec);
+        sample_buf.copy_interleaved_ref(decoded);
+        let chunk = sample_buf.samples().to_vec();
+
+        let out = if needs_resample {
+            resample(&chunk, src_rate, target_sample_rate, channels as u16)
+        } else {
+            chunk
+        };
+
+        // Back-pressure
+        loop {
+            if let Ok(buf) = buffer.try_lock() {
+                if buf.samples.len() < 44100 * channels * 2 {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        if let Ok(s) = state.try_lock() {
+            if s.skip_requested || s.back_requested || s.shuffle_requested || s.jump_to_requested.is_some() {
+                return false;
+            }
+        }
+
+        if let Ok(mut buf) = buffer.lock() {
+            buf.samples.extend(&out);
+        }
+    }
+
+    if let Ok(mut buf) = buffer.lock() {
+        buf.finished = true;
+    }
+    true
+}
+
 /// Starts the audio output stream. Returns shared state for the game loop.
 pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
     let state = Arc::new(Mutex::new(AudioState::new()));
@@ -257,9 +364,9 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
         let sample_rate = supported_config.sample_rate().0;
         let out_channels = supported_config.channels() as usize;
 
-        // Set up playlist or procedural fallback
+        // Set up playlist or embedded default fallback
         let mut playlist: Option<Playlist> = None;
-        let mut use_procedural = true;
+        let mut use_embedded = true;
 
         if let Some(folder) = &folder_owned {
             let files = scan_folder(Path::new(folder));
@@ -271,25 +378,12 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                         .collect();
                 }
                 playlist = Some(Playlist::new(files));
-                use_procedural = false;
+                use_embedded = false;
             }
         }
 
         // Shared sample buffer between decode thread and audio callback
         let buffer = Arc::new(Mutex::new(SampleBuffer::new(2)));
-
-        if use_procedural {
-            // Load procedural immediately (it's fast)
-            let audio = generate_procedural(DEFAULT_BPM, 300.0, sample_rate);
-            if let Ok(mut buf) = buffer.lock() {
-                buf.channels = 1;
-                buf.samples.extend(&audio.samples);
-                buf.finished = true; // will loop
-            }
-            if let Ok(mut s) = state_clone.lock() {
-                s.reset_for_new_track("Procedural 120 BPM");
-            }
-        }
 
         // Decode thread — handles streaming decode and track advancement
         let buffer_decode = buffer.clone();
@@ -298,7 +392,36 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
         let playlist_decode = playlist_shared.clone();
 
         std::thread::spawn(move || {
-            if use_procedural { return; } // nothing to decode
+            // Embedded default track — loop forever until user picks a folder
+            if use_embedded {
+                if let Ok(mut s) = state_decode.lock() {
+                    s.reset_for_new_track(DEFAULT_TRACK_NAME);
+                    s.track_list = vec![DEFAULT_TRACK_NAME.to_string()];
+                    s.current_track_index = 0;
+                }
+                loop {
+                    if let Ok(mut buf) = buffer_decode.lock() {
+                        buf.samples.clear();
+                        buf.finished = false;
+                    }
+                    stream_decode_bytes(DEFAULT_TRACK, "ogg", sample_rate, &buffer_decode, &state_decode);
+                    // Wait for playback to drain before looping
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        if let Ok(s) = state_decode.try_lock() {
+                            if s.shutdown { return; }
+                        }
+                        if let Ok(buf) = buffer_decode.try_lock() {
+                            if buf.finished && buf.samples.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+                    if let Ok(s) = state_decode.try_lock() {
+                        if s.shutdown { return; }
+                    }
+                }
+            }
 
             loop {
                 let track_path;
@@ -410,7 +533,6 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
             buffer_size: cpal::BufferSize::Fixed(512), // ~12ms — lower latency for beat sync
         };
 
-        let is_procedural = use_procedural;
         let mut smooth_vol: f32 = 0.5; // smoothed volume to avoid step discontinuities
 
         let stream = device.build_output_stream(
@@ -451,8 +573,6 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                                 }
                             }
                             chunk_mono.push(mono / src_ch as f32);
-                        } else if is_procedural && buf.finished {
-                            for s in frame.iter_mut() { *s = 0.0; }
                         } else {
                             for s in frame.iter_mut() { *s = 0.0; }
                         }

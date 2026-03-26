@@ -604,3 +604,18 @@
   tags: [core, music, playback]
   status: implemented
   depends_on: [music.skip, music.prev_track]
+-
+  id: game.lock_delay_recheck
+  section: Game
+  description: 'Bug fix: after a successful rotation or horizontal move during active lock delay, check whether the piece still rests on a surface. Compute piece_cells for the current piece state, then call is_valid_position at (piece.row + 1, piece.col). If that returns true (space exists below), set lock_delay_active = false — do not reset lock_delay_resets or lock_delay_accumulator_ms, as gravity will re-initialize them when lock delay next activates. If is_valid_position returns false (still on a surface), keep lock_delay_active = true and proceed with the existing timer reset logic. This check goes in GameSession::rotate() and GameSession::move_horizontal(), after the existing lock delay timer reset block, guarded by the same lock_delay_active condition.'
+  tags: [core, game, bugfix]
+  status: implemented
+  depends_on: [game.lock_delay, game.rotate, game.move_down, game.collision]
+  modifies: [game.lock_delay]
+-
+  id: audio.streaming_decoder_open_bytes
+  section: Audio
+  description: 'Add StreamingDecoder::open_bytes(data: &''static [u8], extension: &str) -> Result<StreamingDecoder, AudioError>. Same as open() but reads from an in-memory byte slice instead of a file. Wraps data in std::io::Cursor, passes it to MediaSourceStream::new (Cursor<&[u8]> implements MediaSource), and uses the extension parameter as the format hint. No format validation against SUPPORTED_FORMATS needed since the caller controls the embedded data. All other probing, track discovery, and decoder setup is identical to open().'
+  tags: [core, audio]
+  status: draft
+  depends_on: [audio.streaming_decode]
