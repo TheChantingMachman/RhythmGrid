@@ -411,6 +411,7 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
         };
 
         let is_procedural = use_procedural;
+        let mut smooth_vol: f32 = 0.5; // smoothed volume to avoid step discontinuities
 
         let stream = device.build_output_stream(
             &config,
@@ -418,19 +419,25 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                 let mut chunk_mono = Vec::with_capacity(data.len() / out_channels);
 
                 // Read volume and pause state
-                let (vol, is_paused) = state_play.try_lock()
+                let (target_vol, is_paused) = state_play.try_lock()
                     .map(|s| (s.volume, s.paused))
-                    .unwrap_or((0.5, false));
+                    .unwrap_or((smooth_vol, false));
 
                 if is_paused {
                     for s in data.iter_mut() { *s = 0.0; }
                     return;
                 }
 
+                // Per-callback volume smoothing (~5ms ramp at 44.1kHz/512 buffer)
+                let vol_step = (target_vol - smooth_vol) / data.len().max(1) as f32 * out_channels as f32;
+
                 if let Ok(mut buf) = buffer_play.try_lock() {
                     let src_ch = buf.channels.max(1);
 
                     for frame in data.chunks_mut(out_channels) {
+                        // Ramp volume smoothly per frame
+                        smooth_vol += vol_step;
+
                         if buf.samples.len() >= src_ch {
                             let mut mono = 0.0f32;
                             for out_s in frame.iter_mut() {
@@ -440,16 +447,13 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                                 if let Some(sample) = buf.samples.pop_front() {
                                     mono += sample;
                                     let out_ch_idx = ch % out_channels;
-                                    frame[out_ch_idx] += sample * vol;
+                                    frame[out_ch_idx] += sample * smooth_vol;
                                 }
                             }
                             chunk_mono.push(mono / src_ch as f32);
                         } else if is_procedural && buf.finished {
-                            // Procedural: loop by re-reading (buffer was drained)
-                            // This shouldn't happen with 5min of procedural, but safety:
                             for s in frame.iter_mut() { *s = 0.0; }
                         } else {
-                            // Buffer underrun — silence while waiting for decode
                             for s in frame.iter_mut() { *s = 0.0; }
                         }
                     }
@@ -457,6 +461,9 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                     // Couldn't get lock — silence
                     for s in data.iter_mut() { *s = 0.0; }
                 }
+
+                // Snap to target to avoid drift
+                smooth_vol = target_vol;
 
                 if let Ok(mut state) = state_play.try_lock() {
                     state.update_from_samples(&chunk_mono, sample_rate);
