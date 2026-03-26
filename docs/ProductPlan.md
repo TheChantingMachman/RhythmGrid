@@ -463,10 +463,17 @@ Current demo mode plays randomly. A smarter demo AI would:
 - **Beat-synced placement:** final drop/lock on the beat rather than arbitrary timing. Requires lookahead or buffered placement.
 - Pipeline-friendly: the AI decision logic (which piece where, when to drop) is testable and spec-able. Only the music-timing bridge lives in GUI code.
 
-### Preview/Hold piece overhaul (future)
-Two issues with the next-piece preview and held-piece display:
-- **Perspective warping bug:** pieces distort as they rotate due to perspective projection being applied at close range. The 3D preview uses the same perspective matrix as the board, but the preview cubes are much closer to the camera. Fix: render previews with an orthographic or less aggressive perspective, or project them in a separate viewport.
-- **Visual parity with board cubes:** preview/hold pieces use simplified rendering (basic cube faces, no bevels, no inner glow, no GGX lighting). They should match the board cube fidelity: full 12-edge bevels, inner glow, contact AO between piece cells, environment reflections, GGX specular. This is a significant rework of the preview rendering path in scene.rs — the current code manually builds rotated cube faces with painter's algorithm sorting, which would need to be replaced with push_cube_3d calls in a local coordinate space.
+### Preview/Hold piece polish (partially done)
+Moved preview/hold pieces from HUD to world-space 3D rendering via push_cube_3d — they now have full bevels, inner glow, GGX lighting, and visual parity with board cubes. Perspective warping bug is fixed.
+Remaining:
+- **Inner glow z-ordering:** back-facing inner glow faces have subtle lighting pop at some rotation angles. The transparent pass doesn't write depth, so inner glow faces can't be trivially depth-sorted. Archived attempt at face-group sorting on `archive/preview-face-sort`. May need per-object depth pre-pass or OIT.
+- **Board bottom-row z-ordering:** pre-existing issue where bottom row cubes' top faces draw over front faces of the row above due to cabinet angle projection. Same root cause (transparent pass, no depth write).
+
+### Flow field refinement path
+The Flow theme's 3D curl noise particle system currently runs entirely on CPU. Refinement plan:
+1. **CPU velocity grid optimization** — precompute a ~32x32x8 curl velocity grid per frame, particles sample via trilinear lookup instead of per-particle noise. Reduces noise evaluations from O(particles) to O(grid_size) regardless of particle count.
+2. **Effect refinement on CPU** — tune particle behavior, color palettes, interaction forces, shockwave feel, danger-level density scaling, signature line-clear effects (vortex implosion). Easier to debug and iterate on CPU.
+3. **GPU compute shader port** — once the behavior is locked, port particle sim to WGSL compute shader. Math translates 1:1. Enables orders of magnitude more particles for denser, richer fluid motion.
 
 ### Dynamic point lights (future)
 Firework bursts and line clears could cast momentary colored light onto nearby cubes:
@@ -482,7 +489,7 @@ Firework bursts and line clears could cast momentary colored light onto nearby c
 3. **Music-reactive demo AI** — demo mode that performs to the music (see above)
 4. **Background environments** — procedural or authored 3D scenes behind the board (underwater, space, city) per theme
 5. **Screen-space effects** — chromatic aberration, vignette, radial blur as post-process options
-6. **GPU particle system** — compute shader particles for orders of magnitude more density
+6. **GPU particle system** — compute shader port of flow field (see refinement path above), then generalize for all particle effects
 7. **SDF text rendering** — smooth scalable fonts replacing bitmap glyphs
 8. **Visualizer-only mode** — no game, just the music visualization filling the screen
 9. **Custom music analysis** — pre-scan tracks on load for BPM, section boundaries, energy map. Enables choreographed effects.
