@@ -1,6 +1,6 @@
 // @spec-tags: core,game,timing
 // @invariants: LOCK_DELAY_MS=400 and MAX_LOCK_RESETS=15 constants; GameSession lock delay fields initialize to false/0/0; tick() starts lock delay when move_down fails; lock delay accumulates across ticks and expires after 400ms; move_horizontal/rotate reset accumulator and increment resets when lock_delay_active; hard_drop bypasses lock delay; resets exhausted causes immediate lock; GameSession::move_horizontal and rotate return bool matching free fn result
-// @build: 72
+// @build: 95
 
 use rhythm_grid::game::{
     tick, GameSession, GameState, TickResult, ActivePiece,
@@ -69,16 +69,18 @@ fn lock_delay_accumulator_initialized_to_zero_on_activation() {
 }
 
 #[test]
-fn lock_delay_resets_initialized_to_zero_on_activation() {
+fn lock_delay_activation_preserves_existing_resets() {
     let mut session = GameSession::new();
+    session.lock_delay_resets = 5; // simulate resets from a prior recheck cycle
     session.active_piece = ActivePiece {
         piece_type: TetrominoType::I,
         rotation: 0,
         row: 19,
         col: 4,
     };
-    tick(&mut session, 1.0);
-    assert_eq!(session.lock_delay_resets, 0);
+    tick(&mut session, 1.0); // gravity fires, move_down fails → lock delay activates
+    assert!(session.lock_delay_active);
+    assert_eq!(session.lock_delay_resets, 5, "activation must NOT zero resets");
 }
 
 #[test]
@@ -378,7 +380,7 @@ fn lock_delay_locks_when_resets_exhausted_on_next_tick() {
     tick(&mut session, 1.0); // lock_delay_active=true
     // Exhaust resets manually.
     session.lock_delay_resets = MAX_LOCK_RESETS;
-    // Even with < 500ms accumulated, the next tick should lock immediately.
+    // Even with < 400ms accumulated, the next tick should lock immediately.
     let result = tick(&mut session, 0.1); // only 100ms but resets exhausted
     assert!(
         matches!(result, TickResult::PieceLocked { .. }),

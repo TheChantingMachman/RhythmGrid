@@ -610,7 +610,6 @@ pub fn tick(session: &mut GameSession, dt_secs: f64) -> TickResult {
             } else {
                 session.lock_delay_active = true;
                 session.lock_delay_accumulator_ms = 0;
-                session.lock_delay_resets = 0;
                 session.gravity_accumulator_ms = 0;
                 TickResult::Nothing
             }
