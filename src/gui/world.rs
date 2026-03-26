@@ -201,7 +201,7 @@ impl GameWorld {
     pub fn save_settings(&self) {
         let vol = if let Ok(audio) = self.audio.lock() { audio.volume } else { 0.8 };
         let shuffled = if let Ok(audio) = self.audio.lock() { audio.shuffled } else { false };
-        let theme_names = ["Default", "Water", "Debug"];
+        let theme_names = ["Default", "Water", "Space", "Debug"];
         let settings = rhythm_grid::config::Settings {
             volume: vol,
             speed: 1.0,
@@ -224,7 +224,8 @@ impl GameWorld {
         let settings = load_settings(&settings_path);
         let (theme, theme_index) = match settings.theme.as_str() {
             "Water" => (themes::water_theme(), 1),
-            "Debug" => (themes::debug_theme(), 2),
+            "Space" => (themes::space_theme(), 2),
+            "Debug" => (themes::debug_theme(), 3),
             _ => (themes::default_theme(), 0),
         };
         let audio = audio_output::start_audio(settings.music_folder.as_deref());
@@ -755,6 +756,7 @@ impl GameWorld {
         let theme_fns: &[fn() -> themes::VisualTheme] = &[
             themes::default_theme,
             themes::water_theme,
+            themes::space_theme,
             themes::debug_theme,
         ];
         self.theme_index = (self.theme_index + 1) % theme_fns.len();
@@ -768,6 +770,7 @@ impl GameWorld {
         self.fft_vis = FftVisualizer::new(theme.fft);
         self.grid_lines = GridLines::new(theme.grid);
         self.camera = CameraReactor::new(theme.camera);
+        self.particles.particles.clear();
         self.fireworks.shells_only = false;
         self.fireworks.bursts_only = theme.name == "Debug";
         self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
