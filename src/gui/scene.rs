@@ -90,10 +90,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let gw = WIDTH as f32;
     let gh = HEIGHT as f32;
 
-    // Background geometry (transparent — behind everything)
-    build_background(&mut tv, &mut ti, world, gw, gh);
-
-    // Background effects (transparent, behind board)
+    // Background effects + hex/beat_rings + level-up rings
     {
         let fx_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
@@ -102,8 +99,11 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: world.hud_opacity,
         };
+        world.effects.render_dashboard(&mut tv, &mut ti, &fx_ctx);
         world.effects.render_background(&mut tv, &mut ti, &fx_ctx);
     }
+    // Level-up rings (animation-driven, not an effect module)
+    build_level_up_rings(&mut tv, &mut ti, world, gw, gh);
 
     // Occupied cells — glow per piece type, pulse from dynamic rank analysis
     let ef = &world.effects.flags;
@@ -248,18 +248,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 }
 
 /// Background geometric field: hex grid + connecting web + beat rings
-fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, gw: f32, gh: f32) {
-    let ctx = super::effects::RenderContext {
-        board_width: gw,
-        board_height: gh,
-        win_w: 0.0, win_h: 0.0,
-        window_aspect: 1.0,
-        preview_angle: world.preview_angle,
-        hud_opacity: world.hud_opacity,
-    };
-    world.effects.render_dashboard(sv, si, &ctx);
-
-    // Legacy level-up rings (still inline)
+fn build_level_up_rings(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, gw: f32, gh: f32) {
     if !world.effects.flags.level_up_rings { return; }
     let ring_cx = gw / 2.0;
     let ring_cy = -gh / 2.0;
