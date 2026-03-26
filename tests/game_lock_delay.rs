@@ -380,7 +380,7 @@ fn lock_delay_locks_when_resets_exhausted_on_next_tick() {
     tick(&mut session, 1.0); // lock_delay_active=true
     // Exhaust resets manually.
     session.lock_delay_resets = MAX_LOCK_RESETS;
-    // Even with < 500ms accumulated, the next tick should lock immediately.
+    // Even with < 400ms accumulated, the next tick should lock immediately.
     let result = tick(&mut session, 0.1); // only 100ms but resets exhausted
     assert!(
         matches!(result, TickResult::PieceLocked { .. }),

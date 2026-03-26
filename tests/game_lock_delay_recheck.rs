@@ -1,6 +1,6 @@
 // @spec-tags: core,game,bugfix
-// @invariants: After move_horizontal/rotate succeeds during active lock delay, recheck is_valid_position at row+1; if space below exists set lock_delay_active=false without touching resets or accumulator; recheck is guarded by lock_delay_active; recheck runs even when resets are exhausted; gravity success path (PieceMoved) zeroes lock_delay_resets; gravity failure path (lock delay activation) does NOT zero lock_delay_resets; resets accumulate across recheck deactivation/reactivation cycles
-// @build: 95
+// @invariants: After move_horizontal/rotate succeeds during active lock delay, recheck is_valid_position at row+1; if space below exists set lock_delay_active=false without touching resets or accumulator; recheck is guarded by lock_delay_active; recheck runs even when resets are exhausted; gravity success path (PieceMoved) does NOT zero lock_delay_resets — resets persist until piece placement; gravity does NOT zero lock_delay_resets in either success or failure path; resets accumulate across the full landing sequence and only zero on piece placement (hard_drop, tick lock expiration, hold)
+// @build: 98
 
 use rhythm_grid::game::{
     tick, GameSession, GameState, TickResult, ActivePiece,
@@ -285,13 +285,13 @@ fn move_horizontal_recheck_runs_even_when_resets_exhausted() {
 // --- Test 11 ---
 
 #[test]
-fn gravity_success_zeroes_lock_delay_resets() {
+fn gravity_success_preserves_lock_delay_resets() {
     let mut session = GameSession::new();
     session.lock_delay_resets = 5; // leftover from previous cycle
     // Piece at default spawn position — can fall
     let result = tick(&mut session, 1.0); // gravity fires, move_down succeeds
     assert_eq!(result, TickResult::PieceMoved);
-    assert_eq!(session.lock_delay_resets, 0, "gravity success must zero resets");
+    assert_eq!(session.lock_delay_resets, 5, "gravity success must preserve resets");
 }
 
 // --- Test 12 ---
@@ -347,13 +347,13 @@ fn resets_accumulate_across_recheck_deactivation_reactivation() {
 // --- Test 14 ---
 
 #[test]
-fn gravity_success_resets_counter_prevents_circumvention() {
+fn gravity_success_does_not_zero_accumulated_resets() {
     let mut session = GameSession::new();
     session.lock_delay_resets = 10; // accumulated resets
     // Piece at spawn position, can fall
     let result = tick(&mut session, 1.0);
     assert_eq!(result, TickResult::PieceMoved);
-    assert_eq!(session.lock_delay_resets, 0, "gravity success must zero resets to prevent circumvention");
+    assert_eq!(session.lock_delay_resets, 10, "gravity success must not zero accumulated resets");
 }
 
 // --- Test 15 ---
@@ -372,4 +372,19 @@ fn lock_delay_expiry_still_zeroes_resets() {
     let result = tick(&mut session, 0.4); // lock delay expires
     assert!(matches!(result, TickResult::PieceLocked { .. }));
     assert_eq!(session.lock_delay_resets, 0, "expiry cleanup must zero resets");
+}
+
+// --- Test 16 ---
+
+#[test]
+fn gravity_success_preserves_resets_before_landing() {
+    let mut session = GameSession::new();
+    session.lock_delay_resets = 3; // resets from a prior recheck cycle
+    // Piece at default spawn position — can fall
+    let result = tick(&mut session, 1.0); // gravity fires, move_down succeeds → PieceMoved
+    assert_eq!(result, TickResult::PieceMoved);
+    assert_eq!(
+        session.lock_delay_resets, 3,
+        "gravity success must preserve resets from prior recheck cycle"
+    );
 }

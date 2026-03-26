@@ -606,7 +606,6 @@ pub fn tick(session: &mut GameSession, dt_secs: f64) -> TickResult {
         if session.gravity_accumulator_ms >= interval {
             if move_down(&session.grid, &mut session.active_piece) {
                 session.gravity_accumulator_ms = 0;
-                session.lock_delay_resets = 0;
                 TickResult::PieceMoved
             } else {
                 session.lock_delay_active = true;

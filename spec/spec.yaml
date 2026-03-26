@@ -609,7 +609,7 @@
   section: Game
   description: 'Bug fix, two parts. (1) Recheck after move/rotate: after a successful rotation or horizontal move during active lock delay, check whether the piece still rests on a surface. Compute piece_cells for the current piece state, then call is_valid_position at (piece.row + 1, piece.col). If that returns true (space exists below), set lock_delay_active = false — do not touch lock_delay_resets or lock_delay_accumulator_ms. If false (still on surface), keep lock_delay_active = true (existing timer reset logic already ran). This check goes in GameSession::rotate() and GameSession::move_horizontal(), after the existing lock delay timer reset block, guarded by the same lock_delay_active condition. (2) Preserve resets across the full landing sequence: do NOT zero lock_delay_resets anywhere in tick()''s gravity handling — neither on move_down success nor on move_down failure. Remove the lock_delay_resets = 0 line from the gravity success branch (where move_down returns true and PieceMoved is returned). Resets are already correctly zeroed in every piece-placement path (hard_drop, tick lock expiration, hold), so they reset naturally when a new piece spawns. This ensures MAX_LOCK_RESETS applies across the entire landing sequence including recheck deactivation/reactivation cycles caused by wall kicks.'
   tags: [core, game, bugfix]
-  status: stale
+  status: implemented
   depends_on: [game.lock_delay, game.rotate, game.move_down, game.collision]
   modifies: [game.lock_delay]
 -
