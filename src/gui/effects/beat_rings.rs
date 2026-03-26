@@ -91,10 +91,10 @@ impl AudioEffect for BeatRings {
                 let (c1, s1) = (a1.cos(), a1.sin());
 
                 let base = verts.len() as u32;
-                verts.push(Vertex { position: [ring_cx + c0 * inner_r, ring_cy + s0 * inner_r, ring_z], normal: ring_n, color: color_inner });
-                verts.push(Vertex { position: [ring_cx + c1 * inner_r, ring_cy + s1 * inner_r, ring_z], normal: ring_n, color: color_inner });
-                verts.push(Vertex { position: [ring_cx + c1 * outer_r, ring_cy + s1 * outer_r, ring_z], normal: ring_n, color: color_outer });
-                verts.push(Vertex { position: [ring_cx + c0 * outer_r, ring_cy + s0 * outer_r, ring_z], normal: ring_n, color: color_outer });
+                verts.push(Vertex { position: [ring_cx + c0 * inner_r, ring_cy + s0 * inner_r, ring_z], normal: ring_n, color: color_inner, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [ring_cx + c1 * inner_r, ring_cy + s1 * inner_r, ring_z], normal: ring_n, color: color_inner, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [ring_cx + c1 * outer_r, ring_cy + s1 * outer_r, ring_z], normal: ring_n, color: color_outer, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [ring_cx + c0 * outer_r, ring_cy + s0 * outer_r, ring_z], normal: ring_n, color: color_outer, uv: [0.0, 0.0] });
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
         }

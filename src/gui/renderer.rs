@@ -15,21 +15,31 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) world_pos: vec3<f32>,
+    @location(3) uv: vec2<f32>,
 };
 
 @vertex
-fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec4<f32>) -> VertexOutput {
+fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec4<f32>, @location(3) uv: vec2<f32>) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = u.view_proj * vec4<f32>(position, 1.0);
     out.color = color;
     out.normal = normal;
     out.world_pos = position;
+    out.uv = uv;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
+
+    // Soft particle: radial falloff from quad center (uv = -1..1)
+    if (in.uv.x != 0.0 || in.uv.y != 0.0) {
+        let dist = length(in.uv);
+        if (dist > 1.0) { discard; }
+        let soft = 1.0 - dist * dist; // quadratic falloff — bright center, soft edges
+        return vec4<f32>(in.color.rgb, in.color.a * soft);
+    }
 
     // Skip lighting for HUD elements (normal = 0,0,1 and z near 0)
     if (n.z > 0.99 && in.world_pos.z < 0.1) {
@@ -39,18 +49,46 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Directional light from upper-front-right
     let light_dir = normalize(vec3<f32>(0.3, 0.5, 0.8));
     let ambient = 0.25;
-    let diffuse = max(dot(n, light_dir), 0.0) * 0.55;
+    let ndotl = max(dot(n, light_dir), 0.0);
+    let diffuse = ndotl * 0.55;
 
     // Per-pixel view direction from camera position
     let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
     let half_dir = normalize(light_dir + view_dir);
-    let spec = pow(max(dot(n, half_dir), 0.0), 32.0) * 0.6; // HDR: can exceed 1.0
+    let ndotv = max(dot(n, view_dir), 0.001);
+    let ndoth = max(dot(n, half_dir), 0.0);
 
-    // Fresnel (Schlick approximation) — edges facing away from camera glow
-    let fresnel = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0) * 0.4; // HDR: brighter edges
+    // GGX specular (Cook-Torrance BRDF)
+    let roughness = 0.3;
+    let a = roughness * roughness;
+    let a2 = a * a;
+    let d = ndoth * ndoth * (a2 - 1.0) + 1.0;
+    let D = a2 / (3.14159 * d * d);
+    let k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+    let G = (ndotv / (ndotv * (1.0 - k) + k)) * (ndotl / (ndotl * (1.0 - k) + k));
+    let F = 0.04 + 0.96 * pow(1.0 - max(dot(n, half_dir), 0.0), 5.0);
+    let spec = D * G * F / max(4.0 * ndotv * ndotl, 0.001);
 
-    let brightness = ambient + diffuse + spec + fresnel;
-    return vec4<f32>(in.color.rgb * brightness, in.color.a);
+    // Environment reflection — procedural gradient sampled by reflection vector
+    let refl = reflect(-view_dir, n);
+    let env_y = refl.y * 0.5 + 0.5; // 0=down, 1=up
+    let env_base = mix(
+        vec3<f32>(0.02, 0.02, 0.06),  // dark floor
+        vec3<f32>(0.15, 0.20, 0.35),  // bright sky
+        smoothstep(0.0, 1.0, env_y)
+    );
+    // Warm horizon band
+    let horizon = exp(-16.0 * (env_y - 0.5) * (env_y - 0.5)) * vec3<f32>(0.12, 0.06, 0.02);
+    let env_color = env_base + horizon;
+    // Blend by fresnel — edges reflect more (dielectric)
+    let env_fresnel = 0.04 + 0.96 * pow(1.0 - ndotv, 5.0);
+    let reflection = env_color * env_fresnel * 0.8;
+
+    // Subtle rim light — artistic edge glow independent of light direction
+    let rim = pow(1.0 - ndotv, 4.0) * 0.10;
+
+    let lit = in.color.rgb * (ambient + diffuse) + vec3<f32>(spec, spec, spec) + reflection;
+    return vec4<f32>(lit + in.color.rgb * rim, in.color.a);
 }
 "#;
 
@@ -73,10 +111,6 @@ impl Uniforms {
             ],
             camera_pos: [0.0, 0.0, 16.0, 0.0],
         }
-    }
-
-    pub fn from_mat(m: [[f32; 4]; 4]) -> Self {
-        Uniforms { view_proj: m, camera_pos: [0.0, 0.0, 16.0, 0.0] }
     }
 }
 

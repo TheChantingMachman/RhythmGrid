@@ -417,16 +417,76 @@ Sound effects and visual effects should be behind trait interfaces, not hardcode
 | Schlick fresnel | Very high | Low | ~5 shader lines, `dot(normal, viewDir)`. Single biggest visual upgrade. |
 | Rounded cube geometry | High | Moderate | Beveled edges catch specular highlights. Combined with fresnel = gem look. |
 | Color grading / LUT | High | Low | Post-process color curve per theme. Instant cinematic feel. |
-| HDR + tonemap | High | Moderate | Float color space, brighter highlights without wash-out. |
-| Fake subsurface scattering | Medium | Low | Tint back faces with transmitted front color. Cheap inner glow. |
-| Emissive per-pixel | Medium | Moderate | Different surface areas glow differently. Patterns, center vs edge. |
+| HDR + tonemap | High | Moderate | **Done.** Float color space, ACES tonemapping. |
+| Fake subsurface scattering | Medium | Low | **Done.** Back-face brightening scaled by darkness. |
+| Inner glow (geometry) | Medium | Moderate | **Done.** HDR emissive cube inside translucent shell. |
+| GGX specular | High | Low | **Done.** Cook-Torrance BRDF replaces Blinn-Phong. |
+| Full bevel (12 edges + corners) | High | Moderate | **Done.** All edges rounded with corner patches. |
+| Contact AO | Medium | Low | **Done.** Per-vertex darkening from neighbor bitmask. |
+| Environment reflection | Medium | Low | **Done.** Procedural gradient sampled by reflection vector. |
+| Motion trails | Medium | Low | **Done.** Hard drop streak + subtle fall ghost. |
 | Normal mapping | Medium | Moderate | Fake surface detail. Needs UV coords + texture. |
-| SSAO | Medium | Hard | Darkens creases where cubes meet. Depth and grounding. |
-| Environment mapping | Medium | Hard | Cubes reflect surroundings (cubemap or SSR). |
 | Soft particles | Low | Moderate | Particles fade near surfaces instead of hard-clip. |
 | Depth of field | Low | Hard | Background blur, focus on play area. |
-| Motion blur | Low | Hard | Fast pieces leave streaks. |
 | Volumetric lighting | Low | Hard | God rays, light shafts. |
+
+### Visual tuning backlog
+- Cube brightness balance: inner glow + env reflection + specular stack can run hot — revisit multipliers
+- AO on camera-away corners looks a touch dark — may reduce AO strength or raise ambient
+- Motion trails: revisit intensity/duration, may need to dial down or add toggle
+- Overall: do a holistic tuning pass once all techniques are in place
+
+### Adaptive theme selection (future)
+Automatically select or blend visual themes based on the character of the playing music:
+- **Energy classification:** use rolling energy, beat confidence, and spectral centroid to categorize the current track (chill/ambient, mid-energy, high-energy/aggressive)
+- **Theme tagging:** each theme gets an energy profile tag (e.g., Water=chill, Default=mid, Debug=high) and optional genre affinity
+- **Auto-switch:** when a new track starts or energy profile shifts significantly, cross-fade to the best-matching theme
+- **Hysteresis:** avoid rapid switching — require sustained energy shift (10-15s) before triggering a change
+- **Manual override:** player can lock a theme to disable auto-switching
+- Builds on existing RollingEnergy + BeatConfidence + spectral centroid infrastructure
+- Prerequisite: more themes with distinct energy personalities to make switching meaningful
+
+### Melodic drift signal (future, brainstorm)
+A slow-moving audio analysis signal that captures the meandering, non-rhythmic character of music — melody contour, harmonic center, or a smoothed spectral average that evolves over 5-20 second timescales. Not beat-driven or percussive. More like "where is the music wandering?"
+- Could derive from: heavily smoothed spectral centroid, rolling harmonic center of gravity, pitch class energy distribution, or a low-pass filtered version of the dominant frequency
+- Output: a slow 2D vector (direction + magnitude) that changes gradually, almost randomly
+- Use case: steer the starfield flight direction so you're not always flying straight. The field would gently curve and drift as the music's tonal character shifts. Quiet passages might spiral slowly, busy sections might carve wider arcs.
+- Could also drive: camera orbit drift, hex grid rotation bias, aurora flow direction, fog drift
+- Key quality: must feel organic and unpredictable, not mechanically tied to any one musical event
+
+### Music-reactive demo AI (future)
+Current demo mode plays randomly. A smarter demo AI would:
+- **Pace to the music:** place pieces faster during high-energy sections, slower during breakdowns/ambient passages. Use rolling energy and BPM to set drop cadence.
+- **Intentional drama:** hold pieces at the top during quiet passages, then rapid-fire drops on beat drops. Build tension visually.
+- **Line clear choreography:** time line clears to coincide with strong beats or measure boundaries. Stack deliberately for multi-line clears on musical climaxes.
+- **Aggression tiers:** chill (slow, methodical, mostly singles/doubles) → mid (steady pace, occasional triples) → aggressive (fast placement, tetris chasing, T-spins)
+- **Beat-synced placement:** final drop/lock on the beat rather than arbitrary timing. Requires lookahead or buffered placement.
+- Pipeline-friendly: the AI decision logic (which piece where, when to drop) is testable and spec-able. Only the music-timing bridge lives in GUI code.
+
+### Preview/Hold piece overhaul (future)
+Two issues with the next-piece preview and held-piece display:
+- **Perspective warping bug:** pieces distort as they rotate due to perspective projection being applied at close range. The 3D preview uses the same perspective matrix as the board, but the preview cubes are much closer to the camera. Fix: render previews with an orthographic or less aggressive perspective, or project them in a separate viewport.
+- **Visual parity with board cubes:** preview/hold pieces use simplified rendering (basic cube faces, no bevels, no inner glow, no GGX lighting). They should match the board cube fidelity: full 12-edge bevels, inner glow, contact AO between piece cells, environment reflections, GGX specular. This is a significant rework of the preview rendering path in scene.rs — the current code manually builds rotated cube faces with painter's algorithm sorting, which would need to be replaced with push_cube_3d calls in a local coordinate space.
+
+### Dynamic point lights (future)
+Firework bursts and line clears could cast momentary colored light onto nearby cubes:
+- Pass active flash positions + colors via a uniform buffer (e.g., up to 4 point lights)
+- Fragment shader computes per-pixel contribution from each point light (distance falloff)
+- Triggered by firework detonations, line clear flashes, T-spin events
+- Short-lived (0.1-0.2s) — flash effect, not sustained illumination
+- Would make burst flashes feel physically present rather than just overlaid
+
+### Long-term roadmap
+1. **More themes** — 5-8 distinct visual personalities (neon, minimal, organic, retro, dark) to make adaptive theme selection meaningful
+2. **Adaptive theme selection** — auto-switch themes based on music energy (see above)
+3. **Music-reactive demo AI** — demo mode that performs to the music (see above)
+4. **Background environments** — procedural or authored 3D scenes behind the board (underwater, space, city) per theme
+5. **Screen-space effects** — chromatic aberration, vignette, radial blur as post-process options
+6. **GPU particle system** — compute shader particles for orders of magnitude more density
+7. **SDF text rendering** — smooth scalable fonts replacing bitmap glyphs
+8. **Visualizer-only mode** — no game, just the music visualization filling the screen
+9. **Custom music analysis** — pre-scan tracks on load for BPM, section boundaries, energy map. Enables choreographed effects.
+10. **Platform expansion** — web (via wgpu/WebGPU), macOS, Steam release
 
 ---
 

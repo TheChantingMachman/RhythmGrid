@@ -89,7 +89,7 @@ impl AudioState {
         // Accumulate samples for FFT
         self.fft_sample_rate = sample_rate;
         self.fft_buffer.extend_from_slice(samples);
-        const FFT_WINDOW: usize = 2048;
+        const FFT_WINDOW: usize = 1024; // ~23ms at 44.1kHz — faster beat response
         if self.fft_buffer.len() >= FFT_WINDOW {
             let window: Vec<f32> = self.fft_buffer.drain(..FFT_WINDOW).collect();
             let raw = fft_bands(&window, sample_rate);
@@ -125,7 +125,16 @@ impl AudioState {
 
     fn reset_for_new_track(&mut self, name: &str) {
         self.beat_detector = BeatDetector::new();
+        self.multi_beat_detector = MultiBeatDetector::new();
+        self.flux_detector = SpectralFluxDetector::new();
         self.elapsed_secs = 0.0;
+        self.amplitude = 0.0;
+        self.beat_intensity = 0.0;
+        self.bands = [0.0; 7];
+        self.band_beats = [false; 7];
+        self.centroid = 0.0;
+        self.flux = 0.0;
+        self.fft_buffer.clear();
         self.track_name = name.to_string();
     }
 }
@@ -140,7 +149,7 @@ struct SampleBuffer {
 impl SampleBuffer {
     fn new(channels: usize) -> Self {
         SampleBuffer {
-            samples: VecDeque::with_capacity(44100 * 2 * 10), // ~10s buffer
+            samples: VecDeque::with_capacity(44100 * 2 * 2), // ~2s buffer
             channels,
             finished: false,
         }
@@ -210,7 +219,7 @@ fn stream_decode_track(
         // Back-pressure: wait if buffer is too full
         loop {
             if let Ok(buf) = buffer.try_lock() {
-                if buf.samples.len() < 44100 * channels * 10 {
+                if buf.samples.len() < 44100 * channels * 2 { // ~2s back-pressure cap
                     break;
                 }
             }
@@ -398,7 +407,7 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
         let config = cpal::StreamConfig {
             channels: out_channels as u16,
             sample_rate: cpal::SampleRate(sample_rate),
-            buffer_size: cpal::BufferSize::Default,
+            buffer_size: cpal::BufferSize::Fixed(512), // ~12ms — lower latency for beat sync
         };
 
         let is_procedural = use_procedural;

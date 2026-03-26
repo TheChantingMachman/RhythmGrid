@@ -124,10 +124,10 @@ impl AudioEffect for GridLines {
                 let (dx1, dy1) = if has_forces { self.displacement_at(x, y1) } else { (0.0, 0.0) };
 
                 let base = verts.len() as u32;
-                verts.push(Vertex { position: [x - thickness + dx0, -(y0 + dy0), 0.0], normal: n, color: line_color });
-                verts.push(Vertex { position: [x + thickness + dx0, -(y0 + dy0), 0.0], normal: n, color: line_color });
-                verts.push(Vertex { position: [x + thickness + dx1, -(y1 + dy1), 0.0], normal: n, color: line_color });
-                verts.push(Vertex { position: [x - thickness + dx1, -(y1 + dy1), 0.0], normal: n, color: line_color });
+                verts.push(Vertex { position: [x - thickness + dx0, -(y0 + dy0), 0.0], normal: n, color: line_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [x + thickness + dx0, -(y0 + dy0), 0.0], normal: n, color: line_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [x + thickness + dx1, -(y1 + dy1), 0.0], normal: n, color: line_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [x - thickness + dx1, -(y1 + dy1), 0.0], normal: n, color: line_color, uv: [0.0, 0.0] });
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
         }
@@ -145,10 +145,10 @@ impl AudioEffect for GridLines {
                 let (dx1, dy1) = if has_forces { self.displacement_at(x1, y) } else { (0.0, 0.0) };
 
                 let base = verts.len() as u32;
-                verts.push(Vertex { position: [x0 + dx0, -(y + dy0) - thickness, 0.0], normal: n, color: line_color });
-                verts.push(Vertex { position: [x1 + dx1, -(y + dy1) - thickness, 0.0], normal: n, color: line_color });
-                verts.push(Vertex { position: [x1 + dx1, -(y + dy1) + thickness, 0.0], normal: n, color: line_color });
-                verts.push(Vertex { position: [x0 + dx0, -(y + dy0) + thickness, 0.0], normal: n, color: line_color });
+                verts.push(Vertex { position: [x0 + dx0, -(y + dy0) - thickness, 0.0], normal: n, color: line_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [x1 + dx1, -(y + dy1) - thickness, 0.0], normal: n, color: line_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [x1 + dx1, -(y + dy1) + thickness, 0.0], normal: n, color: line_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [x0 + dx0, -(y + dy0) + thickness, 0.0], normal: n, color: line_color, uv: [0.0, 0.0] });
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
         }

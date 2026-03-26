@@ -48,8 +48,8 @@ impl CameraReactor {
         let jitter_x = hi_beat * p.jitter_x * (preview_angle * 7.0).sin();
         let jitter_y = hi_beat * p.jitter_y * (preview_angle * 11.0).cos();
 
-        let shake_x = self.shake_intensity * (self.shake_time * 1.3).sin() * 0.4;
-        let shake_y = self.shake_intensity * (self.shake_time * 1.7).cos() * 0.25;
+        let shake_x = self.shake_intensity * (self.shake_time * 1.3).sin() * 0.2;
+        let shake_y = self.shake_intensity * (self.shake_time * 1.7).cos() * 0.12;
 
         let bass_zoom = self.smooth_zoom;
 

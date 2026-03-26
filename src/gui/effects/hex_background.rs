@@ -69,10 +69,10 @@ impl AudioEffect for HexBackground {
                 ];
 
                 let base = verts.len() as u32;
-                verts.push(Vertex { position: [geo_cx + dx - self.dot_size, geo_cy + dy - self.dot_size, geo_z], normal: geo_n, color: dot_color });
-                verts.push(Vertex { position: [geo_cx + dx + self.dot_size, geo_cy + dy - self.dot_size, geo_z], normal: geo_n, color: dot_color });
-                verts.push(Vertex { position: [geo_cx + dx + self.dot_size, geo_cy + dy + self.dot_size, geo_z], normal: geo_n, color: dot_color });
-                verts.push(Vertex { position: [geo_cx + dx - self.dot_size, geo_cy + dy + self.dot_size, geo_z], normal: geo_n, color: dot_color });
+                verts.push(Vertex { position: [geo_cx + dx - self.dot_size, geo_cy + dy - self.dot_size, geo_z], normal: geo_n, color: dot_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [geo_cx + dx + self.dot_size, geo_cy + dy - self.dot_size, geo_z], normal: geo_n, color: dot_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [geo_cx + dx + self.dot_size, geo_cy + dy + self.dot_size, geo_z], normal: geo_n, color: dot_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [geo_cx + dx - self.dot_size, geo_cy + dy + self.dot_size, geo_z], normal: geo_n, color: dot_color, uv: [0.0, 0.0] });
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
         }
@@ -99,10 +99,10 @@ impl AudioEffect for HexBackground {
                 let ny = ddx / len * line_w;
 
                 let base = verts.len() as u32;
-                verts.push(Vertex { position: [x0 + nx, y0 + ny, geo_z], normal: geo_n, color: line_color });
-                verts.push(Vertex { position: [x1 + nx, y1 + ny, geo_z], normal: geo_n, color: line_color });
-                verts.push(Vertex { position: [x1 - nx, y1 - ny, geo_z], normal: geo_n, color: line_color });
-                verts.push(Vertex { position: [x0 - nx, y0 - ny, geo_z], normal: geo_n, color: line_color });
+                verts.push(Vertex { position: [x0 + nx, y0 + ny, geo_z], normal: geo_n, color: line_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [x1 + nx, y1 + ny, geo_z], normal: geo_n, color: line_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [x1 - nx, y1 - ny, geo_z], normal: geo_n, color: line_color, uv: [0.0, 0.0] });
+                verts.push(Vertex { position: [x0 - nx, y0 - ny, geo_z], normal: geo_n, color: line_color, uv: [0.0, 0.0] });
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
         }

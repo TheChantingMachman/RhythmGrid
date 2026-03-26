@@ -14,3 +14,8 @@ symphonia = { version = "0.5", features = ["mp3", "wav", "flac", "ogg", "vorbis"
 toml = "1.0.7"
 wgpu = "24"
 winit = "0.30"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"

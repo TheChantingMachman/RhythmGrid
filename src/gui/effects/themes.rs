@@ -9,6 +9,9 @@ pub struct EffectFlags {
     pub grid_lines: bool,
     pub fft_visualizer: bool,
     pub fireworks: bool,
+    pub fire: bool,
+    pub starfield: bool,
+    pub aurora: bool,
     pub camera_sway: bool,
 
     // Inline scene effects
@@ -31,7 +34,7 @@ impl EffectFlags {
     pub fn all_on() -> Self {
         EffectFlags {
             beat_rings: true, hex_background: true, grid_lines: true,
-            fft_visualizer: true, fireworks: true, camera_sway: true,
+            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, camera_sway: true,
             cube_glow: true, ghost_piece: true, active_piece_pulse: true,
             clearing_flash: true, t_spin_flash: true, level_up_rings: true,
             combo_text: true, particle_beat_pulse: true,
@@ -42,7 +45,7 @@ impl EffectFlags {
     pub fn all_off() -> Self {
         EffectFlags {
             beat_rings: false, hex_background: false, grid_lines: false,
-            fft_visualizer: false, fireworks: false, camera_sway: false,
+            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, camera_sway: false,
             cube_glow: false, ghost_piece: false, active_piece_pulse: false,
             clearing_flash: false, t_spin_flash: false, level_up_rings: false,
             combo_text: false, particle_beat_pulse: false,
@@ -64,6 +67,7 @@ pub enum SignalRank {
 /// Maps effects to analysis ranks. The runtime resolves ranks to actual
 /// band indices based on rolling_energy + beat_confidence analysis.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct EffectBindings {
     pub board_pulse: SignalRank,
     pub cube_glow: SignalRank,
@@ -177,8 +181,8 @@ pub fn default_theme() -> VisualTheme {
             ],
         },
         camera: CameraParams {
-            sway_base: 0.3, sway_danger_add: 0.2,
-            jitter_x: 0.08, jitter_y: 0.05,
+            sway_base: 0.15, sway_danger_add: 0.1,
+            jitter_x: 0.04, jitter_y: 0.025,
             zoom_amount: 0.5, shake_decay: 1.3,
         },
         effects: {
@@ -216,8 +220,8 @@ pub fn water_theme() -> VisualTheme {
             ],
         },
         camera: CameraParams {
-            sway_base: 0.4, sway_danger_add: 0.15,
-            jitter_x: 0.03, jitter_y: 0.02,
+            sway_base: 0.2, sway_danger_add: 0.08,
+            jitter_x: 0.015, jitter_y: 0.01,
             zoom_amount: 0.1, // gentle — less nausea than default
             shake_decay: 0.8,
         },
@@ -243,14 +247,17 @@ pub fn debug_theme() -> VisualTheme {
     let mut theme = default_theme();
     theme.name = "Debug";
     theme.effects = EffectFlags::all_off();
-    // Base visibility + dynamic mapping test effects
+    // Baseline experience (always on) + effect under test
+    // NOTE: when testing a new effect in isolation, keep these baseline flags on
+    // and only add the effect being tested. Toggle other effects off as needed.
     theme.effects.grid_lines = true;
-    theme.effects.fft_visualizer = true;
     theme.effects.cube_glow = true;
     theme.effects.ghost_piece = true;
     theme.effects.active_piece_pulse = true;
-    theme.effects.beat_rings = true;
-    theme.effects.fireworks = true;
+    theme.effects.clearing_flash = true;
+    theme.effects.line_clear_particles = true;
+    // Effect under test:
+    theme.effects.aurora = true;
     theme.color_grade = [1.0, 1.0, 1.0]; // neutral for debug
     // Bindings: rings follow most active band, board pulse follows beat,
     // fireworks follow second most active

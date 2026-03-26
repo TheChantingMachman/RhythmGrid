@@ -9,13 +9,15 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub color: [f32; 4],
+    pub uv: [f32; 2], // (0,0) = standard geometry, (-1..1, -1..1) = soft particle quad
 }
 
 impl Vertex {
-    pub const ATTRIBS: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
+    pub const ATTRIBS: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
         0 => Float32x3,  // position
         1 => Float32x3,  // normal
         2 => Float32x4,  // color
+        3 => Float32x2,  // uv
     ];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -48,10 +50,10 @@ pub fn push_quad(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let (x0, y0) = px_to_ndc(x, y, ww, wh);
     let (x1, y1) = px_to_ndc(x + w, y + h, ww, wh);
     let base = verts.len() as u32;
-    verts.push(Vertex { position: [x0, y0, z], normal: HUD_NORMAL, color });
-    verts.push(Vertex { position: [x1, y0, z], normal: HUD_NORMAL, color });
-    verts.push(Vertex { position: [x1, y1, z], normal: HUD_NORMAL, color });
-    verts.push(Vertex { position: [x0, y1, z], normal: HUD_NORMAL, color });
+    verts.push(Vertex { position: [x0, y0, z], normal: HUD_NORMAL, color, uv: [0.0, 0.0] });
+    verts.push(Vertex { position: [x1, y0, z], normal: HUD_NORMAL, color, uv: [0.0, 0.0] });
+    verts.push(Vertex { position: [x1, y1, z], normal: HUD_NORMAL, color, uv: [0.0, 0.0] });
+    verts.push(Vertex { position: [x0, y1, z], normal: HUD_NORMAL, color, uv: [0.0, 0.0] });
     indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
@@ -70,14 +72,19 @@ pub fn push_panel(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
 
 /// 3D cube in world space. Position is grid (col, row), y-up convention.
 /// `glow_boost` (typically amplitude * 2.0) modulates color saturation and brightness.
+/// `neighbors` bitmask for contact AO: 1=up, 2=down, 4=left, 8=right.
 pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                     col: f32, row: f32, depth: f32, color: [f32; 4],
-                    glow_boost: f32) {
+                    glow_boost: f32, neighbors: u8, settle: f32) {
     let gap = 0.08; // visible gap between cubes creates grid structure
-    let x0 = col + gap;
-    let x1 = col + 1.0 - gap;
-    let y0 = -row - gap;        // top of cell (y-up)
-    let y1 = -row - 1.0 + gap;  // bottom of cell
+    // Settle deformation: squish Y, widen X, shift down
+    let sq_y = settle * 0.12;
+    let sq_x = settle * 0.06;
+    let sq_drop = settle * 0.06;
+    let x0 = col + gap - sq_x * 0.5;
+    let x1 = col + 1.0 - gap + sq_x * 0.5;
+    let y0 = -row - gap - sq_y * 0.5 - sq_drop;        // top of cell (y-up)
+    let y1 = -row - 1.0 + gap + sq_y * 0.5 - sq_drop;  // bottom of cell
     let z0 = -depth * 0.5;      // back face (behind grid plane)
     let z1 = depth * 0.5;       // front face (in front of grid plane)
 
@@ -93,25 +100,68 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
         color[3],
     ];
 
+    // Inner glow cube — bright core visible through the translucent outer shell.
+    // Rendered first so it composites behind the outer cube (back-to-front).
+    // Skip for ghost pieces / very translucent cubes where the core would overpower.
+    if color[3] > 0.5 {
+        let inset = 0.22;
+        let w = x1 - x0;
+        let h = y0 - y1; // positive (y0 > y1 in y-up)
+        let gx0 = x0 + w * inset;
+        let gx1 = x1 - w * inset;
+        let gy0 = y0 - h * inset;
+        let gy1 = y1 + h * inset;
+        let gz0 = z0 + depth * inset;
+        let gz1 = z1 - depth * inset;
+
+        // HDR emissive color — white-shifted and boosted past 1.0 so bloom picks it up
+        let glow_mul = 1.2 + glow_boost * 0.5;
+        let wm = 0.3; // white mix
+        let gc = [
+            (color[0] * (1.0 - wm) + wm) * glow_mul,
+            (color[1] * (1.0 - wm) + wm) * glow_mul,
+            (color[2] * (1.0 - wm) + wm) * glow_mul,
+            0.7,
+        ];
+
+        // Simple 6-face box (no bevels — inner core, not directly visible)
+        let gfaces: &[([f32; 3], [[f32; 3]; 4])] = &[
+            ([0.0, 0.0, 1.0],  [[gx0, gy0, gz1], [gx1, gy0, gz1], [gx1, gy1, gz1], [gx0, gy1, gz1]]),
+            ([0.0, 0.0, -1.0], [[gx1, gy0, gz0], [gx0, gy0, gz0], [gx0, gy1, gz0], [gx1, gy1, gz0]]),
+            ([0.0, 1.0, 0.0],  [[gx0, gy0, gz1], [gx0, gy0, gz0], [gx1, gy0, gz0], [gx1, gy0, gz1]]),
+            ([0.0, -1.0, 0.0], [[gx0, gy1, gz0], [gx0, gy1, gz1], [gx1, gy1, gz1], [gx1, gy1, gz0]]),
+            ([1.0, 0.0, 0.0],  [[gx1, gy0, gz1], [gx1, gy0, gz0], [gx1, gy1, gz0], [gx1, gy1, gz1]]),
+            ([-1.0, 0.0, 0.0], [[gx0, gy0, gz0], [gx0, gy0, gz1], [gx0, gy1, gz1], [gx0, gy1, gz0]]),
+        ];
+        for (normal, corners) in gfaces {
+            let base_idx = verts.len() as u32;
+            for &pos in corners {
+                verts.push(Vertex { position: pos, normal: *normal, color: gc, uv: [0.0, 0.0] });
+            }
+            indices.extend_from_slice(&[base_idx, base_idx+1, base_idx+2, base_idx, base_idx+2, base_idx+3]);
+        }
+    }
+
     // Rounded cube: main faces inset, multi-strip bevel for smooth edges
     let b = 0.05; // total bevel size
     let steps = 3u32; // bevel subdivisions for smoothness
 
-    // Inner bounds (inset by bevel)
+    // Inner bounds (inset by bevel on all sides)
     let ix0 = x0 + b;
     let ix1 = x1 - b;
     let iy0 = y0 - b;
     let iy1 = y1 + b;
+    let iz0 = z0 + b;
     let iz1 = z1 - b;
 
-    // Main faces (inset)
+    // Main faces (all inset by bevel amount for smooth edges on every edge)
     let faces: &[([f32; 3], [[f32; 3]; 4])] = &[
         ([0.0, 0.0, 1.0],  [[ix0, iy0, z1], [ix1, iy0, z1], [ix1, iy1, z1], [ix0, iy1, z1]]),  // Front
-        ([0.0, 0.0, -1.0], [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]]),          // Back
-        ([0.0, 1.0, 0.0],  [[ix0, y0, iz1], [ix0, y0, z0], [ix1, y0, z0], [ix1, y0, iz1]]),     // Top
-        ([0.0, -1.0, 0.0], [[ix0, y1, z0], [ix0, y1, iz1], [ix1, y1, iz1], [ix1, y1, z0]]),     // Bottom
-        ([1.0, 0.0, 0.0],  [[x1, iy0, iz1], [x1, iy0, z0], [x1, iy1, z0], [x1, iy1, iz1]]),    // Right
-        ([-1.0, 0.0, 0.0], [[x0, iy0, z0], [x0, iy0, iz1], [x0, iy1, iz1], [x0, iy1, z0]]),    // Left
+        ([0.0, 0.0, -1.0], [[ix1, iy0, z0], [ix0, iy0, z0], [ix0, iy1, z0], [ix1, iy1, z0]]),  // Back
+        ([0.0, 1.0, 0.0],  [[ix0, y0, iz1], [ix0, y0, iz0], [ix1, y0, iz0], [ix1, y0, iz1]]),   // Top
+        ([0.0, -1.0, 0.0], [[ix0, y1, iz0], [ix0, y1, iz1], [ix1, y1, iz1], [ix1, y1, iz0]]),   // Bottom
+        ([1.0, 0.0, 0.0],  [[x1, iy0, iz1], [x1, iy0, iz0], [x1, iy1, iz0], [x1, iy1, iz1]]),  // Right
+        ([-1.0, 0.0, 0.0], [[x0, iy0, iz0], [x0, iy0, iz1], [x0, iy1, iz1], [x0, iy1, iz0]]),  // Left
     ];
 
     // Per-vertex edge glow: edges bright (original color + white),
@@ -149,70 +199,147 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                  (color[2] + highlight).min(1.0),
                  color[3])
             };
-            let vc = [r, g, b, a];
-            verts.push(Vertex { position: pos, normal: *normal, color: vc });
+            // Contact AO: darken vertices near occupied neighbors
+            let pnx = ((pos[0] - x0) / (x1 - x0)).clamp(0.0, 1.0);
+            let pny = ((pos[1] - y1) / (y0 - y1)).clamp(0.0, 1.0);
+            let mut ao = 0.0f32;
+            if neighbors & 1 != 0 { ao += pny * pny; }
+            if neighbors & 2 != 0 { ao += (1.0 - pny) * (1.0 - pny); }
+            if neighbors & 4 != 0 { ao += (1.0 - pnx) * (1.0 - pnx); }
+            if neighbors & 8 != 0 { ao += pnx * pnx; }
+            let ao_f = 1.0 - ao.min(1.0) * 0.3;
+            let vc = [r * ao_f, g * ao_f, b * ao_f, a];
+            verts.push(Vertex { position: pos, normal: *normal, color: vc, uv: [0.0, 0.0] });
         }
         indices.extend_from_slice(&[base_idx, base_idx+1, base_idx+2, base_idx, base_idx+2, base_idx+3]);
     }
 
-    // Multi-strip bevels along front edges — smooth normal transition
-    // Helper: emit a bevel strip quad with interpolated normal
+    // Multi-strip bevels along all 12 edges — smooth normal transition
     let emit_bevel = |verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
                       p0: [f32; 3], p1: [f32; 3], p2: [f32; 3], p3: [f32; 3],
                       n: [f32; 3]| {
+        // AO from strip midpoint
+        let mx = (p0[0] + p2[0]) * 0.5;
+        let my = (p0[1] + p2[1]) * 0.5;
+        let pnx = ((mx - x0) / (x1 - x0)).clamp(0.0, 1.0);
+        let pny = ((my - y1) / (y0 - y1)).clamp(0.0, 1.0);
+        let mut ao = 0.0f32;
+        if neighbors & 1 != 0 { ao += pny * pny; }
+        if neighbors & 2 != 0 { ao += (1.0 - pny) * (1.0 - pny); }
+        if neighbors & 4 != 0 { ao += (1.0 - pnx) * (1.0 - pnx); }
+        if neighbors & 8 != 0 { ao += pnx * pnx; }
+        let f = 1.0 - ao.min(1.0) * 0.3;
+        let c = [color[0] * f, color[1] * f, color[2] * f, color[3]];
         let base_idx = verts.len() as u32;
-        verts.push(Vertex { position: p0, normal: n, color });
-        verts.push(Vertex { position: p1, normal: n, color });
-        verts.push(Vertex { position: p2, normal: n, color });
-        verts.push(Vertex { position: p3, normal: n, color });
+        verts.push(Vertex { position: p0, normal: n, color: c, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: p1, normal: n, color: c, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: p2, normal: n, color: c, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: p3, normal: n, color: c, uv: [0.0, 0.0] });
         indices.extend_from_slice(&[base_idx, base_idx+1, base_idx+2, base_idx, base_idx+2, base_idx+3]);
     };
 
-    // Generate bevel strips for front edges
     let pi_half = std::f32::consts::FRAC_PI_2;
     for s in 0..steps {
         let t0 = s as f32 / steps as f32;
         let t1 = (s + 1) as f32 / steps as f32;
         let a0 = t0 * pi_half;
         let a1 = t1 * pi_half;
-        // Position interpolation along the bevel curve
         let (sin0, cos0) = (a0.sin(), a0.cos());
         let (sin1, cos1) = (a1.sin(), a1.cos());
-        // Normal at midpoint of this strip
         let am = (a0 + a1) * 0.5;
         let (sinm, cosm) = (am.sin(), am.cos());
 
-        // Front-top bevel: normal transitions from (0,0,1) to (0,1,0)
-        let ftz0 = z1 - b + b * sin0;
-        let ftz1 = z1 - b + b * sin1;
-        let fty0 = y0 - b + b * cos0;
-        let fty1 = y0 - b + b * cos1;
-        emit_bevel(verts, indices,
-            [ix0, fty0, ftz0], [ix1, fty0, ftz0], [ix1, fty1, ftz1], [ix0, fty1, ftz1],
-            [0.0, cosm, sinm]);
+        // Shared position offsets — each is a quarter-circle sweep along one axis
+        let rx0 = x1 - b + b * sin0;   // right x
+        let rx1 = x1 - b + b * sin1;
+        let lx0 = x0 + b - b * sin0;   // left x
+        let lx1 = x0 + b - b * sin1;
+        let ty0 = y0 - b + b * cos0;   // top y
+        let ty1 = y0 - b + b * cos1;
+        let by0 = y1 + b - b * cos0;   // bottom y
+        let by1 = y1 + b - b * cos1;
+        let fzs0 = z1 - b + b * sin0;  // front z (sin profile)
+        let fzs1 = z1 - b + b * sin1;
+        let fzc0 = z1 - b + b * cos0;  // front z (cos profile)
+        let fzc1 = z1 - b + b * cos1;
+        let bzs0 = z0 + b - b * sin0;  // back z (sin profile)
+        let bzs1 = z0 + b - b * sin1;
+        let bzc0 = z0 + b - b * cos0;  // back z (cos profile)
+        let bzc1 = z0 + b - b * cos1;
 
-        // Front-bottom bevel: normal transitions from (0,0,1) to (0,-1,0)
-        let fby0 = y1 + b - b * cos0;
-        let fby1 = y1 + b - b * cos1;
+        // --- Front edges (normal sweeps toward +z) ---
         emit_bevel(verts, indices,
-            [ix0, fby1, ftz1], [ix1, fby1, ftz1], [ix1, fby0, ftz0], [ix0, fby0, ftz0],
-            [0.0, -cosm, sinm]);
+            [ix0, ty0, fzs0], [ix1, ty0, fzs0], [ix1, ty1, fzs1], [ix0, ty1, fzs1],
+            [0.0, cosm, sinm]);                                                        // front-top
+        emit_bevel(verts, indices,
+            [ix0, by1, fzs1], [ix1, by1, fzs1], [ix1, by0, fzs0], [ix0, by0, fzs0],
+            [0.0, -cosm, sinm]);                                                       // front-bottom
+        emit_bevel(verts, indices,
+            [rx0, iy0, fzc0], [rx1, iy0, fzc1], [rx1, iy1, fzc1], [rx0, iy1, fzc0],
+            [sinm, 0.0, cosm]);                                                        // front-right
+        emit_bevel(verts, indices,
+            [lx1, iy0, fzc1], [lx0, iy0, fzc0], [lx0, iy1, fzc0], [lx1, iy1, fzc1],
+            [-sinm, 0.0, cosm]);                                                       // front-left
 
-        // Front-right bevel: normal transitions from (0,0,1) to (1,0,0)
-        let frx0 = x1 - b + b * sin0;
-        let frx1 = x1 - b + b * sin1;
-        let frz0 = z1 - b + b * cos0;  // note: cos for z here
-        let frz1 = z1 - b + b * cos1;
+        // --- Back edges (normal sweeps toward -z) ---
         emit_bevel(verts, indices,
-            [frx0, iy0, frz0], [frx1, iy0, frz1], [frx1, iy1, frz1], [frx0, iy1, frz0],
-            [sinm, 0.0, cosm]);
+            [ix0, ty0, bzs0], [ix1, ty0, bzs0], [ix1, ty1, bzs1], [ix0, ty1, bzs1],
+            [0.0, cosm, -sinm]);                                                       // back-top
+        emit_bevel(verts, indices,
+            [ix0, by1, bzs1], [ix1, by1, bzs1], [ix1, by0, bzs0], [ix0, by0, bzs0],
+            [0.0, -cosm, -sinm]);                                                      // back-bottom
+        emit_bevel(verts, indices,
+            [rx0, iy0, bzc0], [rx1, iy0, bzc1], [rx1, iy1, bzc1], [rx0, iy1, bzc0],
+            [sinm, 0.0, -cosm]);                                                       // back-right
+        emit_bevel(verts, indices,
+            [lx1, iy0, bzc1], [lx0, iy0, bzc0], [lx0, iy1, bzc0], [lx1, iy1, bzc1],
+            [-sinm, 0.0, -cosm]);                                                      // back-left
 
-        // Front-left bevel
-        let flx0 = x0 + b - b * sin0;
-        let flx1 = x0 + b - b * sin1;
+        // --- Depth edges (connecting front and back, no z in normal) ---
         emit_bevel(verts, indices,
-            [flx1, iy0, frz1], [flx0, iy0, frz0], [flx0, iy1, frz0], [flx1, iy1, frz1],
-            [-sinm, 0.0, cosm]);
+            [rx0, ty0, iz0], [rx0, ty0, iz1], [rx1, ty1, iz1], [rx1, ty1, iz0],
+            [sinm, cosm, 0.0]);                                                        // top-right
+        emit_bevel(verts, indices,
+            [lx0, ty0, iz1], [lx0, ty0, iz0], [lx1, ty1, iz0], [lx1, ty1, iz1],
+            [-sinm, cosm, 0.0]);                                                       // top-left
+        emit_bevel(verts, indices,
+            [rx0, by0, iz1], [rx0, by0, iz0], [rx1, by1, iz0], [rx1, by1, iz1],
+            [sinm, -cosm, 0.0]);                                                       // bottom-right
+        emit_bevel(verts, indices,
+            [lx0, by0, iz0], [lx0, by0, iz1], [lx1, by1, iz1], [lx1, by1, iz0],
+            [-sinm, -cosm, 0.0]);                                                      // bottom-left
+    }
+
+    // Corner patches — single triangle fills each gap where 3 bevels meet.
+    // Per-vertex normals are axis-aligned; GPU interpolation approximates a sphere.
+    for &(sx, sy, sz) in &[
+        (1.0f32, 1.0, 1.0), (-1.0, 1.0, 1.0), (1.0, -1.0, 1.0), (-1.0, -1.0, 1.0),
+        (1.0, 1.0, -1.0), (-1.0, 1.0, -1.0), (1.0, -1.0, -1.0), (-1.0, -1.0, -1.0),
+    ] {
+        let ccx = if sx > 0.0 { ix1 } else { ix0 };
+        let ccy = if sy > 0.0 { iy0 } else { iy1 };
+        let ccz = if sz > 0.0 { iz1 } else { iz0 };
+
+        let tri: [([f32; 3], [f32; 3]); 3] = [
+            ([ccx + sx * b, ccy, ccz], [sx, 0.0, 0.0]),
+            ([ccx, ccy + sy * b, ccz], [0.0, sy, 0.0]),
+            ([ccx, ccy, ccz + sz * b], [0.0, 0.0, sz]),
+        ];
+
+        let base = verts.len() as u32;
+        for &(pos, normal) in &tri {
+            let pnx = ((pos[0] - x0) / (x1 - x0)).clamp(0.0, 1.0);
+            let pny = ((pos[1] - y1) / (y0 - y1)).clamp(0.0, 1.0);
+            let mut ao = 0.0f32;
+            if neighbors & 1 != 0 { ao += pny * pny; }
+            if neighbors & 2 != 0 { ao += (1.0 - pny) * (1.0 - pny); }
+            if neighbors & 4 != 0 { ao += (1.0 - pnx) * (1.0 - pnx); }
+            if neighbors & 8 != 0 { ao += pnx * pnx; }
+            let f = 1.0 - ao.min(1.0) * 0.3;
+            let c = [color[0] * f, color[1] * f, color[2] * f, color[3]];
+            verts.push(Vertex { position: pos, normal, color: c, uv: [0.0, 0.0]  });
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2]);
     }
 }
 
@@ -238,7 +365,7 @@ pub fn push_slab_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     for (normal, corners) in faces {
         let base = verts.len() as u32;
         for &pos in corners {
-            verts.push(Vertex { position: pos, normal: *normal, color });
+            verts.push(Vertex { position: pos, normal: *normal, color, uv: [0.0, 0.0] });
         }
         indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
     }
@@ -255,7 +382,7 @@ pub fn push_extruded_shape(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let front_n = [0.0f32, 0.0, 1.0];
     let base = verts.len() as u32;
     for &[x, y] in points {
-        verts.push(Vertex { position: [x, -y, z1], normal: front_n, color });
+        verts.push(Vertex { position: [x, -y, z1], normal: front_n, color, uv: [0.0, 0.0] });
     }
     for i in 1..n as u32 - 1 {
         indices.extend_from_slice(&[base, base + i, base + i + 1]);
@@ -265,7 +392,7 @@ pub fn push_extruded_shape(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     let back_n = [0.0f32, 0.0, -1.0];
     let base = verts.len() as u32;
     for &[x, y] in points {
-        verts.push(Vertex { position: [x, -y, z0], normal: back_n, color });
+        verts.push(Vertex { position: [x, -y, z0], normal: back_n, color, uv: [0.0, 0.0] });
     }
     for i in 1..n as u32 - 1 {
         indices.extend_from_slice(&[base, base + i + 1, base + i]);
@@ -283,36 +410,12 @@ pub fn push_extruded_shape(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
         let side_n = [dy / len, dx / len, 0.0]; // perpendicular in XY
 
         let base = verts.len() as u32;
-        verts.push(Vertex { position: [x0, -y0, z1], normal: side_n, color });
-        verts.push(Vertex { position: [x1, -y1, z1], normal: side_n, color });
-        verts.push(Vertex { position: [x1, -y1, z0], normal: side_n, color });
-        verts.push(Vertex { position: [x0, -y0, z0], normal: side_n, color });
+        verts.push(Vertex { position: [x0, -y0, z1], normal: side_n, color, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: [x1, -y1, z1], normal: side_n, color, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: [x1, -y1, z0], normal: side_n, color, uv: [0.0, 0.0] });
+        verts.push(Vertex { position: [x0, -y0, z0], normal: side_n, color, uv: [0.0, 0.0] });
         indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
     }
-}
-
-pub fn push_grid_line_v(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
-                        x: f32, height: f32, color: [f32; 4], thickness: f32) {
-    let w = thickness;
-    let n = [0.0f32, 0.0, 1.0];
-    let base = verts.len() as u32;
-    verts.push(Vertex { position: [x - w, 0.0, 0.0], normal: n, color });
-    verts.push(Vertex { position: [x + w, 0.0, 0.0], normal: n, color });
-    verts.push(Vertex { position: [x + w, -height, 0.0], normal: n, color });
-    verts.push(Vertex { position: [x - w, -height, 0.0], normal: n, color });
-    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-}
-
-pub fn push_grid_line_h(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
-                        y: f32, width: f32, color: [f32; 4], thickness: f32) {
-    let w = thickness;
-    let n = [0.0f32, 0.0, 1.0];
-    let base = verts.len() as u32;
-    verts.push(Vertex { position: [0.0, y - w, 0.0], normal: n, color });
-    verts.push(Vertex { position: [width, y - w, 0.0], normal: n, color });
-    verts.push(Vertex { position: [width, y + w, 0.0], normal: n, color });
-    verts.push(Vertex { position: [0.0, y + w, 0.0], normal: n, color });
-    indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
 }
 
 pub fn push_text(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
