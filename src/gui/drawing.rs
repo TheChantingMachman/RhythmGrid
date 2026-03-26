@@ -101,8 +101,9 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     ];
 
     // Inner glow cube — bright core visible through the translucent outer shell.
-    // Rendered first so it composites behind the outer cube (back-to-front).
-    // Skip for ghost pieces / very translucent cubes where the core would overpower.
+    // Only for semi-transparent cubes (preview pieces via OIT). Opaque board pieces
+    // (alpha 1.0) get their glow from glow_boost on outer faces instead — inner glow
+    // in the opaque pass would cause depth conflicts.
     if color[3] > 0.5 {
         let inset = 0.22;
         let w = x1 - x0;
@@ -116,13 +117,16 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
 
         // HDR emissive color — tinted toward the piece color, subtle enough to
         // read as a luminous core through OIT rather than a competing layer.
-        let glow_mul = 0.9 + glow_boost * 0.4;
-        let wm = 0.15; // reduced white mix — more colored, less blown-out
+        // HDR emissive — high RGB for brightness, low alpha for minimal OIT weight.
+        // This makes the glow visually bright but it doesn't dilute the outer shell's
+        // color in the OIT weighted average (weight = alpha * depth_factor).
+        let glow_mul = 1.4 + glow_boost * 0.6;
+        let wm = 0.1; // minimal white — preserve piece color saturation
         let gc = [
             (color[0] * (1.0 - wm) + wm) * glow_mul,
             (color[1] * (1.0 - wm) + wm) * glow_mul,
             (color[2] * (1.0 - wm) + wm) * glow_mul,
-            0.4, // lower opacity — blends subtly behind the outer shell
+            0.15, // very low alpha — bright but lightweight in OIT averaging
         ];
 
         // Soft glow faces — each face uses soft particle UVs for radial falloff,

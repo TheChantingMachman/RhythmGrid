@@ -218,14 +218,14 @@ fn fs_bloom_composite(in: VsOut) -> @location(0) vec4<f32> {
             let offset = vec2<f32>(f32(x) * step, f32(y) * step) * pixel;
             let s = textureSample(scene_tex, tex_sampler, in.uv + offset);
             let brightness = dot(s.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
-            let thresh = smoothstep(0.15, 0.4, brightness);
+            let thresh = smoothstep(0.35, 0.7, brightness);
             bloom += s.rgb * thresh;
             count += 1.0;
         }
     }
     bloom /= count;
 
-    let bloom_strength = 0.8;
+    let bloom_strength = 0.6;
     let composited = scene.rgb + bloom * bloom_strength;
     // Color grading — per-theme color temperature
     let graded = composited * bloom_u.color_grade.rgb;
