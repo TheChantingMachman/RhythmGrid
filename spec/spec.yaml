@@ -401,7 +401,7 @@
 -
   id: game.lock_delay
   section: Game
-  description: After a piece can no longer move down, a brief lock delay of 500ms begins before the piece locks. Any successful move or rotation resets the timer. Maximum of 15 resets per piece. If the timer expires or resets are exhausted, the piece locks immediately.
+  description: After a piece can no longer move down, a brief lock delay of 400ms begins before the piece locks. Any successful move or rotation resets the timer. Maximum of 15 resets per piece. If the timer expires or resets are exhausted, the piece locks immediately.
   tags: [core, game, timing]
   status: implemented
   constants:
