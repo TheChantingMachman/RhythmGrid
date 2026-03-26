@@ -12,6 +12,7 @@ pub struct EffectFlags {
     pub fire: bool,
     pub starfield: bool,
     pub aurora: bool,
+    pub flow_field: bool,
     pub camera_sway: bool,
 
     // Inline scene effects
@@ -34,7 +35,7 @@ impl EffectFlags {
     pub fn all_on() -> Self {
         EffectFlags {
             beat_rings: true, hex_background: true, grid_lines: true,
-            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, camera_sway: true,
+            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, flow_field: false, camera_sway: true,
             cube_glow: true, ghost_piece: true, active_piece_pulse: true,
             clearing_flash: true, t_spin_flash: true, level_up_rings: true,
             combo_text: true, particle_beat_pulse: true,
@@ -45,7 +46,7 @@ impl EffectFlags {
     pub fn all_off() -> Self {
         EffectFlags {
             beat_rings: false, hex_background: false, grid_lines: false,
-            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, camera_sway: false,
+            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, flow_field: false, camera_sway: false,
             cube_glow: false, ghost_piece: false, active_piece_pulse: false,
             clearing_flash: false, t_spin_flash: false, level_up_rings: false,
             combo_text: false, particle_beat_pulse: false,
@@ -298,6 +299,64 @@ pub fn space_theme() -> VisualTheme {
     }
 }
 
+// TODO: Flow theme needs more love — custom color palette tuning, possibly
+// flow-field-aware grid lines, particle size/density tied to danger level,
+// and a signature visual for line clears (vortex implosion?).
+pub fn flow_theme() -> VisualTheme {
+    VisualTheme {
+        name: "Flow",
+        color_grade: [0.95, 1.0, 1.1], // cool neutral with slight blue lift
+        rings: RingParams {
+            max_radius: 20.0, base_life: 4.0,
+            color_r: 0.15, color_g: 0.3, color_b: 0.5, base_alpha: 0.15,
+        },
+        hex: HexParams {
+            dot_min_size: 0.04, dot_max_size: 0.15, base_speed: 0.1,
+            danger_speed_mult: 0.2,
+            base_r: 0.1, base_g: 0.2, base_b: 0.4, base_alpha: 0.02,
+            hex_rings: 4, ring_spacing: 3.5,
+        },
+        grid: GridParams {
+            base_r: 25.0, base_g: 40.0, base_b: 70.0,
+            base_thickness: 0.015, beat_thickness_add: 0.02,
+        },
+        fft: FftParams {
+            band_colors: [
+                [20, 30, 100], [30, 60, 140], [40, 100, 160],
+                [50, 140, 160], [80, 170, 140], [120, 180, 120], [160, 200, 140],
+            ],
+        },
+        camera: CameraParams {
+            sway_base: 0.1, sway_danger_add: 0.05,
+            jitter_x: 0.015, jitter_y: 0.01,
+            zoom_amount: 0.3, shake_decay: 0.9,
+        },
+        effects: {
+            let mut f = EffectFlags::all_on();
+            f.fire = false;
+            f.starfield = false;
+            f.aurora = false;
+            f.hex_background = false;
+            f.fireworks = false;
+            f.beat_rings = false;
+            f.particle_beat_pulse = false;
+            // Flow field is the star
+            f.flow_field = true;
+            f
+        },
+        bindings: EffectBindings::default_bindings(),
+        piece_colors: Some([
+            [ 80, 180, 200, 255], // I — teal
+            [ 60, 160, 160, 255], // O — dark teal
+            [100, 140, 200, 255], // T — steel blue
+            [ 80, 200, 140, 255], // S — seafoam
+            [ 60, 120, 180, 255], // Z — ocean blue
+            [ 40,  80, 160, 255], // J — deep blue
+            [100, 220, 180, 255], // L — aquamarine
+        ]),
+    }
+}
+
 pub fn debug_theme() -> VisualTheme {
     let mut theme = default_theme();
     theme.name = "Debug";
@@ -311,7 +370,7 @@ pub fn debug_theme() -> VisualTheme {
     theme.effects.active_piece_pulse = true;
     theme.effects.clearing_flash = true;
     theme.effects.line_clear_particles = true;
-    // Effect under test:
+    // Effect under test: (swap this flag to isolate different effects)
     theme.effects.aurora = true;
     theme.color_grade = [1.0, 1.0, 1.0]; // neutral for debug
     // Bindings: rings follow most active band, board pulse follows beat,

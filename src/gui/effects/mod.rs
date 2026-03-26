@@ -11,6 +11,7 @@ pub mod fireworks;
 pub mod fire;
 pub mod starfield;
 pub mod aurora;
+pub mod flow_field;
 
 use super::drawing::Vertex;
 

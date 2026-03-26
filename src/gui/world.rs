@@ -60,6 +60,7 @@ pub struct GameWorld {
     pub(super) fire: super::effects::fire::Fire,
     pub(super) starfield: super::effects::starfield::Starfield,
     pub(super) aurora: super::effects::aurora::Aurora,
+    pub(super) flow_field: super::effects::flow_field::FlowField,
     pub(super) effect_flags: themes::EffectFlags,
     pub(super) danger_level: f32,
     pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
@@ -201,7 +202,7 @@ impl GameWorld {
     pub fn save_settings(&self) {
         let vol = if let Ok(audio) = self.audio.lock() { audio.volume } else { 0.8 };
         let shuffled = if let Ok(audio) = self.audio.lock() { audio.shuffled } else { false };
-        let theme_names = ["Default", "Water", "Space", "Debug"];
+        let theme_names = ["Default", "Water", "Space", "Flow", "Debug"];
         let settings = rhythm_grid::config::Settings {
             volume: vol,
             speed: 1.0,
@@ -225,7 +226,8 @@ impl GameWorld {
         let (theme, theme_index) = match settings.theme.as_str() {
             "Water" => (themes::water_theme(), 1),
             "Space" => (themes::space_theme(), 2),
-            "Debug" => (themes::debug_theme(), 3),
+            "Flow" => (themes::flow_theme(), 3),
+            "Debug" => (themes::debug_theme(), 4),
             _ => (themes::default_theme(), 0),
         };
         let audio = audio_output::start_audio(settings.music_folder.as_deref());
@@ -266,6 +268,7 @@ impl GameWorld {
             fire: super::effects::fire::Fire::new(),
             starfield: super::effects::starfield::Starfield::new(),
             aurora: super::effects::aurora::Aurora::new(),
+            flow_field: super::effects::flow_field::FlowField::new(),
             effect_flags: theme.effects.clone(),
             piece_colors: theme.piece_colors,
             render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
@@ -608,6 +611,22 @@ impl GameWorld {
         if ef.aurora {
             self.aurora.update(&self.audio_frame);
         }
+        if ef.flow_field {
+            self.flow_field.update(&self.audio_frame);
+            // Feed active piece positions to flow field
+            if self.session.state == GameState::Playing {
+                let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
+                let piece_world: Vec<(f32, f32)> = cells.iter().map(|&(dr, dc)| {
+                    let c = (self.session.active_piece.col + dc) as f32 + 0.5;
+                    let r = (self.session.active_piece.row + dr) as f32 + 0.5;
+                    (c, r)
+                }).collect();
+                self.flow_field.set_piece_cells(piece_world);
+            } else {
+                self.flow_field.set_piece_cells(Vec::new());
+            }
+            super::effects::flow_field::tick_particles(&mut self.flow_field, dt as f32);
+        }
         if ef.camera_sway { self.camera.update(&self.audio_frame); }
 
         // Decay AFTER effects have consumed the frame
@@ -757,6 +776,7 @@ impl GameWorld {
             themes::default_theme,
             themes::water_theme,
             themes::space_theme,
+            themes::flow_theme,
             themes::debug_theme,
         ];
         self.theme_index = (self.theme_index + 1) % theme_fns.len();
@@ -771,6 +791,7 @@ impl GameWorld {
         self.grid_lines = GridLines::new(theme.grid);
         self.camera = CameraReactor::new(theme.camera);
         self.particles.particles.clear();
+        self.flow_field = super::effects::flow_field::FlowField::new();
         self.fireworks.shells_only = false;
         self.fireworks.bursts_only = theme.name == "Debug";
         self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
@@ -945,6 +966,14 @@ impl GameWorld {
                     }
                     if self.effect_flags.camera_shake {
                         self.camera.trigger_shake((0.2 + lines as f32 * 0.25).min(1.0));
+                    }
+                    if self.effect_flags.flow_field {
+                        // Shockwave at center of landing area
+                        let drop_x = piece_col as f32 + 0.5;
+                        let drop_y = land_bottom as f32 + 0.5;
+                        let drop_dist = (land_row - start_row).max(0) as f32;
+                        let intensity = 0.5 + (drop_dist / 20.0).min(1.0) * 0.5;
+                        self.flow_field.trigger_drop(drop_x, drop_y, intensity);
                     }
                     if self.effect_flags.grid_distortion {
                         let cx = self.session.active_piece.col as f32;
