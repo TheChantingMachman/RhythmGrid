@@ -128,9 +128,9 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         if c > 0 && g[r][c-1] != CellState::Empty { nb |= 4; }
         if c + 1 < WIDTH && g[r][c+1] != CellState::Empty { nb |= 8; }
         // Check settle animation for this cell
-        let settle = world.settle_cells.iter()
+        let settle = world.anims.settle_cells.iter()
             .find(|s| s.col == cell.col && s.row == cell.row)
-            .map(|s| (s.timer / super::world::SETTLE_DURATION).clamp(0.0, 1.0))
+            .map(|s| (s.timer / super::animations::SETTLE_DURATION).clamp(0.0, 1.0))
             .unwrap_or(0.0);
         push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow, nb, settle);
     }
@@ -184,8 +184,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     }
 
     // Hard drop trails — translucent streaks from start to landing
-    for trail in &world.drop_trails {
-        let progress = 1.0 - (trail.timer / super::world::DROP_TRAIL_DURATION).max(0.0);
+    for trail in &world.anims.drop_trails {
+        let progress = 1.0 - (trail.timer / super::animations::DROP_TRAIL_DURATION).max(0.0);
         let alpha = (1.0 - progress) * 0.35;
         let mut color = rgba_to_f32(world.themed_piece_color(trail.type_index));
         color[3] = alpha;
@@ -193,9 +193,9 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let trail_start = trail.start_row.max(trail.end_row - 6);
         for row in trail_start..trail.end_row {
             if row >= 0 && row < HEIGHT as i32 {
-                let fade = 1.0 - (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
+                let fade = (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
                 let mut c = color;
-                c[3] = alpha * fade; // fade from top to bottom of trail
+                c[3] = alpha * fade; // brightest at landing, fades upward
                 push_cube_3d(&mut tv, &mut ti, trail.col as f32, row as f32, cube_depth * 0.15, c, 0.0, 0, 0.0);
             }
         }
@@ -424,7 +424,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 
     // Shatter fragments — scattered mini-cubes from line clears
     if ef.clearing_flash {
-        for frag in &world.shatter_fragments {
+        for frag in &world.anims.shatter_fragments {
             let life = (frag.timer / frag.max_life).clamp(0.0, 1.0);
             let alpha = life * life; // quadratic fade
             if alpha < 0.01 { continue; }
@@ -462,7 +462,7 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
     let ring_n = [0.0f32, 0.0, 1.0];
     let ring_segments = 32;
 
-    for ring in &world.bg_rings {
+    for ring in &world.anims.bg_rings {
         let progress = 1.0 - ring.life / ring.max_life;
         let alpha = ring.color[3] * (1.0 - progress).powi(2);
         if alpha < 0.005 { continue; }
@@ -517,8 +517,8 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", rs.total_lines), text_col, 2.0);
 
     // T-spin flash
-    if ef.t_spin_flash && world.t_spin_flash > 0.01 {
-        let ta = (world.t_spin_flash * 255.0) as u8;
+    if ef.t_spin_flash && world.anims.t_spin_flash > 0.01 {
+        let ta = (world.anims.t_spin_flash * 255.0) as u8;
         push_text(&mut verts, &mut indices, w / 2.0 - 40.0, h / 2.0 - 60.0,
                   "T-SPIN", rgba_to_f32([255, 100, 255, ta]), 3.0);
     }

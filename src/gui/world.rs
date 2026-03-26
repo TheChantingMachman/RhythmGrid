@@ -26,16 +26,10 @@ pub struct GameWorld {
     preview_timer: f32,
     pub audio: Arc<Mutex<AudioState>>,
     pub analysis: super::audio_analysis::AudioAnalysis,
-    pub(super) t_spin_flash: f32, // 1.0 on t-spin, decays to 0
     pub(super) prev_beat: bool,
-    pub(super) clearing_cells: Vec<ClearingCell>,
-    pub(super) drop_trails: Vec<DropTrail>,
-    pub(super) settle_cells: Vec<SettleCell>,
-    pub(super) shatter_fragments: Vec<ShatterFragment>,
-    pub(super) bg_rings: Vec<BgRing>, // legacy — kept for level-up rings
+    pub anims: super::animations::Animations,
     pub effects: super::effect_manager::EffectManager,
     pub(super) danger_level: f32,
-    pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
     last_level: u32,
     pub(super) window_aspect: f32,
     pub(super) hud_opacity: f32,  // 0.0 = invisible, 1.0 = full
@@ -91,57 +85,8 @@ pub(super) struct Button {
     pub hovered: bool,
 }
 
-/// Expanding ring in the background
-pub(super) struct BgRing {
-    pub radius: f32,
-    pub max_radius: f32,
-    pub life: f32,
-    pub max_life: f32,
-    pub color: [f32; 4],
-}
-
-/// Per-cell clearing animation (fields used for spawn tracking; rendering replaced by shatter)
-#[allow(dead_code)]
-pub(super) struct ClearingCell {
-    pub col: i32,
-    pub row: i32,
-    pub timer: f32,
-    pub _color: [f32; 4],  // original piece color (reserved for future non-white dissolve)
-    pub scale: f32,         // 1.0 → 0.0 as it dissolves
-}
-
-pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
-
-pub(super) struct ShatterFragment {
-    pub x: f32,
-    pub y: f32,
-    pub vx: f32,
-    pub vy: f32,
-    pub size: f32,
-    pub color: [f32; 4],
-    pub timer: f32,
-    pub max_life: f32,
-}
-
-pub(super) const SHATTER_DURATION: f32 = 0.6;
-
-pub(super) struct DropTrail {
-    pub col: i32,
-    pub start_row: i32,   // where the piece was before drop
-    pub end_row: i32,     // where it landed
-    pub type_index: u32,
-    pub timer: f32,
-}
-
-pub(super) const DROP_TRAIL_DURATION: f32 = 0.2;
-
-pub(super) struct SettleCell {
-    pub col: i32,
-    pub row: i32,
-    pub timer: f32,
-}
-
-pub(super) const SETTLE_DURATION: f32 = 0.15;
+// Re-export animation types used inline in this file
+use super::animations::{ClearingCell, DropTrail, SettleCell, LINE_CLEAR_DURATION, DROP_TRAIL_DURATION, SETTLE_DURATION};
 
 impl GameWorld {
     /// Resolve a SignalRank to an actual band index using analysis results.
@@ -199,13 +144,8 @@ impl GameWorld {
             preview_timer: 0.0,
             audio,
             analysis: super::audio_analysis::AudioAnalysis::new(),
-            t_spin_flash: 0.0,
             prev_beat: false,
-            clearing_cells: Vec::new(),
-            drop_trails: Vec::new(),
-            settle_cells: Vec::new(),
-            shatter_fragments: Vec::new(),
-            bg_rings: Vec::new(),
+            anims: super::animations::Animations::new(),
             effects: super::effect_manager::EffectManager::new(&theme),
             piece_colors: theme.piece_colors,
             render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
@@ -228,7 +168,6 @@ impl GameWorld {
             logical_window_size: [settings.window_width, settings.window_height],
             bindings: theme.bindings.clone(),
             danger_level: 0.0,
-            level_up_flash: 0.0,
             last_level: 1,
             window_aspect: THEME.win_w as f32 / THEME.win_h as f32,
             hud_opacity: 1.0,
@@ -280,14 +219,6 @@ impl GameWorld {
 
         // (effect modules updated below after AudioFrame is built)
 
-        // Level-up rings still use legacy bg_rings vec
-        for ring in &mut self.bg_rings {
-            let progress = 1.0 - ring.life / ring.max_life;
-            ring.radius = 0.5 + progress * ring.max_radius;
-            ring.life -= dt as f32;
-        }
-        self.bg_rings.retain(|r| r.life > 0.0);
-
         // Upper-mids/presence beats (bands 4-5) → particle burst
         let w = THEME.win_w as f32;
         let h = THEME.win_h as f32;
@@ -320,34 +251,7 @@ impl GameWorld {
             self.hud_fade_timer = 1.5;
         }
 
-        for cell in &mut self.clearing_cells {
-            cell.timer -= dt as f32;
-            let progress = 1.0 - (cell.timer / LINE_CLEAR_DURATION).max(0.0);
-            cell.scale = 1.0 - progress; // shrink to 0
-        }
-        self.clearing_cells.retain(|c| c.timer > 0.0);
-
-        // Drop trail decay
-        for trail in &mut self.drop_trails {
-            trail.timer -= dt as f32;
-        }
-        self.drop_trails.retain(|t| t.timer > 0.0);
-
-        // Shatter fragment physics
-        for frag in &mut self.shatter_fragments {
-            frag.timer -= dt as f32;
-            frag.x += frag.vx * dt as f32;
-            frag.y += frag.vy * dt as f32;
-            frag.vy += 8.0 * dt as f32; // gravity (positive = downward in row coords)
-            frag.vx *= 0.97; // drag
-        }
-        self.shatter_fragments.retain(|f| f.timer > 0.0);
-
-        // Settle animation decay
-        for cell in &mut self.settle_cells {
-            cell.timer -= dt as f32;
-        }
-        self.settle_cells.retain(|c| c.timer > 0.0);
+        self.anims.update(dt as f32);
 
         // Level up detection
         let current_level = level_for_lines(self.session.total_lines);
@@ -355,17 +259,7 @@ impl GameWorld {
             self.hud_opacity = 1.0;
             self.hud_fade_timer = 2.0;
             if self.effects.flags.level_up_rings {
-                self.level_up_flash = 1.0;
-            }
-            // Spawn celebratory rings
-            for i in 0..3 {
-                self.bg_rings.push(BgRing {
-                    radius: 0.5 + i as f32 * 0.3,
-                    max_radius: 25.0,
-                    life: 2.5 - i as f32 * 0.3,
-                    max_life: 2.5 - i as f32 * 0.3,
-                    color: [0.3, 0.8, 1.0, 0.5], // bright cyan
-                });
+                self.anims.spawn_level_up_rings();
             }
             // Burst of particles from board center
             let w = THEME.win_w as f32;
@@ -389,7 +283,6 @@ impl GameWorld {
             }
             self.last_level = current_level;
         }
-        self.level_up_flash = (self.level_up_flash - dt as f32 * 1.5).max(0.0);
 
         // Build AudioFrame BEFORE decay so effects see fresh beat triggers
         self.audio_frame = self.analysis.audio_frame(self.danger_level, dt as f32);
@@ -420,7 +313,7 @@ impl GameWorld {
         self.analysis.decay_beats(dt as f32);
 
         // T-spin flash decay
-        self.t_spin_flash = (self.t_spin_flash - dt as f32 * 1.0).max(0.0);
+        self.anims.t_spin_flash = (self.anims.t_spin_flash - dt as f32 * 1.0).max(0.0);
         self.toast_timer = (self.toast_timer - dt as f32).max(0.0);
 
         // Smooth escalation transition
@@ -464,11 +357,11 @@ impl GameWorld {
                     let r = pre_piece.row + dr;
                     let c = pre_piece.col + dc;
                     if r >= 0 && r < HEIGHT as i32 {
-                        self.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
+                        self.anims.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
                     }
                 }
                 if pre_is_t_spin {
-                    self.t_spin_flash = 1.0;
+                    self.anims.t_spin_flash = 1.0;
                 }
                 if lines_cleared > 0 {
                     let cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
@@ -479,7 +372,7 @@ impl GameWorld {
                     }
                     // Shatter fragments for cleared rows (tick path)
                     if self.effects.flags.clearing_flash {
-                        self.spawn_shatter_for_row_range(piece_row - lines_cleared as i32 + 1, lines_cleared);
+                        self.anims.spawn_shatter_for_row_range(piece_row - lines_cleared as i32 + 1, lines_cleared);
                     }
                     if self.effects.flags.camera_shake {
                         self.camera.trigger_shake((lines_cleared as f32 * 0.3).min(1.0));
@@ -511,10 +404,9 @@ impl GameWorld {
             // If game over, restart
             if self.session.state == GameState::GameOver {
                 self.session = GameSession::new();
-                self.clearing_cells.clear();
-                self.bg_rings.clear();
+                self.anims.clear();
                 self.danger_level = 0.0;
-                self.level_up_flash = 0.0;
+                self.anims.level_up_flash = 0.0;
                 self.last_level = 1;
                 self.camera.reset();
             }
@@ -540,10 +432,9 @@ impl GameWorld {
             // Auto-restart on game over in demo mode
             if self.session.state == GameState::GameOver {
                 self.session = GameSession::new();
-                self.clearing_cells.clear();
-                self.bg_rings.clear();
+                self.anims.clear();
                 self.danger_level = 0.0;
-                self.level_up_flash = 0.0;
+                self.anims.level_up_flash = 0.0;
                 self.last_level = 1;
                 self.camera.reset();
             }
@@ -635,10 +526,8 @@ impl GameWorld {
             // Restart fresh game when exiting demo
             self.session = GameSession::new();
             self.last_tick = Instant::now();
-            self.clearing_cells.clear();
-            self.bg_rings.clear();
+            self.anims.clear();
             self.danger_level = 0.0;
-            self.level_up_flash = 0.0;
             self.last_level = 1;
             self.camera.reset();
         }
@@ -681,7 +570,7 @@ impl GameWorld {
                             cleared_rows.push(row as i32);
                             for col in 0..WIDTH {
                                 if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
-                                    self.clearing_cells.push(ClearingCell {
+                                    self.anims.clearing_cells.push(ClearingCell {
                                         col: col as i32, row: row as i32,
                                         timer: LINE_CLEAR_DURATION,
                                         _color: rgba_to_f32(self.themed_piece_color(ti)),
@@ -693,7 +582,7 @@ impl GameWorld {
                     }
                     // Shatter fragments for cleared rows (hard drop path)
                     for &row in &cleared_rows {
-                        self.spawn_shatter_for_row_range(row, 1);
+                        self.anims.spawn_shatter_for_row_range(row, 1);
                     }
                     // Undo simulation
                     for &(dr, dc) in &cells {
@@ -712,7 +601,7 @@ impl GameWorld {
                             let sr = start_row + dr;
                             let er = land_row + dr;
                             if col >= 0 && col < WIDTH as i32 {
-                                self.drop_trails.push(DropTrail {
+                                self.anims.drop_trails.push(DropTrail {
                                     col,
                                     start_row: sr,
                                     end_row: er,
@@ -728,7 +617,7 @@ impl GameWorld {
                         let r = land_row + dr;
                         let c = piece_col + dc;
                         if r >= 0 && r < HEIGHT as i32 {
-                            self.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
+                            self.anims.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
                         }
                     }
 
@@ -786,10 +675,8 @@ impl GameWorld {
                     // Reset game state without restarting audio
                     self.session = GameSession::new();
                     self.last_tick = Instant::now();
-                    self.clearing_cells.clear();
-                    self.bg_rings.clear();
+                    self.anims.clear();
                     self.danger_level = 0.0;
-                    self.level_up_flash = 0.0;
                     self.last_level = 1;
                     self.camera.reset();
                     }
@@ -819,37 +706,6 @@ impl GameWorld {
         }
     }
 
-    fn spawn_shatter_for_row_range(&mut self, top_row: i32, lines: u32) {
-        // Use a simple deterministic scatter based on cell position
-        let mut seed = (top_row as u32).wrapping_mul(31).wrapping_add(lines * 17);
-        let pseudo = |s: &mut u32| -> f32 {
-            *s = s.wrapping_mul(1103515245).wrapping_add(12345);
-            ((*s >> 16) & 0x7FFF) as f32 / 32767.0
-        };
-        for row in top_row..(top_row + lines as i32) {
-            if row < 0 || row >= HEIGHT as i32 { continue; }
-            for col in 0..WIDTH as i32 {
-                let cx = col as f32 + 0.5;
-                let cy = row as f32 + 0.5;
-                let frags = 3 + (pseudo(&mut seed) * 2.0) as u32; // 3-4 fragments per cell
-                for _ in 0..frags {
-                    let angle = pseudo(&mut seed) * std::f32::consts::TAU;
-                    let speed = 2.0 + pseudo(&mut seed) * 4.0;
-                    let size = 0.1 + pseudo(&mut seed) * 0.2;
-                    self.shatter_fragments.push(ShatterFragment {
-                        x: cx,
-                        y: cy,
-                        vx: angle.cos() * speed,
-                        vy: angle.sin() * speed,
-                        size,
-                        color: [1.0, 1.0, 1.0, 0.9],
-                        timer: SHATTER_DURATION,
-                        max_life: SHATTER_DURATION,
-                    });
-                }
-            }
-        }
-    }
 
     /// Project a world-space point to screen pixel coords using the VP matrix.
     fn project_to_screen(vp: &[[f32; 4]; 4], point: [f32; 3], win_w: f32, win_h: f32) -> [f32; 2] {
