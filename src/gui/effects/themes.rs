@@ -96,6 +96,7 @@ impl EffectBindings {
 }
 
 /// Parameters for BeatRings effect.
+#[derive(Clone, Copy)]
 pub struct RingParams {
     pub max_radius: f32,
     pub base_life: f32,
@@ -106,6 +107,7 @@ pub struct RingParams {
 }
 
 /// Parameters for HexBackground effect.
+#[derive(Clone, Copy)]
 pub struct HexParams {
     pub dot_min_size: f32,
     pub dot_max_size: f32,
@@ -120,6 +122,7 @@ pub struct HexParams {
 }
 
 /// Parameters for GridLines effect.
+#[derive(Clone, Copy)]
 pub struct GridParams {
     pub base_r: f32,
     pub base_g: f32,
@@ -129,11 +132,13 @@ pub struct GridParams {
 }
 
 /// Parameters for FftVisualizer band colors.
+#[derive(Clone, Copy)]
 pub struct FftParams {
     pub band_colors: [[u8; 3]; 7],
 }
 
 /// Parameters for CameraReactor.
+#[derive(Clone, Copy)]
 pub struct CameraParams {
     pub sway_base: f32,
     pub sway_danger_add: f32,

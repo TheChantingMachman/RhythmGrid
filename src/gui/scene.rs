@@ -93,9 +93,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     // Background geometry (transparent — behind everything)
     build_background(&mut tv, &mut ti, world, gw, gh);
 
-    // Fireworks (transparent, behind board)
+    // Background effects (transparent, behind board)
     {
-        use super::effects::AudioEffect;
         let fx_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
             win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
@@ -103,33 +102,19 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: world.hud_opacity,
         };
-        if world.effect_flags.fireworks {
-            world.fireworks.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.fire {
-            world.fire.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.starfield {
-            world.starfield.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.aurora {
-            world.aurora.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.flow_field {
-            world.flow_field.render(&mut tv, &mut ti, &fx_ctx);
-        }
+        world.effects.render_background(&mut tv, &mut ti, &fx_ctx);
     }
 
     // Occupied cells — glow per piece type, pulse from dynamic rank analysis
-    let ef = &world.effect_flags;
+    let ef = &world.effects.flags;
     let pulse_band = world.resolve_rank(world.bindings.board_pulse);
     let glow_band = world.resolve_rank(world.bindings.cube_glow);
     for cell in &world.render_board.occupied {
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.75;
         let (band_glow, depth) = if ef.cube_glow {
-            (world.bands_norm[glow_band] * 1.5,
-             cube_depth + world.band_beat_intensity[pulse_band] * 0.22)
+            (world.analysis.bands_norm[glow_band] * 1.5,
+             cube_depth + world.analysis.band_beat_intensity[pulse_band] * 0.22)
         } else {
             (0.0, cube_depth)
         };
@@ -143,9 +128,9 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         if c > 0 && g[r][c-1] != CellState::Empty { nb |= 4; }
         if c + 1 < WIDTH && g[r][c+1] != CellState::Empty { nb |= 8; }
         // Check settle animation for this cell
-        let settle = world.settle_cells.iter()
+        let settle = world.anims.settle_cells.iter()
             .find(|s| s.col == cell.col && s.row == cell.row)
-            .map(|s| (s.timer / super::world::SETTLE_DURATION).clamp(0.0, 1.0))
+            .map(|s| (s.timer / super::animations::SETTLE_DURATION).clamp(0.0, 1.0))
             .unwrap_or(0.0);
         push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow, nb, settle);
     }
@@ -165,7 +150,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.85;
         let (active_glow, active_depth) = if ef.active_piece_pulse {
-            (world.bands_norm[band] * 1.5, cube_depth + world.band_beat_intensity[band] * 0.22)
+            (world.analysis.bands_norm[band] * 1.5, cube_depth + world.analysis.band_beat_intensity[band] * 0.22)
         } else {
             (0.0, cube_depth)
         };
@@ -176,7 +161,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     {
         let next_color = rgba_to_f32(world.themed_piece_color(world.render_next.type_index));
         let band = (world.render_next.type_index as usize) % 7;
-        let glow = if ef.cube_glow { world.bands_norm[band] * 1.0 } else { 0.0 };
+        let glow = if ef.cube_glow { world.analysis.bands_norm[band] * 1.0 } else { 0.0 };
         render_preview_piece(
             &mut tv, &mut ti,
             &world.render_next.cells, next_color, cube_depth, glow,
@@ -189,7 +174,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     if let Some(ref held) = world.render_held {
         let held_color = rgba_to_f32(world.themed_piece_color(held.type_index));
         let band = (held.type_index as usize) % 7;
-        let glow = if ef.cube_glow { world.bands_norm[band] * 1.0 } else { 0.0 };
+        let glow = if ef.cube_glow { world.analysis.bands_norm[band] * 1.0 } else { 0.0 };
         render_preview_piece(
             &mut tv, &mut ti,
             &held.cells, held_color, cube_depth, glow,
@@ -199,8 +184,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     }
 
     // Hard drop trails — translucent streaks from start to landing
-    for trail in &world.drop_trails {
-        let progress = 1.0 - (trail.timer / super::world::DROP_TRAIL_DURATION).max(0.0);
+    for trail in &world.anims.drop_trails {
+        let progress = 1.0 - (trail.timer / super::animations::DROP_TRAIL_DURATION).max(0.0);
         let alpha = (1.0 - progress) * 0.35;
         let mut color = rgba_to_f32(world.themed_piece_color(trail.type_index));
         color[3] = alpha;
@@ -208,9 +193,9 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let trail_start = trail.start_row.max(trail.end_row - 6);
         for row in trail_start..trail.end_row {
             if row >= 0 && row < HEIGHT as i32 {
-                let fade = 1.0 - (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
+                let fade = (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
                 let mut c = color;
-                c[3] = alpha * fade; // fade from top to bottom of trail
+                c[3] = alpha * fade; // brightest at landing, fades upward
                 push_cube_3d(&mut tv, &mut ti, trail.col as f32, row as f32, cube_depth * 0.15, c, 0.0, 0, 0.0);
             }
         }
@@ -227,9 +212,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Grid lines (effect module)
-    if ef.grid_lines {
-        use super::effects::AudioEffect;
+    // Grid lines (effect module — renders to opaque pass)
+    {
         let grid_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
             win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
@@ -237,7 +221,7 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: world.hud_opacity,
         };
-        world.grid_lines.render(&mut sv, &mut si, &grid_ctx);
+        world.effects.render_grid(&mut sv, &mut si, &grid_ctx);
     }
 
     // --- 3D Music Dashboard ---
@@ -425,9 +409,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         ], 0.0, 0.2, col);
     }
 
-    // FFT visualizer (effect module)
+    // FFT visualizer (rendered via effect manager with dashboard HUD opacity)
     if ef.fft_visualizer {
-        use super::effects::AudioEffect;
         let fft_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
             win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
@@ -435,12 +418,13 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: hud_a,
         };
-        world.fft_vis.render(&mut tv, &mut ti, &fft_ctx);
+        use super::effects::AudioEffect;
+        world.effects.fft_vis.render(&mut tv, &mut ti, &fft_ctx);
     }
 
     // Shatter fragments — scattered mini-cubes from line clears
     if ef.clearing_flash {
-        for frag in &world.shatter_fragments {
+        for frag in &world.anims.shatter_fragments {
             let life = (frag.timer / frag.max_life).clamp(0.0, 1.0);
             let alpha = life * life; // quadratic fade
             if alpha < 0.01 { continue; }
@@ -468,27 +452,17 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
         preview_angle: world.preview_angle,
         hud_opacity: world.hud_opacity,
     };
-    use super::effects::AudioEffect;
-
-    // Hex background (effect module)
-    if world.effect_flags.hex_background {
-        world.hex_background.render(sv, si, &ctx);
-    }
-
-    // Beat rings (effect module)
-    if world.effect_flags.beat_rings {
-        world.beat_rings.render(sv, si, &ctx);
-    }
+    world.effects.render_dashboard(sv, si, &ctx);
 
     // Legacy level-up rings (still inline)
-    if !world.effect_flags.level_up_rings { return; }
+    if !world.effects.flags.level_up_rings { return; }
     let ring_cx = gw / 2.0;
     let ring_cy = -gh / 2.0;
     let ring_z = -1.0;
     let ring_n = [0.0f32, 0.0, 1.0];
     let ring_segments = 32;
 
-    for ring in &world.bg_rings {
+    for ring in &world.anims.bg_rings {
         let progress = 1.0 - ring.life / ring.max_life;
         let alpha = ring.color[3] * (1.0 - progress).powi(2);
         if alpha < 0.005 { continue; }
@@ -518,7 +492,7 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
 fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     let mut verts = Vec::new();
     let mut indices = Vec::new();
-    let ef = &world.effect_flags;
+    let ef = &world.effects.flags;
     let t = &THEME;
     let w = t.win_w as f32;
     let h = t.win_h as f32;
@@ -543,8 +517,8 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", rs.total_lines), text_col, 2.0);
 
     // T-spin flash
-    if ef.t_spin_flash && world.t_spin_flash > 0.01 {
-        let ta = (world.t_spin_flash * 255.0) as u8;
+    if ef.t_spin_flash && world.anims.t_spin_flash > 0.01 {
+        let ta = (world.anims.t_spin_flash * 255.0) as u8;
         push_text(&mut verts, &mut indices, w / 2.0 - 40.0, h / 2.0 - 60.0,
                   "T-SPIN", rgba_to_f32([255, 100, 255, ta]), 3.0);
     }
@@ -663,12 +637,12 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     // Particles (always visible, not affected by HUD fade)
-    world.particles.render(&mut verts, &mut indices);
+    world.effects.render_particles(&mut verts, &mut indices);
 
     // Apply HUD opacity (skip particles — they're always visible)
     let opacity = world.hud_opacity;
     if opacity < 0.99 {
-        let particle_verts = world.particles.particles.len() * 4;
+        let particle_verts = world.effects.particles.particles.len() * 4;
         let hud_vert_count = verts.len().saturating_sub(particle_verts);
         for v in verts[..hud_vert_count].iter_mut() {
             v.color[3] *= opacity;
@@ -729,15 +703,15 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             push_quad(&mut verts, &mut indices, px, by, pair_w, max_h, rgba_to_f32([20, 20, 40, 150]), 0.01);
 
             // Left bar: rolling energy average (blue/gold)
-            let avg_val = world.energy_averages[i].min(1.0);
+            let avg_val = world.analysis.energy_averages[i].min(1.0);
             let avg_h = avg_val * max_h;
-            let avg_col = if world.resolved_ranks.contains(&i) { rank_col } else {
+            let avg_col = if world.analysis.resolved_ranks.contains(&i) { rank_col } else {
                 rgba_to_f32([40, 80, 160, 220])
             };
             push_quad(&mut verts, &mut indices, px, by + max_h - avg_h, bar_w, avg_h, avg_col, 0.02);
 
             // Right bar: real-time band level (green)
-            let live_val = world.bands[i].min(1.0);
+            let live_val = world.analysis.bands[i].min(1.0);
             let live_h = live_val * max_h;
             push_quad(&mut verts, &mut indices, px + bar_w + 2.0, by + max_h - live_h, bar_w, live_h, live_col, 0.02);
 
@@ -755,15 +729,15 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             push_quad(&mut verts, &mut indices, px, by, pair_w, max_h, rgba_to_f32([20, 20, 40, 150]), 0.01);
 
             // Left bar: confidence (orange/gold)
-            let conf_val = world.confidence_values[i].min(1.0);
+            let conf_val = world.analysis.confidence_values[i].min(1.0);
             let conf_h = conf_val * max_h;
-            let conf_col = if world.resolved_ranks[0] == i { rank_col } else {
+            let conf_col = if world.analysis.resolved_ranks[0] == i { rank_col } else {
                 rgba_to_f32([160, 80, 40, 220])
             };
             push_quad(&mut verts, &mut indices, px, by + max_h - conf_h, bar_w, conf_h, conf_col, 0.02);
 
             // Right bar: real-time beat intensity (green)
-            let beat_val = world.band_beat_intensity[i].min(1.0);
+            let beat_val = world.analysis.band_beat_intensity[i].min(1.0);
             let beat_h = beat_val * max_h;
             push_quad(&mut verts, &mut indices, px + bar_w + 2.0, by + max_h - beat_h, bar_w, beat_h, live_col, 0.02);
 
@@ -772,7 +746,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
         // Resolved ranks display
         let ry = cy + max_h + 36.0;
-        let [r1, r2, r3] = world.resolved_ranks;
+        let [r1, r2, r3] = world.analysis.resolved_ranks;
         push_text(&mut verts, &mut indices, dx, ry,
             &format!("R1:{} R2:{} R3:{}", band_names[r1], band_names[r2], band_names[r3]),
             rank_col, 1.5);
