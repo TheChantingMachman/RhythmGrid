@@ -397,6 +397,12 @@ impl GameSession {
             self.lock_delay_accumulator_ms = 0;
             self.lock_delay_resets += 1;
         }
+        if result && self.lock_delay_active {
+            let cells = piece_cells(self.active_piece.piece_type, self.active_piece.rotation);
+            if is_valid_position(&self.grid, &cells, self.active_piece.row + 1, self.active_piece.col) {
+                self.lock_delay_active = false;
+            }
+        }
         result
     }
 
@@ -407,6 +413,12 @@ impl GameSession {
             if self.lock_delay_active && self.lock_delay_resets < MAX_LOCK_RESETS {
                 self.lock_delay_accumulator_ms = 0;
                 self.lock_delay_resets += 1;
+            }
+            if self.lock_delay_active {
+                let cells = piece_cells(self.active_piece.piece_type, self.active_piece.rotation);
+                if is_valid_position(&self.grid, &cells, self.active_piece.row + 1, self.active_piece.col) {
+                    self.lock_delay_active = false;
+                }
             }
         }
         result

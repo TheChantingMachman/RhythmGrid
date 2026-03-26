@@ -609,6 +609,6 @@
   section: Game
   description: 'Bug fix: after a successful rotation or horizontal move during active lock delay, check whether the piece still rests on a surface. Compute piece_cells for the current piece state, then call is_valid_position at (piece.row + 1, piece.col). If that returns true (space exists below), set lock_delay_active = false — do not reset lock_delay_resets or lock_delay_accumulator_ms, as gravity will re-initialize them when lock delay next activates. If is_valid_position returns false (still on a surface), keep lock_delay_active = true and proceed with the existing timer reset logic. This check goes in GameSession::rotate() and GameSession::move_horizontal(), after the existing lock delay timer reset block, guarded by the same lock_delay_active condition.'
   tags: [core, game, bugfix]
-  status: draft
+  status: implemented
   depends_on: [game.lock_delay, game.rotate, game.move_down, game.collision]
   modifies: [game.lock_delay]
