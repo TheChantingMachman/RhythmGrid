@@ -133,4 +133,23 @@ impl EffectManager {
     pub fn on_track_change(&mut self) {
         self.fireworks.shell_cooldown = 3.0;
     }
+
+    /// Initialize GPU resources for any effects that implement GpuEffect.
+    /// Call once after GPU device is available (or on device recreation).
+    pub fn create_gpu_resources(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue) {
+        // No GPU effects registered yet. When an effect is ported to GpuEffect,
+        // call its create_gpu_resources here:
+        // self.flow_field_gpu.create_gpu_resources(device, queue);
+    }
+
+    /// Dispatch compute work for all GPU effects.
+    /// Call once per frame before rendering. Returns true if any compute work was submitted.
+    pub fn dispatch_compute(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, _audio: &AudioFrame) -> bool {
+        // No GPU effects registered yet. When an effect is ported to GpuEffect:
+        // let mut encoder = device.create_command_encoder(&Default::default());
+        // self.flow_field_gpu.compute(&mut encoder, audio);
+        // queue.submit(std::iter::once(encoder.finish()));
+        // return true;
+        false
+    }
 }
