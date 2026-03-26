@@ -76,6 +76,7 @@ pub trait AudioEffect {
 ///
 /// CPU AudioEffect and GPU GpuEffect coexist — the EffectManager dispatches to the right
 /// interface per effect. Effects can be ported from AudioEffect to GpuEffect one at a time.
+#[allow(dead_code)]
 pub trait GpuEffect {
     /// Allocate GPU resources: compute pipeline, storage buffers, bind groups.
     fn create_gpu_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue);

@@ -136,6 +136,7 @@ impl EffectManager {
 
     /// Initialize GPU resources for any effects that implement GpuEffect.
     /// Call once after GPU device is available (or on device recreation).
+    #[allow(dead_code)]
     pub fn create_gpu_resources(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue) {
         // No GPU effects registered yet. When an effect is ported to GpuEffect,
         // call its create_gpu_resources here:

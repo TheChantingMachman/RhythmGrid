@@ -943,6 +943,7 @@ impl GpuState {
     pub fn queue(&self) -> &wgpu::Queue { &self.queue }
 
     /// Submit a command encoder (for compute dispatches from GpuEffects).
+    #[allow(dead_code)]
     pub fn submit(&self, encoder: wgpu::CommandEncoder) {
         self.queue.submit(std::iter::once(encoder.finish()));
     }
