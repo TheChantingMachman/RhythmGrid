@@ -118,6 +118,10 @@ impl ApplicationHandler for App {
                     gpu.update_uniforms(&uniforms);
                     gpu.set_color_grade(self.world.color_grade);
                 }
+                // Dispatch GPU compute for any GpuEffect instances
+                if let Some(gpu) = &self.gpu {
+                    self.world.effects.dispatch_compute(gpu.device(), gpu.queue(), &self.world.audio_frame);
+                }
                 let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
                 if let Some(gpu) = &mut self.gpu {
                     gpu.render(&ov, &oi, &tv, &ti, &hv, &hi);

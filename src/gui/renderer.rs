@@ -936,6 +936,17 @@ impl GpuState {
         self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[*uniforms]));
     }
 
+    /// Access the GPU device (for creating resources in GpuEffect::create_gpu_resources).
+    pub fn device(&self) -> &wgpu::Device { &self.device }
+
+    /// Access the GPU queue (for submitting compute work and buffer uploads).
+    pub fn queue(&self) -> &wgpu::Queue { &self.queue }
+
+    /// Submit a command encoder (for compute dispatches from GpuEffects).
+    pub fn submit(&self, encoder: wgpu::CommandEncoder) {
+        self.queue.submit(std::iter::once(encoder.finish()));
+    }
+
     pub fn set_color_grade(&self, grade: [f32; 3]) {
         let data = [grade[0], grade[1], grade[2], 1.0f32];
         // Write to the bloom pass uniform buffer (first pass in the chain)
