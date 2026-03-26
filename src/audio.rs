@@ -1,4 +1,5 @@
 use rustfft::{FftPlanner, num_complex::Complex};
+use std::io::Cursor;
 use std::path::Path;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, Decoder};
@@ -452,6 +453,45 @@ impl StreamingDecoder {
 
         let mut hint = Hint::new();
         hint.with_extension(&ext);
+
+        let probed = symphonia::default::get_probe()
+            .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+            .map_err(|e| AudioError::DecodeError(e.to_string()))?;
+
+        let format = probed.format;
+        let track = format
+            .tracks()
+            .iter()
+            .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+            .ok_or_else(|| AudioError::DecodeError("No audio track found".into()))?;
+
+        let track_id = track.id;
+        let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+        let channels = track
+            .codec_params
+            .channels
+            .map(|c| c.count() as u16)
+            .unwrap_or(2);
+
+        let decoder = symphonia::default::get_codecs()
+            .make(&track.codec_params, &DecoderOptions::default())
+            .map_err(|e| AudioError::DecodeError(e.to_string()))?;
+
+        Ok(StreamingDecoder {
+            format,
+            decoder,
+            track_id,
+            sample_rate,
+            channels,
+        })
+    }
+
+    pub fn open_bytes(data: &'static [u8], extension: &str) -> Result<StreamingDecoder, AudioError> {
+        let cursor = Cursor::new(data);
+        let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+
+        let mut hint = Hint::new();
+        hint.with_extension(extension);
 
         let probed = symphonia::default::get_probe()
             .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())

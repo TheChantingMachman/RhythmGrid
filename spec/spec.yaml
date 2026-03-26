@@ -617,5 +617,5 @@
   section: Audio
   description: 'Add StreamingDecoder::open_bytes(data: &''static [u8], extension: &str) -> Result<StreamingDecoder, AudioError>. Same as open() but reads from an in-memory byte slice instead of a file. Wraps data in std::io::Cursor, passes it to MediaSourceStream::new (Cursor<&[u8]> implements MediaSource), and uses the extension parameter as the format hint. No format validation against SUPPORTED_FORMATS needed since the caller controls the embedded data. All other probing, track discovery, and decoder setup is identical to open().'
   tags: [core, audio]
-  status: draft
+  status: implemented
   depends_on: [audio.streaming_decode]
