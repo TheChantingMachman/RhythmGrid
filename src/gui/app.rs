@@ -122,6 +122,15 @@ impl ApplicationHandler for App {
                 if let Some(gpu) = &self.gpu {
                     self.world.effects.dispatch_compute(gpu.device(), gpu.queue(), &self.world.audio_frame);
                 }
+                // Mandelbrot GPU background
+                if let Some(gpu) = &mut self.gpu {
+                    let mb = &self.world.effects.mandelbrot;
+                    let active = self.world.effects.flags.mandelbrot && mb.use_gpu();
+                    gpu.mandelbrot_active = active;
+                    if active {
+                        gpu.update_mandelbrot(&mb.gpu_uniforms(gpu.aspect_ratio()));
+                    }
+                }
                 let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
                 if let Some(gpu) = &mut self.gpu {
                     gpu.render(&ov, &oi, &tv, &ti, &hv, &hi);
