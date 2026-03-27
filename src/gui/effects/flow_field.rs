@@ -252,6 +252,7 @@ pub struct FlowField {
     phase_timer: f32,
     assembled_rotation: [f32; 3],
     assembled_center: [f32; 3],
+    capture_cooldown: f32,  // seconds to skip capture after transition
 }
 
 // World-space bounds (board: x 0..10, y 0..-20)
@@ -266,33 +267,34 @@ const NORMAL: [f32; 3] = [0.0, 0.0, 1.0];
 impl FlowField {
     pub fn new() -> Self {
         // 4 mini tetrahedra — will assemble into a larger one
-        let tetra_scale = 2.8; // 25% smaller than 3.75
+        let tetra_scale = 2.8;
         let spread = 8.0;
         // 5 tetrahedra: center (#4) + 4 outer ones that press face-to-face.
-        // Each outer tetra's target is opposite the center's face — its apex points outward.
-        // Face normals of center tetra (outward):
+        // Compute assembly targets from the EXACT vertex positions (assembled_tetra_verts)
+        // so attract destinations match assembled positions perfectly — no snap.
+        let mut tetra_starts: Vec<[f32; 3]> = Vec::new();
+        let mut tetra_targets: Vec<[f32; 3]> = Vec::new();
         let face_normals = [
-            [ 0.577,  0.577, -0.577],
+            [ 0.577f32,  0.577, -0.577],
             [-0.577,  0.577,  0.577],
             [ 0.577, -0.577,  0.577],
             [-0.577, -0.577, -0.577],
         ];
-        // Distance from center to face center = inradius ≈ 0.577 for unit tetra.
-        // The outer tetra's center sits at 2 * inradius along the normal from center.
-        let face_offset = 1.15; // distance along normal for face-to-face touching
-        let mut tetra_starts: Vec<[f32; 3]> = Vec::new();
-        let mut tetra_targets: Vec<[f32; 3]> = Vec::new();
-        // Outer tetras 0-3
-        for i in 0..4 {
-            let n = face_normals[i];
-            // Scatter start: spread out
-            tetra_starts.push([n[0] * spread, n[1] * spread, n[2] * spread]);
-            // Assembly target: face-to-face with center
-            tetra_targets.push([n[0] * tetra_scale * face_offset, n[1] * tetra_scale * face_offset, n[2] * tetra_scale * face_offset]);
+        for i in 0..5 {
+            let verts = assembled_tetra_verts(i);
+            // Centroid of the assembled tetra's 4 vertices (at unit scale)
+            let cx = (verts[0][0] + verts[1][0] + verts[2][0] + verts[3][0]) / 4.0;
+            let cy = (verts[0][1] + verts[1][1] + verts[2][1] + verts[3][1]) / 4.0;
+            let cz = (verts[0][2] + verts[1][2] + verts[2][2] + verts[3][2]) / 4.0;
+            tetra_targets.push([cx * tetra_scale, cy * tetra_scale, cz * tetra_scale]);
+            // Scatter start: spread along face normals (or center for #4)
+            if i < 4 {
+                let n = face_normals[i];
+                tetra_starts.push([n[0] * spread, n[1] * spread, n[2] * spread]);
+            } else {
+                tetra_starts.push([0.0, 0.0, 0.0]);
+            }
         }
-        // Center tetra (#4)
-        tetra_starts.push([0.0, 0.0, 0.0]);
-        tetra_targets.push([0.0, 0.0, 0.0]);
 
         let tetras = (0..5).map(|i| {
             let s = tetra_starts[i];
@@ -326,6 +328,7 @@ impl FlowField {
             phase_timer: 32.0, // scatter for 32 seconds first
             assembled_rotation: [0.0; 3],
             assembled_center: [5.0, -10.0, -2.0],
+            capture_cooldown: 0.0,
         }
     }
 
@@ -355,7 +358,7 @@ impl FlowField {
             let y = SPAWN_Y_MIN + self.rand_f32().abs() * (SPAWN_Y_MAX - SPAWN_Y_MIN);
             let z = SPAWN_Z_MIN + self.rand_f32().abs() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
             let life = 6.0 + self.rand_f32().abs() * 8.0;
-            let hue = self.centroid + self.rand_f32() * 0.15;
+            let hue = self.centroid + self.rand_f32() * 0.4; // wider range — mix of teal and magenta
             let size = 0.08 + self.rand_f32().abs() * 0.12;
             self.particles.push(FlowParticle {
                 x, y, z, life, max_life: life, hue, size,
@@ -406,7 +409,12 @@ impl AudioEffect for FlowField {
         // perspective projection without needing per-particle camera math.
         for p in &self.particles {
             let t = (p.life / p.max_life).clamp(0.0, 1.0);
-            let alpha = if t > 0.9 { (1.0 - t) * 10.0 } else { t.sqrt() };
+            let mut alpha = if t > 0.9 { (1.0 - t) * 10.0 } else { t.sqrt() };
+            // Quick fade on outer tetra particles in the last 0.5s of attract
+            if self.capture_phase == CapturePhase::Attract && p.stuck_to >= 0 && p.stuck_to < 4 {
+                let fade = (self.phase_timer / 0.5).clamp(0.0, 1.0);
+                alpha *= fade;
+            }
             let [r, g, b, a] = FlowField::hue_to_color(p.hue);
             let color = [r, g, b, a * alpha * 0.7];
 
@@ -445,6 +453,39 @@ impl AudioEffect for FlowField {
                 indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
             }
         }
+
+        // DEBUG: uncomment to show magenta wireframe edges for all tetrahedra
+        // let debug_color = [1.0f32, 0.0, 1.0, 0.8];
+        // let thickness = 0.02;
+        // let cam_dir = [0.0f32, 0.0, 1.0];
+        // let tetra_edges: [(usize, usize); 6] = [(0,1),(0,2),(0,3),(1,2),(1,3),(2,3)];
+        // for t in &self.tetras {
+        //     let world_verts: Vec<[f32; 3]> = if let Some(ref av) = t.assembled_verts {
+        //         av.to_vec()
+        //     } else {
+        //         TETRA_VERTS.iter().map(|v| {
+        //             let scaled = [v[0] * t.scale, v[1] * t.scale, v[2] * t.scale];
+        //             let rotated = t.rotate_point(scaled);
+        //             [rotated[0] + t.x, rotated[1] + t.y, rotated[2] + t.z]
+        //         }).collect()
+        //     };
+        //     for &(a, b) in &tetra_edges {
+        //         let p0 = world_verts[a];
+        //         let p1 = world_verts[b];
+        //         let dx = p1[0]-p0[0]; let dy = p1[1]-p0[1]; let dz = p1[2]-p0[2];
+        //         let c = [dy*cam_dir[2]-dz*cam_dir[1], dz*cam_dir[0]-dx*cam_dir[2], dx*cam_dir[1]-dy*cam_dir[0]];
+        //         let clen = (c[0]*c[0]+c[1]*c[1]+c[2]*c[2]).sqrt().max(0.001);
+        //         let nx = c[0]/clen*thickness;
+        //         let ny = c[1]/clen*thickness;
+        //         let nz = c[2]/clen*thickness;
+        //         let base = verts.len() as u32;
+        //         verts.push(Vertex { position: [p0[0]+nx,p0[1]+ny,p0[2]+nz], normal: NORMAL, color: debug_color, uv: [0.0,0.0] });
+        //         verts.push(Vertex { position: [p0[0]-nx,p0[1]-ny,p0[2]-nz], normal: NORMAL, color: debug_color, uv: [0.0,0.0] });
+        //         verts.push(Vertex { position: [p1[0]-nx,p1[1]-ny,p1[2]-nz], normal: NORMAL, color: debug_color, uv: [0.0,0.0] });
+        //         verts.push(Vertex { position: [p1[0]+nx,p1[1]+ny,p1[2]+nz], normal: NORMAL, color: debug_color, uv: [0.0,0.0] });
+        //         indices.extend_from_slice(&[base,base+1,base+2,base,base+2,base+3]);
+        //     }
+        // }
     }
 }
 
@@ -604,45 +645,40 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
             }
         }
         CapturePhase::Attract => {
-            // Pull tetras toward assembly positions — accelerating
+            // Smooth lerp toward assembly positions — eases in, strong at end
             let progress = 1.0 - (field.phase_timer / 6.0).max(0.0);
-            let pull = progress * progress * 8.0; // quadratic ramp, strong pull
+            // Lerp factor: starts gentle, gets very strong so positions converge
+            let lerp = (progress * progress * progress).min(0.99);
             for t in &mut field.tetras {
-                t.x += (t.target_x - t.x) * pull * dt;
-                t.y += (t.target_y - t.y) * pull * dt;
-                t.z += (t.target_z - t.z) * pull * dt;
-                // Gradually unify rotations toward zero (they'll sync in assembled phase)
-                t.ax *= 1.0 - progress * dt * 2.0;
-                t.ay *= 1.0 - progress * dt * 2.0;
-                t.az *= 1.0 - progress * dt * 2.0;
+                t.x = t.x + (t.target_x - t.x) * lerp.max(progress * 0.3);
+                t.y = t.y + (t.target_y - t.y) * lerp.max(progress * 0.3);
+                t.z = t.z + (t.target_z - t.z) * lerp.max(progress * 0.3);
+                // Spin slows down as they approach
+                t.spin = [t.spin[0] * (1.0 - dt * progress * 3.0).max(0.0),
+                          t.spin[1] * (1.0 - dt * progress * 3.0).max(0.0),
+                          t.spin[2] * (1.0 - dt * progress * 3.0).max(0.0)];
             }
             if field.phase_timer <= 0.0 {
+                // Smooth final placement — should already be very close
                 for t in &mut field.tetras {
                     t.x = t.target_x;
                     t.y = t.target_y;
                     t.z = t.target_z;
-                    t.ax = 0.0; t.ay = 0.0; t.az = 0.0; // sync rotations
+                    t.spin = [0.0; 3]; // stop individual spinning
                 }
-                // Free only outer tetra particles — center keeps its captured ones
-                // This gives the "skeleton" look: dense center + sparse outer surface
+                // Free ALL stuck particles — zero velocity, they'll drift naturally
                 for p in &mut field.particles {
-                    if p.stuck_to >= 0 && p.stuck_to < 4 {
+                    if p.stuck_to >= 0 {
                         p.stuck_to = -1;
                         p.trail_x = p.x;
                         p.trail_y = p.y;
                         p.trail_z = p.z;
-                        p.life = 12.0;
-                        p.max_life = 12.0;
+                        p.life = 6.0;
+                        p.max_life = 6.0;
                     }
                 }
-                // Convert center tetra particles' offsets to assembled frame
-                let ac = field.assembled_center;
-                for p in &mut field.particles {
-                    if p.stuck_to == 4 {
-                        // Recompute offset relative to assembled center (rotation is 0 at start)
-                        p.stuck_offset = [p.x - ac[0], p.y - ac[1], p.z - ac[2]];
-                    }
-                }
+                // Cooldown: don't capture for 3 seconds so freed particles drift out
+                field.capture_cooldown = 0.75;
                 field.capture_phase = CapturePhase::Assembled;
                 field.phase_timer = 50.0;
             }
@@ -698,7 +734,13 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
                 field.tetras[i].az = field.assembled_rotation[2];
             }
 
-            // Continue capturing particles — store offset relative to assembled center
+            // Tick capture cooldown
+            if field.capture_cooldown > 0.0 {
+                field.capture_cooldown -= dt;
+            }
+
+            // Capture particles (only after cooldown so freed particles drift out first)
+            if field.capture_cooldown <= 0.0 {
             let ar = field.assembled_rotation;
             let ac = field.assembled_center;
             let (isx, icx) = ((-ar[0]).sin(), (-ar[0]).cos());
@@ -728,6 +770,7 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
                     }
                 }
             }
+            } // end capture cooldown guard
 
             if field.phase_timer <= 0.0 {
                 field.capture_phase = CapturePhase::Release;
@@ -758,7 +801,7 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
         CapturePhase::Pause => {
             if field.phase_timer <= 0.0 {
                 // Reset tetras to scattered positions
-                let spread = 8.0;
+                let spread = 5.0;
                 let face_normals = [
                     [ 0.577f32,  0.577, -0.577],
                     [-0.577,  0.577,  0.577],
@@ -770,6 +813,8 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
                     t.x = 5.0 + v[0] * spread;
                     t.y = -10.0 + v[1] * spread;
                     t.z = -2.0 + v[2] * spread;
+                    // Restore tumble spin for scatter phase
+                    t.spin = [0.1 + i as f32 * 0.03, 0.08 + i as f32 * 0.025, 0.06];
                 }
                 field.capture_phase = CapturePhase::Scatter;
                 field.phase_timer = 32.0;

@@ -591,9 +591,9 @@ pub fn flow_theme() -> VisualTheme {
         piece_colors: Some([
             [ 80, 180, 200, 255], // I — teal
             [ 60, 160, 160, 255], // O — dark teal
-            [100, 140, 200, 255], // T — steel blue
+            [180,  60, 140, 255], // T — magenta
             [ 80, 200, 140, 255], // S — seafoam
-            [ 60, 120, 180, 255], // Z — ocean blue
+            [140,  40, 110, 255], // Z — dark magenta
             [ 40,  80, 160, 255], // J — deep blue
             [100, 220, 180, 255], // L — aquamarine
         ]),
