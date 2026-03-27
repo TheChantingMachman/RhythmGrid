@@ -14,6 +14,7 @@ pub struct EffectFlags {
     pub aurora: bool,
     pub flow_field: bool,
     pub fluid: bool,
+    pub crystal: bool,
     pub camera_sway: bool,
 
     // Inline scene effects
@@ -36,7 +37,7 @@ impl EffectFlags {
     pub fn all_on() -> Self {
         EffectFlags {
             beat_rings: true, hex_background: true, grid_lines: true,
-            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, camera_sway: true,
+            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, camera_sway: true,
             cube_glow: true, ghost_piece: true, active_piece_pulse: true,
             clearing_flash: true, t_spin_flash: true, level_up_rings: true,
             combo_text: true, particle_beat_pulse: true,
@@ -47,7 +48,7 @@ impl EffectFlags {
     pub fn all_off() -> Self {
         EffectFlags {
             beat_rings: false, hex_background: false, grid_lines: false,
-            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, camera_sway: false,
+            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, camera_sway: false,
             cube_glow: false, ghost_piece: false, active_piece_pulse: false,
             clearing_flash: false, t_spin_flash: false, level_up_rings: false,
             combo_text: false, particle_beat_pulse: false,
@@ -302,6 +303,64 @@ pub fn space_theme() -> VisualTheme {
             [200, 100, 255, 255], // Z — magenta
             [ 50,  60, 180, 255], // J — dark blue
             [120, 220, 255, 255], // L — ice blue
+        ]),
+    }
+}
+
+// TODO: Crystal theme is WIP — board/piece contrast against white background,
+// explosion fragment tuning, fog density balance.
+pub fn crystal_theme() -> VisualTheme {
+    VisualTheme {
+        name: "Crystal",
+        color_grade: [1.0, 1.0, 1.0], // neutral — white background needs no grading
+        rings: RingParams {
+            max_radius: 20.0, base_life: 4.0,
+            color_r: 0.1, color_g: 0.1, color_b: 0.1, base_alpha: 0.1,
+        },
+        hex: HexParams {
+            dot_min_size: 0.04, dot_max_size: 0.15, base_speed: 0.1,
+            danger_speed_mult: 0.2,
+            base_r: 0.05, base_g: 0.05, base_b: 0.05, base_alpha: 0.02,
+            hex_rings: 4, ring_spacing: 3.5,
+        },
+        grid: GridParams {
+            base_r: 30.0, base_g: 30.0, base_b: 40.0,
+            base_thickness: 0.02, beat_thickness_add: 0.02,
+        },
+        fft: FftParams {
+            band_colors: [
+                [20, 20, 30], [30, 30, 45], [40, 40, 60],
+                [50, 50, 75], [60, 60, 90], [70, 70, 100], [80, 80, 110],
+            ],
+        },
+        camera: CameraParams {
+            sway_base: 0.0, sway_danger_add: 0.0,
+            jitter_x: 0.0, jitter_y: 0.0,
+            zoom_amount: 0.56, shake_decay: 0.9,
+        },
+        effects: {
+            let mut f = EffectFlags::all_on();
+            f.fire = false;
+            f.starfield = false;
+            f.aurora = false;
+            f.hex_background = false;
+            f.fireworks = false;
+            f.beat_rings = false;
+            f.flow_field = false;
+            f.fluid = false;
+            f.particle_beat_pulse = false;
+            f.crystal = true;
+            f
+        },
+        bindings: EffectBindings::default_bindings(),
+        piece_colors: Some([
+            [ 30,  30,  50, 255], // I — dark slate
+            [ 40,  40,  60, 255], // O — charcoal
+            [ 20,  20,  40, 255], // T — deep navy
+            [ 50,  50,  70, 255], // S — steel
+            [ 25,  25,  45, 255], // Z — dark blue
+            [ 15,  15,  35, 255], // J — near black
+            [ 45,  45,  65, 255], // L — medium slate
         ]),
     }
 }

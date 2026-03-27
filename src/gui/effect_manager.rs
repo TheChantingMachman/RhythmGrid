@@ -13,6 +13,7 @@ use super::effects::starfield::Starfield;
 use super::effects::aurora::Aurora;
 use super::effects::flow_field::{self, FlowField};
 use super::effects::fluid::{self, Fluid};
+use super::effects::crystal::Crystal;
 use super::effects::themes::{self, EffectFlags, VisualTheme};
 use super::particles::ParticleSystem;
 use super::drawing::Vertex;
@@ -29,6 +30,7 @@ pub struct EffectManager {
     pub aurora: Aurora,
     pub flow_field: FlowField,
     pub fluid: Fluid,
+    pub crystal: Crystal,
     pub particles: ParticleSystem,
     pub flags: EffectFlags,
 }
@@ -46,6 +48,7 @@ impl EffectManager {
             aurora: Aurora::new(),
             flow_field: FlowField::new(),
             fluid: Fluid::new(),
+            crystal: Crystal::new(),
             particles: ParticleSystem::new(),
             flags: theme.effects.clone(),
         }
@@ -61,6 +64,7 @@ impl EffectManager {
         self.particles.particles.clear();
         self.flow_field = FlowField::new();
         self.fluid = Fluid::new();
+        self.crystal = Crystal::new();
         self.fireworks.shells_only = false;
         self.fireworks.bursts_only = theme.name == "Debug";
     }
@@ -105,6 +109,7 @@ impl EffectManager {
             self.fluid.update(audio_frame);
             fluid::tick_particles(&mut self.fluid, dt as f32);
         }
+        if ef.crystal { self.crystal.update(audio_frame); }
     }
 
     /// Render background effects (transparent, behind board): fireworks, fire, starfield, aurora, flow_field.
@@ -116,6 +121,7 @@ impl EffectManager {
         if ef.aurora { self.aurora.render(verts, indices, ctx); }
         if ef.flow_field { self.flow_field.render(verts, indices, ctx); }
         if ef.fluid { self.fluid.render(verts, indices, ctx); }
+        if ef.crystal { self.crystal.render(verts, indices, ctx); }
     }
 
     /// Render grid lines (opaque, board layer).
