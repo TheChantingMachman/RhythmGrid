@@ -356,13 +356,13 @@ pub fn fractal_theme() -> VisualTheme {
         },
         bindings: EffectBindings::default_bindings(),
         piece_colors: Some([
-            [220, 40, 40, 255],   // I — red
-            [40, 200, 60, 255],   // O — neon green
-            [40, 80, 220, 255],   // T — blue
-            [180, 30, 30, 255],   // S — dark red
-            [30, 160, 40, 255],   // Z — green
-            [30, 60, 180, 255],   // J — dark blue
-            [255, 255, 255, 255], // L — white
+            [120, 80, 180, 255],  // I — purple
+            [180, 140, 220, 255], // O — lavender
+            [90, 60, 160, 255],   // T — deep purple
+            [140, 100, 200, 255], // S — violet
+            [70, 40, 140, 255],   // Z — dark violet
+            [160, 120, 200, 255], // J — light purple
+            [100, 70, 170, 255],  // L — medium purple
         ]),
     }
 }
