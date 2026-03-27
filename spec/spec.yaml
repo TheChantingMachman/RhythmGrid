@@ -123,9 +123,9 @@
 -
   id: game.level
   section: Game
-  description: Level starts at 1 and increases every 10 lines cleared. Level determines gravity speed.
+  description: 'Level starts at 1 and increases every 10 lines cleared. Level determines gravity speed via gravity_interval_ms(level: u32) -> u64. Compute using the Tetris Guideline exponential curve in f64: let level_f = level.max(1) as f64; let interval_secs = (0.8 - (level_f - 1.0) * 0.007).powf(level_f - 1.0); return (interval_secs * 1000.0).max(1.0) as u64. This replaces the linear formula. level_for_lines is unchanged.'
   tags: [core, game, progression]
-  status: implemented
+  status: stale
   constants:
     lines_per_level: "10"
     starting_level: "1"
