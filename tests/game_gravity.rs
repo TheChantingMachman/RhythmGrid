@@ -1,6 +1,6 @@
-// @spec-tags: core,game,timing
-// @invariants: gravity_interval_ms(level) returns max(100, 1000-(level-1)*100) clamped to 100ms at level 10+; gravity_tick returns (true,0) when move_down succeeds after interval elapses, or (false,accumulated_ms) unchanged when interval has not yet elapsed
-// @build: 43
+// @spec-tags: core,game,progression
+// @invariants: gravity_interval_ms(level) uses Tetris Guideline exponential curve: (0.8 - (level_f - 1.0) * 0.007).powf(level_f - 1.0) * 1000, min 1ms; gravity_tick returns (true,0) when move_down succeeds after interval elapses, or (false,accumulated_ms) unchanged when interval has not yet elapsed
+// @build: 100
 
 use rhythm_grid::game::{gravity_interval_ms, gravity_tick, ActivePiece};
 use rhythm_grid::grid::Grid;
@@ -14,51 +14,66 @@ fn t_piece(row: i32, col: i32) -> ActivePiece {
 
 #[test]
 fn gravity_interval_level_1_is_1000ms() {
-    // max(100, 1000 - (1-1)*100) = max(100, 1000) = 1000
+    // (0.8)^0 = 1.0 → 1000ms
     assert_eq!(gravity_interval_ms(1), 1000);
 }
 
 #[test]
-fn gravity_interval_level_2_is_900ms() {
-    // max(100, 1000 - (2-1)*100) = max(100, 900) = 900
-    assert_eq!(gravity_interval_ms(2), 900);
+fn gravity_interval_level_2() {
+    // (0.8 - 0.007)^1 = 0.793 → 793ms
+    assert_eq!(gravity_interval_ms(2), 793);
 }
 
 #[test]
-fn gravity_interval_level_5_is_600ms() {
-    // max(100, 1000 - (5-1)*100) = max(100, 600) = 600
-    assert_eq!(gravity_interval_ms(5), 600);
+fn gravity_interval_level_5() {
+    let expected = {
+        let lf = 5.0_f64;
+        ((0.8 - (lf - 1.0) * 0.007).powf(lf - 1.0) * 1000.0).max(1.0) as u64
+    };
+    assert_eq!(gravity_interval_ms(5), expected);
 }
 
 #[test]
-fn gravity_interval_level_9_is_200ms() {
-    // max(100, 1000 - (9-1)*100) = max(100, 200) = 200
-    assert_eq!(gravity_interval_ms(9), 200);
+fn gravity_interval_level_9() {
+    let expected = {
+        let lf = 9.0_f64;
+        ((0.8 - (lf - 1.0) * 0.007).powf(lf - 1.0) * 1000.0).max(1.0) as u64
+    };
+    assert_eq!(gravity_interval_ms(9), expected);
 }
 
 #[test]
-fn gravity_interval_level_10_clamps_to_100ms() {
-    // max(100, 1000 - (10-1)*100) = max(100, 100) = 100
-    assert_eq!(gravity_interval_ms(10), 100);
+fn gravity_interval_level_10() {
+    let expected = {
+        let lf = 10.0_f64;
+        ((0.8 - (lf - 1.0) * 0.007).powf(lf - 1.0) * 1000.0).max(1.0) as u64
+    };
+    assert_eq!(gravity_interval_ms(10), expected);
 }
 
 #[test]
-fn gravity_interval_level_15_clamps_to_100ms() {
-    // max(100, 1000 - (15-1)*100) = max(100, -400) = 100
-    assert_eq!(gravity_interval_ms(15), 100);
+fn gravity_interval_level_15() {
+    let expected = {
+        let lf = 15.0_f64;
+        ((0.8 - (lf - 1.0) * 0.007).powf(lf - 1.0) * 1000.0).max(1.0) as u64
+    };
+    assert_eq!(gravity_interval_ms(15), expected);
 }
 
 #[test]
-fn gravity_interval_level_20_clamps_to_100ms() {
-    // Deeply past the clamp point — must stay at 100
-    assert_eq!(gravity_interval_ms(20), 100);
+fn gravity_interval_level_20() {
+    let expected = {
+        let lf = 20.0_f64;
+        ((0.8 - (lf - 1.0) * 0.007).powf(lf - 1.0) * 1000.0).max(1.0) as u64
+    };
+    assert_eq!(gravity_interval_ms(20), expected);
 }
 
 #[test]
-fn gravity_interval_decreases_monotonically_until_clamp() {
-    // Each level from 1..=10 must be <= the previous level's interval
+fn gravity_interval_decreases_monotonically() {
+    // Interval decreases continuously with no clamp point
     let mut prev = gravity_interval_ms(1);
-    for level in 2..=10 {
+    for level in 2..=20 {
         let curr = gravity_interval_ms(level);
         assert!(
             curr <= prev,
@@ -67,6 +82,18 @@ fn gravity_interval_decreases_monotonically_until_clamp() {
         );
         prev = curr;
     }
+}
+
+#[test]
+fn gravity_interval_minimum_is_1ms() {
+    // At very high levels the interval is clamped to 1ms minimum
+    assert_eq!(gravity_interval_ms(30), 1);
+}
+
+#[test]
+fn gravity_interval_level_0_treated_as_level_1() {
+    // level.max(1) treats 0 as 1 → same as level 1 = 1000ms
+    assert_eq!(gravity_interval_ms(0), 1000);
 }
 
 // ── gravity_tick: interval not yet elapsed ────────────────────────────────────
@@ -97,10 +124,11 @@ fn gravity_tick_one_below_interval_does_not_drop() {
 fn gravity_tick_below_level5_interval_does_not_drop() {
     let grid = Grid::new();
     let mut piece = t_piece(5, 5);
-    // Level 5 interval is 600ms; 599ms should not trigger
-    let (dropped, new_acc) = gravity_tick(&grid, &mut piece, 599, 5);
-    assert!(!dropped, "599ms should not trigger drop at level 5 (interval=600ms)");
-    assert_eq!(new_acc, 599, "accumulator must be returned unchanged");
+    let interval = gravity_interval_ms(5);
+    let below = interval - 1;
+    let (dropped, new_acc) = gravity_tick(&grid, &mut piece, below, 5);
+    assert!(!dropped, "{below}ms should not trigger drop at level 5 (interval={interval}ms)");
+    assert_eq!(new_acc, below, "accumulator must be returned unchanged");
     assert_eq!(piece.row, 5, "row must not change");
 }
 
@@ -137,20 +165,22 @@ fn gravity_tick_drops_piece_by_one_row() {
 }
 
 #[test]
-fn gravity_tick_level10_drops_at_exactly_100ms() {
+fn gravity_tick_level10_drops_at_interval() {
     let grid = Grid::new();
     let mut piece = t_piece(5, 5);
-    // Level 10 clamped interval is 100ms
-    let (dropped, new_acc) = gravity_tick(&grid, &mut piece, 100, 10);
-    assert!(dropped, "100ms must trigger drop at level 10 (interval=100ms)");
+    let interval = gravity_interval_ms(10);
+    let (dropped, new_acc) = gravity_tick(&grid, &mut piece, interval, 10);
+    assert!(dropped, "{interval}ms must trigger drop at level 10");
     assert_eq!(new_acc, 0);
 }
 
 #[test]
-fn gravity_tick_level10_no_drop_below_100ms() {
+fn gravity_tick_level10_no_drop_below_interval() {
     let grid = Grid::new();
     let mut piece = t_piece(5, 5);
-    let (dropped, new_acc) = gravity_tick(&grid, &mut piece, 99, 10);
-    assert!(!dropped, "99ms must not trigger drop at level 10 (interval=100ms)");
-    assert_eq!(new_acc, 99, "accumulator must be returned unchanged");
+    let interval = gravity_interval_ms(10);
+    let below = interval - 1;
+    let (dropped, new_acc) = gravity_tick(&grid, &mut piece, below, 10);
+    assert!(!dropped, "{below}ms must not trigger drop at level 10 (interval={interval}ms)");
+    assert_eq!(new_acc, below, "accumulator must be returned unchanged");
 }
