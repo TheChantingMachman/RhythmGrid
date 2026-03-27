@@ -37,6 +37,8 @@ pub struct EffectManager {
     pub pipes: Pipes,
     pub particles: ParticleSystem,
     pub flags: EffectFlags,
+    // Cached GPU init params for reinitializing after theme change
+    gpu_init: Option<(wgpu::Device, wgpu::Queue, wgpu::BindGroupLayout)>,
 }
 
 impl EffectManager {
@@ -57,10 +59,13 @@ impl EffectManager {
             pipes: Pipes::new(),
             particles: ParticleSystem::new(),
             flags: theme.effects.clone(),
+            gpu_init: None,
         }
     }
 
     /// Apply a new theme — recreate parameterized effects, reset state.
+    /// If GPU resources were previously initialized, pass device/queue/scene_bgl
+    /// to reinitialize them for the new theme.
     pub fn apply_theme(&mut self, theme: &VisualTheme) {
         self.beat_rings = BeatRings::new(theme.rings);
         self.hex_background = HexBackground::new(theme.hex);
@@ -75,6 +80,12 @@ impl EffectManager {
         self.pipes = Pipes::new();
         self.fireworks.shells_only = false;
         self.fireworks.bursts_only = theme.name == "Debug";
+        // Reinit GPU resources if we have cached device info
+        if let Some((device, queue, scene_bgl)) = self.gpu_init.clone() {
+            if self.flags.flow_field {
+                self.flow_field.create_gpu_resources(&device, &queue, &scene_bgl);
+            }
+        }
     }
 
     /// Update all effects from the current audio frame.
@@ -164,6 +175,10 @@ impl EffectManager {
     /// Initialize GPU resources for any effects that implement GpuEffect.
     /// Call once after GPU device is available (or on device recreation).
     pub fn create_gpu_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, scene_bgl: &wgpu::BindGroupLayout) {
+        // Cache for reinit after theme change
+        if self.gpu_init.is_none() {
+            self.gpu_init = Some((device.clone(), queue.clone(), scene_bgl.clone()));
+        }
         if self.flags.flow_field {
             self.flow_field.create_gpu_resources(device, queue, scene_bgl);
         }

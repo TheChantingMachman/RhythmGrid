@@ -868,7 +868,9 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
 
 // ===== GPU Compute Port =====
 
-const MAX_PARTICLES: usize = 49152;
+// Must exceed peak_spawn_rate × max_particle_lifetime to prevent wrapping
+// from overwriting stuck particles. Peak ~2800/sec × 94s ≈ 263K. 16MB GPU buffer.
+const MAX_PARTICLES: usize = 262144;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -1526,12 +1528,8 @@ impl GpuEffect for FlowField {
         let uniforms = self.build_gpu_uniforms(audio.dt);
         let gpu = self.gpu.as_mut().unwrap();
 
-        // Reset cursor on phase transitions so freed/dead slots get reused
-        if uniforms.free_all_stuck == 1 {
-            gpu.spawn_cursor = 0;
-        }
-
-        // Upload new particles (wrap around — dead/freed slots are safe to overwrite)
+        // Upload new particles (wrap around — with 49K buffer and ~250 spawns/sec,
+        // wrapping happens after ~196s, far longer than any particle lifetime)
         let spawns = std::mem::take(&mut gpu.pending_spawns);
         if !spawns.is_empty() {
             let particle_size = std::mem::size_of::<ParticleGpu>();
