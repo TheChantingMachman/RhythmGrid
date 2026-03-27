@@ -12,6 +12,7 @@ pub mod fire;
 pub mod starfield;
 pub mod aurora;
 pub mod flow_field;
+pub mod fluid;
 
 use super::drawing::Vertex;
 use wgpu;

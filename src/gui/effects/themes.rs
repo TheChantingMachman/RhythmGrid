@@ -13,6 +13,7 @@ pub struct EffectFlags {
     pub starfield: bool,
     pub aurora: bool,
     pub flow_field: bool,
+    pub fluid: bool,
     pub camera_sway: bool,
 
     // Inline scene effects
@@ -35,7 +36,7 @@ impl EffectFlags {
     pub fn all_on() -> Self {
         EffectFlags {
             beat_rings: true, hex_background: true, grid_lines: true,
-            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, flow_field: false, camera_sway: true,
+            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, camera_sway: true,
             cube_glow: true, ghost_piece: true, active_piece_pulse: true,
             clearing_flash: true, t_spin_flash: true, level_up_rings: true,
             combo_text: true, particle_beat_pulse: true,
@@ -46,7 +47,7 @@ impl EffectFlags {
     pub fn all_off() -> Self {
         EffectFlags {
             beat_rings: false, hex_background: false, grid_lines: false,
-            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, flow_field: false, camera_sway: false,
+            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, camera_sway: false,
             cube_glow: false, ghost_piece: false, active_piece_pulse: false,
             clearing_flash: false, t_spin_flash: false, level_up_rings: false,
             combo_text: false, particle_beat_pulse: false,
@@ -139,6 +140,7 @@ pub struct FftParams {
 
 /// Parameters for CameraReactor.
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 pub struct CameraParams {
     pub sway_base: f32,
     pub sway_danger_add: f32,
@@ -189,7 +191,7 @@ pub fn default_theme() -> VisualTheme {
         camera: CameraParams {
             sway_base: 0.15, sway_danger_add: 0.1,
             jitter_x: 0.04, jitter_y: 0.025,
-            zoom_amount: 0.5, shake_decay: 1.3,
+            zoom_amount: 1.0, shake_decay: 1.3,
         },
         effects: {
             let mut f = EffectFlags::all_on();
@@ -228,7 +230,7 @@ pub fn water_theme() -> VisualTheme {
         camera: CameraParams {
             sway_base: 0.2, sway_danger_add: 0.08,
             jitter_x: 0.015, jitter_y: 0.01,
-            zoom_amount: 0.1, // gentle — less nausea than default
+            zoom_amount: 0.3, // gentle — less nausea than default
             shake_decay: 0.8,
         },
         effects: {
@@ -276,7 +278,7 @@ pub fn space_theme() -> VisualTheme {
         camera: CameraParams {
             sway_base: 0.12, sway_danger_add: 0.06,
             jitter_x: 0.02, jitter_y: 0.015,
-            zoom_amount: 0.6, shake_decay: 1.0,
+            zoom_amount: 1.2, shake_decay: 1.0,
         },
         effects: {
             let mut f = EffectFlags::all_on();
@@ -300,6 +302,63 @@ pub fn space_theme() -> VisualTheme {
             [200, 100, 255, 255], // Z — magenta
             [ 50,  60, 180, 255], // J — dark blue
             [120, 220, 255, 255], // L — ice blue
+        ]),
+    }
+}
+
+// TODO: Fluid theme is WIP — tumbling piece turbulence, red/white palette.
+// Needs: color palette tuning, danger escalation, line clear signature effect.
+pub fn fluid_theme() -> VisualTheme {
+    VisualTheme {
+        name: "Fluid",
+        color_grade: [1.05, 0.95, 0.92], // warm slight red shift
+        rings: RingParams {
+            max_radius: 20.0, base_life: 4.0,
+            color_r: 0.4, color_g: 0.15, color_b: 0.1, base_alpha: 0.12,
+        },
+        hex: HexParams {
+            dot_min_size: 0.04, dot_max_size: 0.15, base_speed: 0.1,
+            danger_speed_mult: 0.2,
+            base_r: 0.3, base_g: 0.1, base_b: 0.1, base_alpha: 0.02,
+            hex_rings: 4, ring_spacing: 3.5,
+        },
+        grid: GridParams {
+            base_r: 50.0, base_g: 25.0, base_b: 25.0,
+            base_thickness: 0.015, beat_thickness_add: 0.02,
+        },
+        fft: FftParams {
+            band_colors: [
+                [100, 20, 20], [140, 30, 30], [180, 50, 40],
+                [200, 80, 60], [220, 120, 80], [240, 160, 120], [255, 200, 180],
+            ],
+        },
+        camera: CameraParams {
+            sway_base: 0.0, sway_danger_add: 0.0,
+            jitter_x: 0.0, jitter_y: 0.0,
+            zoom_amount: 0.8, shake_decay: 0.9,
+        },
+        effects: {
+            let mut f = EffectFlags::all_on();
+            f.fire = false;
+            f.starfield = false;
+            f.aurora = false;
+            f.hex_background = false;
+            f.fireworks = false;
+            f.beat_rings = false;
+            f.flow_field = false;
+            f.particle_beat_pulse = false;
+            f.fluid = true;
+            f
+        },
+        bindings: EffectBindings::default_bindings(),
+        piece_colors: Some([
+            [220, 60, 60, 255],   // I — red
+            [255, 255, 245, 255], // O — white
+            [200, 50, 50, 255],   // T — deep red
+            [255, 240, 230, 255], // S — warm white
+            [180, 40, 40, 255],   // Z — dark red
+            [255, 220, 210, 255], // J — pink white
+            [240, 80, 70, 255],   // L — bright red
         ]),
     }
 }
@@ -334,7 +393,7 @@ pub fn flow_theme() -> VisualTheme {
         camera: CameraParams {
             sway_base: 0.1, sway_danger_add: 0.05,
             jitter_x: 0.015, jitter_y: 0.01,
-            zoom_amount: 0.3, shake_decay: 0.9,
+            zoom_amount: 0.8, shake_decay: 0.9,
         },
         effects: {
             let mut f = EffectFlags::all_on();
