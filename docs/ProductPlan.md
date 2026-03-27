@@ -463,11 +463,8 @@ Current demo mode plays randomly. A smarter demo AI would:
 - **Beat-synced placement:** final drop/lock on the beat rather than arbitrary timing. Requires lookahead or buffered placement.
 - Pipeline-friendly: the AI decision logic (which piece where, when to drop) is testable and spec-able. Only the music-timing bridge lives in GUI code.
 
-### Preview/Hold piece polish (partially done)
-Moved preview/hold pieces from HUD to world-space 3D rendering via push_cube_3d — they now have full bevels, inner glow, GGX lighting, and visual parity with board cubes. Perspective warping bug is fixed.
-Remaining:
-- **Inner glow z-ordering:** back-facing inner glow faces have subtle lighting pop at some rotation angles. The transparent pass doesn't write depth, so inner glow faces can't be trivially depth-sorted. Archived attempt at face-group sorting on `archive/preview-face-sort`. May need per-object depth pre-pass or OIT.
-- **Board bottom-row z-ordering:** pre-existing issue where bottom row cubes' top faces draw over front faces of the row above due to cabinet angle projection. Same root cause (transparent pass, no depth write).
+### Preview/Hold piece polish (done)
+Moved preview/hold pieces from HUD to world-space 3D rendering via push_cube_3d — full bevels, inner glow, GGX lighting, 3-axis rotation. Weighted Blended OIT fixed all transparent z-ordering (preview faces, board bottom-row cabinet angle). Inner glow tuned with low alpha / high HDR to avoid OIT color dilution.
 
 ### Flow field refinement path
 The Flow theme's 3D curl noise particle system currently runs entirely on CPU. Refinement plan:
@@ -484,7 +481,7 @@ Firework bursts and line clears could cast momentary colored light onto nearby c
 - Would make burst flashes feel physically present rather than just overlaid
 
 ### Long-term roadmap
-1. **More themes** — 5-8 distinct visual personalities (neon, minimal, organic, retro, dark) to make adaptive theme selection meaningful
+1. **More themes** — currently 6 (Default, Water, Space, Flow, Fluid, Debug). Target 8-10 distinct visual personalities for adaptive theme selection
 2. **Adaptive theme selection** — auto-switch themes based on music energy (see above)
 3. **Music-reactive demo AI** — demo mode that performs to the music (see above)
 4. **Background environments** — procedural or authored 3D scenes behind the board (underwater, space, city) per theme
