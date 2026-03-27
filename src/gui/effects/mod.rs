@@ -11,8 +11,12 @@ pub mod fireworks;
 pub mod fire;
 pub mod starfield;
 pub mod aurora;
+pub mod flow_field;
+pub mod fluid;
+pub mod crystal;
 
 use super::drawing::Vertex;
+use wgpu;
 
 /// Audio state snapshot passed to every effect each frame.
 pub struct AudioFrame {
@@ -47,7 +51,7 @@ pub enum RenderPass {
     Hud,
 }
 
-/// A visual effect module driven by audio data.
+/// A visual effect module driven by audio data (CPU-side geometry generation).
 pub trait AudioEffect {
     /// Which render pass this effect's geometry belongs to.
     #[allow(dead_code)]
@@ -60,4 +64,29 @@ pub trait AudioEffect {
     fn render(&self, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, ctx: &RenderContext);
 }
 
+/// A GPU-driven visual effect that owns its own compute pipeline and storage buffers.
+/// Effects implementing this trait run particle simulation / fluid dynamics on the GPU
+/// and draw directly from GPU-side buffers — no CPU geometry generation needed.
+///
+/// Lifecycle:
+/// 1. `create_gpu_resources` — called once (or on device change) to allocate pipelines,
+///    storage buffers, bind groups. The effect owns all its GPU state.
+/// 2. `compute` — called each frame before rendering. Dispatches compute work
+///    (particle advection, noise field generation, etc.) using the audio frame for reactivity.
+/// 3. `render_gpu` — called during the appropriate render pass. Binds its own vertex/storage
+///    buffers and issues draw calls. The render pass is already begun by the caller.
+///
+/// CPU AudioEffect and GPU GpuEffect coexist — the EffectManager dispatches to the right
+/// interface per effect. Effects can be ported from AudioEffect to GpuEffect one at a time.
+#[allow(dead_code)]
+pub trait GpuEffect {
+    /// Allocate GPU resources: compute pipeline, storage buffers, bind groups.
+    fn create_gpu_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue);
 
+    /// Dispatch compute work for this frame.
+    fn compute(&mut self, encoder: &mut wgpu::CommandEncoder, audio: &AudioFrame);
+
+    /// Issue draw calls into the provided render pass.
+    /// The pass is already begun — the effect just needs to bind its pipeline/buffers and draw.
+    fn render_gpu<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>);
+}

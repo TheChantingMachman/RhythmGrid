@@ -101,8 +101,9 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     ];
 
     // Inner glow cube — bright core visible through the translucent outer shell.
-    // Rendered first so it composites behind the outer cube (back-to-front).
-    // Skip for ghost pieces / very translucent cubes where the core would overpower.
+    // Only for semi-transparent cubes (preview pieces via OIT). Opaque board pieces
+    // (alpha 1.0) get their glow from glow_boost on outer faces instead — inner glow
+    // in the opaque pass would cause depth conflicts.
     if color[3] > 0.5 {
         let inset = 0.22;
         let w = x1 - x0;
@@ -114,17 +115,22 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
         let gz0 = z0 + depth * inset;
         let gz1 = z1 - depth * inset;
 
-        // HDR emissive color — white-shifted and boosted past 1.0 so bloom picks it up
-        let glow_mul = 1.2 + glow_boost * 0.5;
-        let wm = 0.3; // white mix
+        // HDR emissive color — tinted toward the piece color, subtle enough to
+        // read as a luminous core through OIT rather than a competing layer.
+        // HDR emissive — high RGB for brightness, low alpha for minimal OIT weight.
+        // This makes the glow visually bright but it doesn't dilute the outer shell's
+        // color in the OIT weighted average (weight = alpha * depth_factor).
+        let glow_mul = 1.4 + glow_boost * 0.6;
+        let wm = 0.1; // minimal white — preserve piece color saturation
         let gc = [
             (color[0] * (1.0 - wm) + wm) * glow_mul,
             (color[1] * (1.0 - wm) + wm) * glow_mul,
             (color[2] * (1.0 - wm) + wm) * glow_mul,
-            0.7,
+            0.15, // very low alpha — bright but lightweight in OIT averaging
         ];
 
-        // Simple 6-face box (no bevels — inner core, not directly visible)
+        // Soft glow faces — each face uses soft particle UVs for radial falloff,
+        // creating a scattered/diffuse glow instead of a hard-edged inner box.
         let gfaces: &[([f32; 3], [[f32; 3]; 4])] = &[
             ([0.0, 0.0, 1.0],  [[gx0, gy0, gz1], [gx1, gy0, gz1], [gx1, gy1, gz1], [gx0, gy1, gz1]]),
             ([0.0, 0.0, -1.0], [[gx1, gy0, gz0], [gx0, gy0, gz0], [gx0, gy1, gz0], [gx1, gy1, gz0]]),
@@ -133,10 +139,11 @@ pub fn push_cube_3d(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
             ([1.0, 0.0, 0.0],  [[gx1, gy0, gz1], [gx1, gy0, gz0], [gx1, gy1, gz0], [gx1, gy1, gz1]]),
             ([-1.0, 0.0, 0.0], [[gx0, gy0, gz0], [gx0, gy0, gz1], [gx0, gy1, gz1], [gx0, gy1, gz0]]),
         ];
+        let corner_uvs = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
         for (normal, corners) in gfaces {
             let base_idx = verts.len() as u32;
-            for &pos in corners {
-                verts.push(Vertex { position: pos, normal: *normal, color: gc, uv: [0.0, 0.0] });
+            for (ci, &pos) in corners.iter().enumerate() {
+                verts.push(Vertex { position: pos, normal: *normal, color: gc, uv: corner_uvs[ci] });
             }
             indices.extend_from_slice(&[base_idx, base_idx+1, base_idx+2, base_idx, base_idx+2, base_idx+3]);
         }

@@ -38,25 +38,11 @@ impl CameraReactor {
         }
     }
 
-    pub fn apply(&self, audio: &AudioFrame, preview_angle: f32, base_eye: [f32; 3]) -> [f32; 3] {
-        let p = &self.params;
-        let bass_beat = audio.band_beats[0].max(audio.band_beats[1]);
-        let sway_amp = p.sway_base + audio.danger * p.sway_danger_add;
-        let sway = bass_beat * sway_amp * (preview_angle * 2.0).sin();
-
-        let hi_beat = audio.band_beats[5].max(audio.band_beats[6]);
-        let jitter_x = hi_beat * p.jitter_x * (preview_angle * 7.0).sin();
-        let jitter_y = hi_beat * p.jitter_y * (preview_angle * 11.0).cos();
-
-        let shake_x = self.shake_intensity * (self.shake_time * 1.3).sin() * 0.2;
-        let shake_y = self.shake_intensity * (self.shake_time * 1.7).cos() * 0.12;
-
-        let bass_zoom = self.smooth_zoom;
-
+    pub fn apply(&self, _audio: &AudioFrame, _preview_angle: f32, base_eye: [f32; 3]) -> [f32; 3] {
         [
-            base_eye[0] + sway + jitter_x + shake_x,
-            base_eye[1] + jitter_y + shake_y,
-            base_eye[2] - bass_zoom,
+            base_eye[0],
+            base_eye[1],
+            base_eye[2] - self.smooth_zoom,
         ]
     }
 

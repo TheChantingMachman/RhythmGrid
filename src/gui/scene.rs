@@ -25,6 +25,58 @@ fn push_text_embossed(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
     push_text(verts, indices, x, y, text, color, scale);
 }
 
+/// Render a tetromino piece in world space using push_cube_3d, with 3-axis rotation.
+/// OIT handles transparent face ordering — no sorting or culling needed.
+fn render_preview_piece(
+    verts: &mut Vec<Vertex>, indices: &mut Vec<u32>,
+    cells: &[(i32, i32)], color: [f32; 4], depth: f32, glow_boost: f32,
+    world_pos: [f32; 3], angles: [f32; 3],
+) {
+    if cells.is_empty() { return; }
+
+    let mut cx = 0.0f32;
+    let mut cy = 0.0f32;
+    for &(dr, dc) in cells {
+        cx += dc as f32 + 0.5;
+        cy += dr as f32 + 0.5;
+    }
+    cx /= cells.len() as f32;
+    cy /= cells.len() as f32;
+
+    let start_vert = verts.len();
+
+    for &(dr, dc) in cells {
+        let col = dc as f32 - cx;
+        let row = dr as f32 - cy;
+        push_cube_3d(verts, indices, col, row, depth, color, glow_boost, 0, 0.0);
+    }
+
+    // 3-axis rotation + translation
+    let (sx, cx_r) = (angles[0].sin(), angles[0].cos());
+    let (sy, cy_r) = (angles[1].sin(), angles[1].cos());
+    let (sz, cz) = (angles[2].sin(), angles[2].cos());
+
+    for v in &mut verts[start_vert..] {
+        let p = v.position;
+        let y1 = p[1] * cx_r - p[2] * sx;
+        let z1 = p[1] * sx + p[2] * cx_r;
+        let x2 = p[0] * cy_r + z1 * sy;
+        let z2 = -p[0] * sy + z1 * cy_r;
+        let x3 = x2 * cz - y1 * sz;
+        let y3 = x2 * sz + y1 * cz;
+        v.position = [x3 + world_pos[0], y3 + world_pos[1], z2 + world_pos[2]];
+
+        let n = v.normal;
+        let ny1 = n[1] * cx_r - n[2] * sx;
+        let nz1 = n[1] * sx + n[2] * cx_r;
+        let nx2 = n[0] * cy_r + nz1 * sy;
+        let nz2 = -n[0] * sy + nz1 * cy_r;
+        let nx3 = nx2 * cz - ny1 * sz;
+        let ny3 = nx2 * sz + ny1 * cz;
+        v.normal = [nx3, ny3, nz2];
+    }
+}
+
 /// Build 3D scene (world-space cubes, background) and 2D HUD (NDC overlay)
 /// Returns (opaque_scene, transparent_scene, hud) geometry.
 pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
@@ -38,12 +90,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let gw = WIDTH as f32;
     let gh = HEIGHT as f32;
 
-    // Background geometry (transparent — behind everything)
-    build_background(&mut tv, &mut ti, world, gw, gh);
-
-    // Fireworks (transparent, behind board)
+    // Background effects + hex/beat_rings + level-up rings
     {
-        use super::effects::AudioEffect;
         let fx_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
             win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
@@ -51,30 +99,22 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: world.hud_opacity,
         };
-        if world.effect_flags.fireworks {
-            world.fireworks.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.fire {
-            world.fire.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.starfield {
-            world.starfield.render(&mut tv, &mut ti, &fx_ctx);
-        }
-        if world.effect_flags.aurora {
-            world.aurora.render(&mut tv, &mut ti, &fx_ctx);
-        }
+        world.effects.render_dashboard(&mut tv, &mut ti, &fx_ctx);
+        world.effects.render_background(&mut tv, &mut ti, &fx_ctx);
     }
+    // Level-up rings (animation-driven, not an effect module)
+    build_level_up_rings(&mut tv, &mut ti, world, gw, gh);
 
     // Occupied cells — glow per piece type, pulse from dynamic rank analysis
-    let ef = &world.effect_flags;
+    let ef = &world.effects.flags;
     let pulse_band = world.resolve_rank(world.bindings.board_pulse);
     let glow_band = world.resolve_rank(world.bindings.cube_glow);
     for cell in &world.render_board.occupied {
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.75;
         let (band_glow, depth) = if ef.cube_glow {
-            (world.bands_norm[glow_band] * 1.5,
-             cube_depth + world.band_beat_intensity[pulse_band] * 0.22)
+            (world.analysis.bands_norm[glow_band] * 1.5,
+             cube_depth + world.analysis.band_beat_intensity[pulse_band] * 0.22)
         } else {
             (0.0, cube_depth)
         };
@@ -88,9 +128,9 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         if c > 0 && g[r][c-1] != CellState::Empty { nb |= 4; }
         if c + 1 < WIDTH && g[r][c+1] != CellState::Empty { nb |= 8; }
         // Check settle animation for this cell
-        let settle = world.settle_cells.iter()
+        let settle = world.anims.settle_cells.iter()
             .find(|s| s.col == cell.col && s.row == cell.row)
-            .map(|s| (s.timer / super::world::SETTLE_DURATION).clamp(0.0, 1.0))
+            .map(|s| (s.timer / super::animations::SETTLE_DURATION).clamp(0.0, 1.0))
             .unwrap_or(0.0);
         push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow, nb, settle);
     }
@@ -110,16 +150,42 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let mut color = rgba_to_f32(world.themed_piece_color(cell.type_index));
         color[3] = 0.85;
         let (active_glow, active_depth) = if ef.active_piece_pulse {
-            (world.bands_norm[band] * 1.5, cube_depth + world.band_beat_intensity[band] * 0.22)
+            (world.analysis.bands_norm[band] * 1.5, cube_depth + world.analysis.band_beat_intensity[band] * 0.22)
         } else {
             (0.0, cube_depth)
         };
         push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, active_depth, color, active_glow, 0, 0.0);
     }
 
+    // Next piece preview (world-space, right of board)
+    {
+        let next_color = rgba_to_f32(world.themed_piece_color(world.render_next.type_index));
+        let band = (world.render_next.type_index as usize) % 7;
+        let glow = if ef.cube_glow { world.analysis.bands_norm[band] * 1.0 } else { 0.0 };
+        render_preview_piece(
+            &mut tv, &mut ti,
+            &world.render_next.cells, next_color, cube_depth, glow,
+            [13.0, -2.5, 0.0],
+            [world.preview_angle * 0.3, world.preview_angle * 0.7, world.preview_angle * 0.15],
+        );
+    }
+
+    // Held piece preview (world-space, left of board)
+    if let Some(ref held) = world.render_held {
+        let held_color = rgba_to_f32(world.themed_piece_color(held.type_index));
+        let band = (held.type_index as usize) % 7;
+        let glow = if ef.cube_glow { world.analysis.bands_norm[band] * 1.0 } else { 0.0 };
+        render_preview_piece(
+            &mut tv, &mut ti,
+            &held.cells, held_color, cube_depth, glow,
+            [-3.0, -2.5, 0.0],
+            [world.preview_angle * 0.2, world.preview_angle * 0.5, 0.0],
+        );
+    }
+
     // Hard drop trails — translucent streaks from start to landing
-    for trail in &world.drop_trails {
-        let progress = 1.0 - (trail.timer / super::world::DROP_TRAIL_DURATION).max(0.0);
+    for trail in &world.anims.drop_trails {
+        let progress = 1.0 - (trail.timer / super::animations::DROP_TRAIL_DURATION).max(0.0);
         let alpha = (1.0 - progress) * 0.35;
         let mut color = rgba_to_f32(world.themed_piece_color(trail.type_index));
         color[3] = alpha;
@@ -127,9 +193,9 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         let trail_start = trail.start_row.max(trail.end_row - 6);
         for row in trail_start..trail.end_row {
             if row >= 0 && row < HEIGHT as i32 {
-                let fade = 1.0 - (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
+                let fade = (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
                 let mut c = color;
-                c[3] = alpha * fade; // fade from top to bottom of trail
+                c[3] = alpha * fade; // brightest at landing, fades upward
                 push_cube_3d(&mut tv, &mut ti, trail.col as f32, row as f32, cube_depth * 0.15, c, 0.0, 0, 0.0);
             }
         }
@@ -146,9 +212,8 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         }
     }
 
-    // Grid lines (effect module)
-    if ef.grid_lines {
-        use super::effects::AudioEffect;
+    // Grid lines (effect module — renders to opaque pass)
+    {
         let grid_ctx = super::effects::RenderContext {
             board_width: gw, board_height: gh,
             win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
@@ -156,218 +221,29 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
             preview_angle: world.preview_angle,
             hud_opacity: world.hud_opacity,
         };
-        world.grid_lines.render(&mut sv, &mut si, &grid_ctx);
+        world.effects.render_grid(&mut sv, &mut si, &grid_ctx);
     }
 
-    // --- 3D Music Dashboard ---
-    let hud_a = world.hud_opacity;
+    // 3D Music Dashboard (volume, transport, folder, FFT visualizer)
+    super::dashboard::build_dashboard(&mut tv, &mut ti, world, gw, gh);
 
-    // Volume: [-] ====== [+]  (right side, anchored to window edge)
-    let vol = if let Ok(audio) = world.audio.try_lock() { audio.volume } else { 0.5 };
-    let audio_x = 12.5;
-    let vol_minus_x = audio_x;
-    let vol_btn_w = 0.5;
-    let vol_bar_x = vol_minus_x + vol_btn_w + 0.15;
-    let vol_plus_x = audio_x + 2.5;
-    let vol_bar_w = vol_plus_x - vol_bar_x - 0.15;
-    let vol_y = 15.5;
-    let vol_h = 0.2;
-    let vol_bg = rgba_to_f32([15, 15, 30, (160.0 * hud_a) as u8]);
-    push_slab_3d(&mut tv, &mut ti, vol_bar_x, vol_y + 0.15, vol_bar_w, vol_h, 0.15, vol_bg);
-    let vol_fill = rgba_to_f32([60, 100, 180, (220.0 * hud_a) as u8]);
-    push_slab_3d(&mut tv, &mut ti, vol_bar_x, vol_y + 0.15, vol_bar_w * vol, vol_h, 0.3, vol_fill);
-    // Vol down [-] — 3D extruded minus glyph
-    {
-        let btn = world.buttons.iter().find(|b| b.id == super::world::ButtonId::VolDown).unwrap();
-        let col = if btn.hovered {
-            rgba_to_f32([200, 140, 140, (255.0 * hud_a) as u8])
-        } else {
-            rgba_to_f32([160, 160, 200, (200.0 * hud_a) as u8])
-        };
-        let cx = btn.world_x + btn.world_w * 0.5;
-        let cy = btn.world_y + btn.world_h * 0.5;
-        let s = 0.15;
-        // Minus: horizontal bar
-        push_extruded_shape(&mut tv, &mut ti, &[
-            [cx - s, cy - s * 0.25], [cx + s, cy - s * 0.25],
-            [cx + s, cy + s * 0.25], [cx - s, cy + s * 0.25],
-        ], 0.0, 0.25, col);
-    }
-    // Vol up [+] — 3D extruded plus glyph
-    {
-        let btn = world.buttons.iter().find(|b| b.id == super::world::ButtonId::VolUp).unwrap();
-        let col = if btn.hovered {
-            rgba_to_f32([140, 200, 140, (255.0 * hud_a) as u8])
-        } else {
-            rgba_to_f32([160, 160, 200, (200.0 * hud_a) as u8])
-        };
-        let cx = btn.world_x + btn.world_w * 0.5;
-        let cy = btn.world_y + btn.world_h * 0.5;
-        let s = 0.15;
-        // Plus: horizontal bar
-        push_extruded_shape(&mut tv, &mut ti, &[
-            [cx - s, cy - s * 0.25], [cx + s, cy - s * 0.25],
-            [cx + s, cy + s * 0.25], [cx - s, cy + s * 0.25],
-        ], 0.0, 0.25, col);
-        // Plus: vertical bar
-        push_extruded_shape(&mut tv, &mut ti, &[
-            [cx - s * 0.25, cy - s], [cx + s * 0.25, cy - s],
-            [cx + s * 0.25, cy + s], [cx - s * 0.25, cy + s],
-        ], 0.0, 0.25, col);
-    }
-
-    // Transport buttons: [<<] [>||] [>>] [SH]
-    // Transport buttons: [<<] [>||] [>>] [SH]
-    let transport_ids = [
-        super::world::ButtonId::Back,
-        super::world::ButtonId::PlayPause,
-        super::world::ButtonId::Skip,
-        super::world::ButtonId::Shuffle,
-    ];
-    let is_paused = if let Ok(audio) = world.audio.try_lock() { audio.paused } else { false };
-    for &id in &transport_ids {
-        let btn = world.buttons.iter().find(|b| b.id == id).unwrap();
-
-        // 3D extruded glyph — no backing cube, the icon IS the button
-        let base_rgb = match id {
-            super::world::ButtonId::PlayPause if is_paused => [120, 180, 120],
-            super::world::ButtonId::Shuffle => [120, 120, 200],
-            _ => [160, 180, 220],
-        };
-        let icon_col = if btn.hovered {
-            rgba_to_f32([
-                (base_rgb[0] as u8).saturating_add(60),
-                (base_rgb[1] as u8).saturating_add(60),
-                (base_rgb[2] as u8).saturating_add(60),
-                (255.0 * hud_a) as u8,
-            ])
-        } else {
-            rgba_to_f32([base_rgb[0] as u8, base_rgb[1] as u8, base_rgb[2] as u8, (200.0 * hud_a) as u8])
-        };
-        let cx = btn.world_x + btn.world_w * 0.5;
-        let cy = btn.world_y + btn.world_h * 0.5;
-        let z0 = 0.0;
-        let z1 = 0.3;
-        let s = 0.2; // larger icon — is the button now
-
-        match id {
-            super::world::ButtonId::Back => {
-                // |◀ — bar + left triangle (extruded)
-                push_extruded_shape(&mut tv, &mut ti, &[
-                    [cx + s * 0.8, cy - s], [cx + s * 1.1, cy - s],
-                    [cx + s * 1.1, cy + s], [cx + s * 0.8, cy + s],
-                ], z0, z1, icon_col);
-                push_extruded_shape(&mut tv, &mut ti, &[
-                    [cx - s, cy], [cx + s * 0.6, cy - s], [cx + s * 0.6, cy + s],
-                ], z0, z1, icon_col);
-            }
-            super::world::ButtonId::PlayPause => {
-                if is_paused {
-                    // ▶ play triangle
-                    push_extruded_shape(&mut tv, &mut ti, &[
-                        [cx - s * 0.6, cy - s], [cx + s, cy], [cx - s * 0.6, cy + s],
-                    ], z0, z1, icon_col);
-                } else {
-                    // ❚❚ two pause bars
-                    for offset in [-s * 0.5, s * 0.2] {
-                        push_extruded_shape(&mut tv, &mut ti, &[
-                            [cx + offset, cy - s], [cx + offset + s * 0.3, cy - s],
-                            [cx + offset + s * 0.3, cy + s], [cx + offset, cy + s],
-                        ], z0, z1, icon_col);
-                    }
-                }
-            }
-            super::world::ButtonId::Skip => {
-                // ▶| — right triangle + bar
-                push_extruded_shape(&mut tv, &mut ti, &[
-                    [cx - s, cy - s], [cx + s * 0.6, cy], [cx - s, cy + s],
-                ], z0, z1, icon_col);
-                push_extruded_shape(&mut tv, &mut ti, &[
-                    [cx + s * 0.8, cy - s], [cx + s * 1.1, cy - s],
-                    [cx + s * 1.1, cy + s], [cx + s * 0.8, cy + s],
-                ], z0, z1, icon_col);
-            }
-            super::world::ButtonId::Shuffle => {
-                // Crossed arrows — two diagonal bars (shortened 10%) with arrowheads
-                let t = s * 0.12;
-                let sh = s * 0.9; // shortened bar (tails stay, tips shorten)
-                // Diagonal 1: bottom-left → top-right
-                push_extruded_shape(&mut tv, &mut ti, &[
-                    [cx - s, cy + s - t], [cx - s, cy + s + t],
-                    [cx + sh, cy - sh + t], [cx + sh, cy - sh - t],
-                ], z0, z1, icon_col);
-                // Arrowhead top-right (aligned with diagonal)
-                push_extruded_shape(&mut tv, &mut ti, &[
-                    [cx + s, cy - s],           // tip
-                    [cx + s * 0.5, cy - s],     // left wing
-                    [cx + s, cy - s * 0.5],     // bottom wing
-                ], z0, z1, icon_col);
-                // Diagonal 2: top-left → bottom-right
-                push_extruded_shape(&mut tv, &mut ti, &[
-                    [cx - s, cy - s - t], [cx - s, cy - s + t],
-                    [cx + sh, cy + sh + t], [cx + sh, cy + sh - t],
-                ], z0, z1, icon_col);
-                // Arrowhead bottom-right (aligned with diagonal)
-                push_extruded_shape(&mut tv, &mut ti, &[
-                    [cx + s, cy + s],           // tip
-                    [cx + s * 0.5, cy + s],     // left wing
-                    [cx + s, cy + s * 0.5],     // top wing
-                ], z0, z1, icon_col);
-            }
-            _ => {}
-        }
-    }
-
-    // Folder button — 3D extruded folder icon
-    {
-        let fld = world.buttons.iter().find(|b| b.id == super::world::ButtonId::Folder).unwrap();
-        let col = if fld.hovered {
-            rgba_to_f32([140, 160, 220, (255.0 * hud_a) as u8])
-        } else {
-            rgba_to_f32([100, 120, 180, (200.0 * hud_a) as u8])
-        };
-        let cx = fld.world_x + fld.world_w * 0.5;
-        let cy = fld.world_y + fld.world_h * 0.5;
-        let w = 0.385;
-        let h = 0.28;
-        let tab_w = w * 0.35; // tab width
-        let tab_h = h * 0.2;  // tab height
-        // Folder body (rectangle)
-        push_extruded_shape(&mut tv, &mut ti, &[
-            [cx - w, cy - h + tab_h], [cx + w, cy - h + tab_h],
-            [cx + w, cy + h], [cx - w, cy + h],
-        ], 0.0, 0.2, col);
-        // Tab (small rectangle on top-left)
-        push_extruded_shape(&mut tv, &mut ti, &[
-            [cx - w, cy - h], [cx - w + tab_w, cy - h],
-            [cx - w + tab_w, cy - h + tab_h], [cx - w, cy - h + tab_h],
-        ], 0.0, 0.2, col);
-    }
-
-    // FFT visualizer (effect module)
-    if ef.fft_visualizer {
-        use super::effects::AudioEffect;
-        let fft_ctx = super::effects::RenderContext {
-            board_width: gw, board_height: gh,
-            win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
-            window_aspect: world.window_aspect,
-            preview_angle: world.preview_angle,
-            hud_opacity: hud_a,
-        };
-        world.fft_vis.render(&mut tv, &mut ti, &fft_ctx);
-    }
-
-    // Shatter fragments — scattered mini-cubes from line clears
+    // Shatter fragments — soft glowing particles from line clears
     if ef.clearing_flash {
-        for frag in &world.shatter_fragments {
+        let normal = [0.0f32, 0.0, 1.0];
+        for frag in &world.anims.shatter_fragments {
             let life = (frag.timer / frag.max_life).clamp(0.0, 1.0);
-            let alpha = life * life; // quadratic fade
+            let alpha = life * life;
             if alpha < 0.01 { continue; }
-            let s = frag.size * (0.5 + life * 0.5); // shrink as they die
+            let s = frag.size * (0.5 + life * 0.5);
             let color = [frag.color[0], frag.color[1], frag.color[2], alpha * frag.color[3]];
-            push_slab_3d(&mut tv, &mut ti,
-                frag.x - s * 0.5, frag.y - s * 0.5,
-                s, s, s * 0.5, color);
+            let z = 0.3;
+            // Soft circle billboard with UV radial falloff
+            let base = tv.len() as u32;
+            tv.push(Vertex { position: [frag.x - s, -frag.y - s, z], normal, color, uv: [-1.0, -1.0] });
+            tv.push(Vertex { position: [frag.x + s, -frag.y - s, z], normal, color, uv: [ 1.0, -1.0] });
+            tv.push(Vertex { position: [frag.x + s, -frag.y + s, z], normal, color, uv: [ 1.0,  1.0] });
+            tv.push(Vertex { position: [frag.x - s, -frag.y + s, z], normal, color, uv: [-1.0,  1.0] });
+            ti.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
         }
     }
 
@@ -378,36 +254,15 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 }
 
 /// Background geometric field: hex grid + connecting web + beat rings
-fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, gw: f32, gh: f32) {
-    let ctx = super::effects::RenderContext {
-        board_width: gw,
-        board_height: gh,
-        win_w: 0.0, win_h: 0.0,
-        window_aspect: 1.0,
-        preview_angle: world.preview_angle,
-        hud_opacity: world.hud_opacity,
-    };
-    use super::effects::AudioEffect;
-
-    // Hex background (effect module)
-    if world.effect_flags.hex_background {
-        world.hex_background.render(sv, si, &ctx);
-    }
-
-    // Beat rings (effect module)
-    if world.effect_flags.beat_rings {
-        world.beat_rings.render(sv, si, &ctx);
-    }
-
-    // Legacy level-up rings (still inline)
-    if !world.effect_flags.level_up_rings { return; }
+fn build_level_up_rings(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, gw: f32, gh: f32) {
+    if !world.effects.flags.level_up_rings { return; }
     let ring_cx = gw / 2.0;
     let ring_cy = -gh / 2.0;
     let ring_z = -1.0;
     let ring_n = [0.0f32, 0.0, 1.0];
     let ring_segments = 32;
 
-    for ring in &world.bg_rings {
+    for ring in &world.anims.bg_rings {
         let progress = 1.0 - ring.life / ring.max_life;
         let alpha = ring.color[3] * (1.0 - progress).powi(2);
         if alpha < 0.005 { continue; }
@@ -437,7 +292,7 @@ fn build_background(sv: &mut Vec<Vertex>, si: &mut Vec<u32>, world: &GameWorld, 
 fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     let mut verts = Vec::new();
     let mut indices = Vec::new();
-    let ef = &world.effect_flags;
+    let ef = &world.effects.flags;
     let t = &THEME;
     let w = t.win_w as f32;
     let h = t.win_h as f32;
@@ -446,179 +301,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
     // --- Fadeable HUD elements (affected by hud_opacity) ---
 
-    let np_x = w - 120.0;
-    let np_y = 12.0;
-
-    // Mark where preview piece starts (won't be faded)
-    let preview_start_vert = verts.len();
-    let next_cells = world.render_next.cells;
-    let next_color = rgba_to_f32(world.themed_piece_color(world.render_next.type_index));
-    // Correct preview scale for window aspect ratio
-    let theme_aspect = w / h;
-    let aspect_corr = theme_aspect / world.window_aspect;
-    let preview_scale = 36.0;
-    let cube_half = 0.42;
-    let preview_cx = np_x + 54.0;
-    let preview_cy = np_y + 52.0;
-
-    // 3-axis rotation
-    let ax = world.preview_angle * 0.3;
-    let ay = world.preview_angle * 0.7;
-    let az = world.preview_angle * 0.15;
-    let (sx_r, cx_r) = (ax.sin(), ax.cos());
-    let (sy, cy) = (ay.sin(), ay.cos());
-    let (sz, cz) = (az.sin(), az.cos());
-
-    let mut center = [0.0f32; 3];
-    for &(dr, dc) in &next_cells {
-        center[0] += dc as f32;
-        center[1] += dr as f32;
-    }
-    center[0] /= next_cells.len() as f32;
-    center[1] /= next_cells.len() as f32;
-
-    for &(dr, dc) in &next_cells {
-        let local_x = dc as f32 - center[0];
-        let local_y = dr as f32 - center[1];
-        let corners_local: [[f32; 3]; 8] = [
-            [local_x - cube_half, local_y - cube_half, -cube_half],
-            [local_x + cube_half, local_y - cube_half, -cube_half],
-            [local_x + cube_half, local_y + cube_half, -cube_half],
-            [local_x - cube_half, local_y + cube_half, -cube_half],
-            [local_x - cube_half, local_y - cube_half, cube_half],
-            [local_x + cube_half, local_y - cube_half, cube_half],
-            [local_x + cube_half, local_y + cube_half, cube_half],
-            [local_x - cube_half, local_y + cube_half, cube_half],
-        ];
-
-        let mut projected = [[0.0f32; 2]; 8];
-        for (i, c) in corners_local.iter().enumerate() {
-            let y1 = c[1] * cx_r - c[2] * sx_r;
-            let z1 = c[1] * sx_r + c[2] * cx_r;
-            let x2 = c[0] * cy + z1 * sy;
-            let z2 = -c[0] * sy + z1 * cy;
-            let x3 = x2 * cz - y1 * sz;
-            let y3 = x2 * sz + y1 * cz;
-            let persp = 4.0 / (4.0 + z2 * 0.3);
-            projected[i] = [
-                preview_cx + x3 * preview_scale * persp * aspect_corr,
-                preview_cy + y3 * preview_scale * persp,
-            ];
-        }
-
-        let faces: &[([usize; 4], [f32; 3])] = &[
-            ([4, 5, 6, 7], [0.0, 0.0, 1.0]),
-            ([5, 1, 2, 6], [1.0, 0.0, 0.0]),
-            ([0, 1, 5, 4], [0.0, -1.0, 0.0]),
-            ([0, 3, 7, 4], [-1.0, 0.0, 0.0]),
-            ([3, 2, 6, 7], [0.0, 1.0, 0.0]),
-            ([0, 1, 2, 3], [0.0, 0.0, -1.0]),
-        ];
-
-        let mut face_order: Vec<(usize, f32)> = faces.iter().enumerate().map(|(i, (_, n))| {
-            let _ny1 = n[1] * cx_r - n[2] * sx_r;
-            let nz1 = n[1] * sx_r + n[2] * cx_r;
-            let nz2 = -n[0] * sy + nz1 * cy;
-            (i, nz2)
-        }).collect();
-        face_order.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-
-        for &(fi, nz) in &face_order {
-            if nz < 0.0 { continue; }
-            let (ci, _normal) = &faces[fi];
-            let shade = 0.4 + nz * 0.6;
-            let fc = [next_color[0] * shade, next_color[1] * shade, next_color[2] * shade, next_color[3]];
-
-            let base = verts.len() as u32;
-            for &idx in ci {
-                let px = projected[idx];
-                let (nx, ny) = px_to_ndc(px[0], px[1], w, h);
-                verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc, uv: [0.0, 0.0] });
-            }
-            indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-        }
-    }
-
-    // Held piece preview (top-left, mirrors next piece position)
-    if let Some(ref held) = world.render_held {
-        let held_cells = held.cells;
-        let held_color = rgba_to_f32(world.themed_piece_color(held.type_index));
-        let held_cx = 66.0;
-        let held_cy = np_y + 52.0;
-        let held_scale = 36.0;
-
-        let mut held_center = [0.0f32; 3];
-        for &(dr, dc) in &held_cells {
-            held_center[0] += dc as f32;
-            held_center[1] += dr as f32;
-        }
-        held_center[0] /= held_cells.len() as f32;
-        held_center[1] /= held_cells.len() as f32;
-
-        // Slower rotation than next piece
-        let hax = world.preview_angle * 0.2;
-        let hay = world.preview_angle * 0.5;
-        let (hsx, hcx) = (hax.sin(), hax.cos());
-        let (hsy, hcy) = (hay.sin(), hay.cos());
-
-        for &(dr, dc) in &held_cells {
-            let lx = dc as f32 - held_center[0];
-            let ly = dr as f32 - held_center[1];
-            let corners: [[f32; 3]; 8] = [
-                [lx - cube_half, ly - cube_half, -cube_half],
-                [lx + cube_half, ly - cube_half, -cube_half],
-                [lx + cube_half, ly + cube_half, -cube_half],
-                [lx - cube_half, ly + cube_half, -cube_half],
-                [lx - cube_half, ly - cube_half, cube_half],
-                [lx + cube_half, ly - cube_half, cube_half],
-                [lx + cube_half, ly + cube_half, cube_half],
-                [lx - cube_half, ly + cube_half, cube_half],
-            ];
-            let mut proj = [[0.0f32; 2]; 8];
-            for (i, c) in corners.iter().enumerate() {
-                let y1 = c[1] * hcx - c[2] * hsx;
-                let z1 = c[1] * hsx + c[2] * hcx;
-                let x2 = c[0] * hcy + z1 * hsy;
-                let z2 = -c[0] * hsy + z1 * hcy;
-                let persp = 4.0 / (4.0 + z2 * 0.3);
-                proj[i] = [
-                    held_cx + x2 * held_scale * persp * aspect_corr,
-                    held_cy + y1 * held_scale * persp,
-                ];
-            }
-            let faces: &[([usize; 4], [f32; 3])] = &[
-                ([4, 5, 6, 7], [0.0, 0.0, 1.0]),
-                ([5, 1, 2, 6], [1.0, 0.0, 0.0]),
-                ([0, 1, 5, 4], [0.0, -1.0, 0.0]),
-                ([0, 3, 7, 4], [-1.0, 0.0, 0.0]),
-                ([3, 2, 6, 7], [0.0, 1.0, 0.0]),
-                ([0, 1, 2, 3], [0.0, 0.0, -1.0]),
-            ];
-            let mut fo: Vec<(usize, f32)> = faces.iter().enumerate().map(|(i, (_, n))| {
-                let nz1 = n[1] * hsx + n[2] * hcx;
-                let nz2 = -n[0] * hsy + nz1 * hcy;
-                (i, nz2)
-            }).collect();
-            fo.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            for &(fi, nz) in &fo {
-                if nz < 0.0 { continue; }
-                let (ci, _) = &faces[fi];
-                let shade = 0.4 + nz * 0.6;
-                let fc = [held_color[0] * shade, held_color[1] * shade, held_color[2] * shade, held_color[3]];
-                let base = verts.len() as u32;
-                for &idx in ci {
-                    let px = proj[idx];
-                    let (nx, ny) = px_to_ndc(px[0], px[1], w, h);
-                    verts.push(Vertex { position: [nx, ny, 0.06], normal: HUD_NORMAL, color: fc, uv: [0.0, 0.0] });
-                }
-                indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-            }
-        }
-    }
-
-    let preview_end_vert = verts.len();
-
-    // Hold label (top-left, above held piece preview)
+    // Hold label (top-left)
     push_text(&mut verts, &mut indices, 12.0, 12.0, "HOLD", dim_col, 1.0);
 
     // Score / Level / Lines (left side, below held piece area)
@@ -634,8 +317,8 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     push_text(&mut verts, &mut indices, 12.0, stats_y + 88.0, &format!("{}", rs.total_lines), text_col, 2.0);
 
     // T-spin flash
-    if ef.t_spin_flash && world.t_spin_flash > 0.01 {
-        let ta = (world.t_spin_flash * 255.0) as u8;
+    if ef.t_spin_flash && world.anims.t_spin_flash > 0.01 {
+        let ta = (world.anims.t_spin_flash * 255.0) as u8;
         push_text(&mut verts, &mut indices, w / 2.0 - 40.0, h / 2.0 - 60.0,
                   "T-SPIN", rgba_to_f32([255, 100, 255, ta]), 3.0);
     }
@@ -746,7 +429,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         push_text_embossed(&mut verts, &mut indices, px, pa_y + 296.0,
                   &format!("VOL  {:.0}%", vol * 100.0), text_col, 2.0);
         // Theme
-        let theme_names = ["DEFAULT", "WATER", "SPACE", "DEBUG"];
+        let theme_names = ["DEFAULT", "WATER", "SPACE", "FLOW", "FLUID", "CRYSTAL", "DEBUG"];
         let theme_name = theme_names.get(world.theme_index).unwrap_or(&"DEFAULT");
         push_text_embossed(&mut verts, &mut indices, px, pa_y + 322.0,
                   &format!("THEME  {}", theme_name), text_col, 2.0);
@@ -754,18 +437,14 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     // Particles (always visible, not affected by HUD fade)
-    world.particles.render(&mut verts, &mut indices);
+    world.effects.render_particles(&mut verts, &mut indices);
 
-    // Apply HUD opacity — skip preview piece and particles
+    // Apply HUD opacity (skip particles — they're always visible)
     let opacity = world.hud_opacity;
     if opacity < 0.99 {
-        let particle_verts = world.particles.particles.len() * 4;
+        let particle_verts = world.effects.particles.particles.len() * 4;
         let hud_vert_count = verts.len().saturating_sub(particle_verts);
-        for (i, v) in verts[..hud_vert_count].iter_mut().enumerate() {
-            // Skip preview piece vertices (always visible)
-            if i >= preview_start_vert && i < preview_end_vert {
-                continue;
-            }
+        for v in verts[..hud_vert_count].iter_mut() {
             v.color[3] *= opacity;
         }
     }
@@ -779,7 +458,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             || world.toast_text.starts_with("RESAMPLING")
             || world.toast_text.starts_with("REMAPPED")
             || world.toast_text.starts_with("ANALYZING");
-        let show = if is_analysis { world.theme_index == 3 } else { true }; // 2 = debug
+        let show = if is_analysis { world.theme_index == 6 } else { true }; // 2 = debug
         if show {
             let ta = (world.toast_timer.min(1.0) * 200.0) as u8;
             push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
@@ -803,7 +482,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     // Debug analysis dashboard (debug theme only, always visible)
-    if world.theme_index == 3 {
+    if world.theme_index == 6 {
         let band_names = ["SB", "BA", "LM", "MI", "UM", "PR", "BR"];
         let dx = 12.0;
         let dy = 210.0;
@@ -824,15 +503,15 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             push_quad(&mut verts, &mut indices, px, by, pair_w, max_h, rgba_to_f32([20, 20, 40, 150]), 0.01);
 
             // Left bar: rolling energy average (blue/gold)
-            let avg_val = world.energy_averages[i].min(1.0);
+            let avg_val = world.analysis.energy_averages[i].min(1.0);
             let avg_h = avg_val * max_h;
-            let avg_col = if world.resolved_ranks.contains(&i) { rank_col } else {
+            let avg_col = if world.analysis.resolved_ranks.contains(&i) { rank_col } else {
                 rgba_to_f32([40, 80, 160, 220])
             };
             push_quad(&mut verts, &mut indices, px, by + max_h - avg_h, bar_w, avg_h, avg_col, 0.02);
 
             // Right bar: real-time band level (green)
-            let live_val = world.bands[i].min(1.0);
+            let live_val = world.analysis.bands[i].min(1.0);
             let live_h = live_val * max_h;
             push_quad(&mut verts, &mut indices, px + bar_w + 2.0, by + max_h - live_h, bar_w, live_h, live_col, 0.02);
 
@@ -850,15 +529,15 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             push_quad(&mut verts, &mut indices, px, by, pair_w, max_h, rgba_to_f32([20, 20, 40, 150]), 0.01);
 
             // Left bar: confidence (orange/gold)
-            let conf_val = world.confidence_values[i].min(1.0);
+            let conf_val = world.analysis.confidence_values[i].min(1.0);
             let conf_h = conf_val * max_h;
-            let conf_col = if world.resolved_ranks[0] == i { rank_col } else {
+            let conf_col = if world.analysis.resolved_ranks[0] == i { rank_col } else {
                 rgba_to_f32([160, 80, 40, 220])
             };
             push_quad(&mut verts, &mut indices, px, by + max_h - conf_h, bar_w, conf_h, conf_col, 0.02);
 
             // Right bar: real-time beat intensity (green)
-            let beat_val = world.band_beat_intensity[i].min(1.0);
+            let beat_val = world.analysis.band_beat_intensity[i].min(1.0);
             let beat_h = beat_val * max_h;
             push_quad(&mut verts, &mut indices, px + bar_w + 2.0, by + max_h - beat_h, bar_w, beat_h, live_col, 0.02);
 
@@ -867,7 +546,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
 
         // Resolved ranks display
         let ry = cy + max_h + 36.0;
-        let [r1, r2, r3] = world.resolved_ranks;
+        let [r1, r2, r3] = world.analysis.resolved_ranks;
         push_text(&mut verts, &mut indices, dx, ry,
             &format!("R1:{} R2:{} R3:{}", band_names[r1], band_names[r2], band_names[r3]),
             rank_col, 1.5);

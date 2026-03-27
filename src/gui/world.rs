@@ -8,19 +8,12 @@ use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
 use rhythm_grid::input::GameAction;
 use rhythm_grid::pieces::*;
-use rhythm_grid::audio::{RollingEnergy, BeatConfidence};
 use rhythm_grid::render::{piece_color, board_state, held_piece_state, next_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender, NextPieceRender};
 use super::audio_output::{self, AudioState};
 use super::camera::CameraReactor;
 use super::drawing::{Vertex, rgba_to_f32};
 use super::effects::AudioFrame;
-use super::effects::beat_rings::BeatRings;
-use super::effects::hex_background::HexBackground;
-use super::effects::fft_visualizer::FftVisualizer;
-use super::effects::grid_lines::GridLines;
-use super::effects::fireworks::Fireworks;
 use super::effects::themes;
-use super::particles::ParticleSystem;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
 use super::theme::{DEFAULT_CAM_ANGLE, THEME};
 
@@ -32,37 +25,11 @@ pub struct GameWorld {
     pub(super) preview_rotation: usize,
     preview_timer: f32,
     pub audio: Arc<Mutex<AudioState>>,
-    pub beat_intensity: f32,
-    pub amplitude: f32,
-    pub bass: f32,
-    pub mids: f32,
-    pub highs: f32,
-    pub(super) bands: [f32; 7],
-    pub(super) peak_bands: [f32; 7],   // slow decay — for visual peak hold indicator
-    pub(super) norm_ceil: [f32; 7],    // fast decay — normalization ceiling
-    pub(super) bands_norm: [f32; 7],   // each band normalized to its own ceiling (0-1)
-    pub(super) band_beat_intensity: [f32; 7], // per-band beat decay (1.0 on beat, decays)
-    pub(super) centroid: f32,         // spectral centroid 0-1 (dark↔bright)
-    pub(super) flux: f32,             // spectral flux (rate of spectral change)
-    pub(super) t_spin_flash: f32, // 1.0 on t-spin, decays to 0
-    pub particles: ParticleSystem,
+    pub analysis: super::audio_analysis::AudioAnalysis,
     pub(super) prev_beat: bool,
-    pub(super) clearing_cells: Vec<ClearingCell>,
-    pub(super) drop_trails: Vec<DropTrail>,
-    pub(super) settle_cells: Vec<SettleCell>,
-    pub(super) shatter_fragments: Vec<ShatterFragment>,
-    pub(super) bg_rings: Vec<BgRing>, // legacy — kept for level-up rings
-    pub(super) beat_rings: BeatRings,
-    pub(super) hex_background: HexBackground,
-    pub(super) fft_vis: FftVisualizer,
-    pub(super) grid_lines: GridLines,
-    pub(super) fireworks: Fireworks,
-    pub(super) fire: super::effects::fire::Fire,
-    pub(super) starfield: super::effects::starfield::Starfield,
-    pub(super) aurora: super::effects::aurora::Aurora,
-    pub(super) effect_flags: themes::EffectFlags,
+    pub anims: super::animations::Animations,
+    pub effects: super::effect_manager::EffectManager,
     pub(super) danger_level: f32,
-    pub(super) level_up_flash: f32, // 1.0 on level up, decays to 0.0
     last_level: u32,
     pub(super) window_aspect: f32,
     pub(super) hud_opacity: f32,  // 0.0 = invisible, 1.0 = full
@@ -88,16 +55,7 @@ pub struct GameWorld {
     pub saved_window_x: Option<i32>,
     pub saved_window_y: Option<i32>,
     pub logical_window_size: [u32; 2],
-    // Dynamic audio-visual mapping
-    rolling_energy: RollingEnergy,
-    beat_confidence: BeatConfidence,
     pub(super) bindings: themes::EffectBindings,
-    pub(super) resolved_ranks: [usize; 3],  // band indices for rank 1, 2, 3
-    pub(super) energy_averages: [f32; 7],   // cached for debug dashboard
-    pub(super) confidence_values: [f32; 7], // cached for debug dashboard
-    pub(super) track_time: f64,               // seconds into current track
-    last_track_name: String,                 // detect track changes
-    ranks_locked: bool,                      // true after analysis window
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -127,67 +85,13 @@ pub(super) struct Button {
     pub hovered: bool,
 }
 
-/// Expanding ring in the background
-pub(super) struct BgRing {
-    pub radius: f32,
-    pub max_radius: f32,
-    pub life: f32,
-    pub max_life: f32,
-    pub color: [f32; 4],
-}
-
-/// Per-cell clearing animation (fields used for spawn tracking; rendering replaced by shatter)
-#[allow(dead_code)]
-pub(super) struct ClearingCell {
-    pub col: i32,
-    pub row: i32,
-    pub timer: f32,
-    pub _color: [f32; 4],  // original piece color (reserved for future non-white dissolve)
-    pub scale: f32,         // 1.0 → 0.0 as it dissolves
-}
-
-pub(super) const LINE_CLEAR_DURATION: f32 = 0.4;
-
-pub(super) struct ShatterFragment {
-    pub x: f32,
-    pub y: f32,
-    pub vx: f32,
-    pub vy: f32,
-    pub size: f32,
-    pub color: [f32; 4],
-    pub timer: f32,
-    pub max_life: f32,
-}
-
-pub(super) const SHATTER_DURATION: f32 = 0.6;
-
-pub(super) struct DropTrail {
-    pub col: i32,
-    pub start_row: i32,   // where the piece was before drop
-    pub end_row: i32,     // where it landed
-    pub type_index: u32,
-    pub timer: f32,
-}
-
-pub(super) const DROP_TRAIL_DURATION: f32 = 0.2;
-
-pub(super) struct SettleCell {
-    pub col: i32,
-    pub row: i32,
-    pub timer: f32,
-}
-
-pub(super) const SETTLE_DURATION: f32 = 0.15;
+// Re-export animation types used inline in this file
+use super::animations::{ClearingCell, DropTrail, SettleCell, LINE_CLEAR_DURATION, DROP_TRAIL_DURATION, SETTLE_DURATION};
 
 impl GameWorld {
     /// Resolve a SignalRank to an actual band index using analysis results.
     pub fn resolve_rank(&self, rank: themes::SignalRank) -> usize {
-        match rank {
-            themes::SignalRank::First => self.resolved_ranks[0],
-            themes::SignalRank::Second => self.resolved_ranks[1],
-            themes::SignalRank::Third => self.resolved_ranks[2],
-            themes::SignalRank::Fixed(band) => band.min(6),
-        }
+        self.analysis.resolve_rank(rank)
     }
 
     pub fn themed_piece_color(&self, type_index: u32) -> [u8; 4] {
@@ -201,7 +105,7 @@ impl GameWorld {
     pub fn save_settings(&self) {
         let vol = if let Ok(audio) = self.audio.lock() { audio.volume } else { 0.8 };
         let shuffled = if let Ok(audio) = self.audio.lock() { audio.shuffled } else { false };
-        let theme_names = ["Default", "Water", "Space", "Debug"];
+        let theme_names = ["Default", "Water", "Space", "Flow", "Fluid", "Crystal", "Debug"];
         let settings = rhythm_grid::config::Settings {
             volume: vol,
             speed: 1.0,
@@ -225,7 +129,10 @@ impl GameWorld {
         let (theme, theme_index) = match settings.theme.as_str() {
             "Water" => (themes::water_theme(), 1),
             "Space" => (themes::space_theme(), 2),
-            "Debug" => (themes::debug_theme(), 3),
+            "Flow" => (themes::flow_theme(), 3),
+            "Fluid" => (themes::fluid_theme(), 4),
+            "Crystal" => (themes::crystal_theme(), 5),
+            "Debug" => (themes::debug_theme(), 6),
             _ => (themes::default_theme(), 0),
         };
         let audio = audio_output::start_audio(settings.music_folder.as_deref());
@@ -238,35 +145,10 @@ impl GameWorld {
             preview_rotation: 0,
             preview_timer: 0.0,
             audio,
-            beat_intensity: 0.0,
-            amplitude: 0.0,
-            bass: 0.0,
-            mids: 0.0,
-            highs: 0.0,
-            bands: [0.0; 7],
-            peak_bands: [0.0; 7],
-            norm_ceil: [0.01; 7],
-            bands_norm: [0.0; 7],
-            band_beat_intensity: [0.0; 7],
-            centroid: 0.0,
-            flux: 0.0,
-            t_spin_flash: 0.0,
-            particles: ParticleSystem::new(),
+            analysis: super::audio_analysis::AudioAnalysis::new(),
             prev_beat: false,
-            clearing_cells: Vec::new(),
-            drop_trails: Vec::new(),
-            settle_cells: Vec::new(),
-            shatter_fragments: Vec::new(),
-            bg_rings: Vec::new(),
-            beat_rings: BeatRings::new(theme.rings),
-            hex_background: HexBackground::new(theme.hex),
-            fft_vis: FftVisualizer::new(theme.fft),
-            grid_lines: GridLines::new(theme.grid),
-            fireworks: { let mut fw = Fireworks::new(); fw.bursts_only = theme.name == "Debug"; fw },
-            fire: super::effects::fire::Fire::new(),
-            starfield: super::effects::starfield::Starfield::new(),
-            aurora: super::effects::aurora::Aurora::new(),
-            effect_flags: theme.effects.clone(),
+            anims: super::animations::Animations::new(),
+            effects: super::effect_manager::EffectManager::new(&theme),
             piece_colors: theme.piece_colors,
             render_board: BoardRenderState { occupied: vec![], active: vec![], ghost: vec![] },
             render_status: GameStatusRender {
@@ -286,17 +168,8 @@ impl GameWorld {
             saved_window_x: settings.window_x,
             saved_window_y: settings.window_y,
             logical_window_size: [settings.window_width, settings.window_height],
-            rolling_energy: RollingEnergy::new(10.0, 60.0),  // 10s window, ~60fps
-            beat_confidence: BeatConfidence::new(),
             bindings: theme.bindings.clone(),
-            resolved_ranks: [0, 1, 2],  // default: sub-bass, bass, low-mids
-            energy_averages: [0.0; 7],
-            confidence_values: [0.0; 7],
-            track_time: 0.0,
-            last_track_name: String::new(),
-            ranks_locked: false,
             danger_level: 0.0,
-            level_up_flash: 0.0,
             last_level: 1,
             window_aspect: THEME.win_w as f32 / THEME.win_h as f32,
             hud_opacity: 1.0,
@@ -331,138 +204,22 @@ impl GameWorld {
         let now = Instant::now();
         let dt = now.duration_since(self.last_tick).as_secs_f64();
 
-        // Pull audio state for rendering
-        let mut got_beat = false;
+        // Audio analysis pipeline
         if let Ok(mut audio) = self.audio.try_lock() {
-            audio.tick(dt as f32);
-
-            // Detect track change — reset all analysis state
-            if audio.track_name != self.last_track_name && !audio.track_name.is_empty() {
-                self.last_track_name = audio.track_name.clone();
-                self.track_time = 0.0;
-                self.ranks_locked = false;
-                self.rolling_energy = RollingEnergy::new(10.0, 60.0);
-                self.beat_confidence = BeatConfidence::new();
-                self.energy_averages = [0.0; 7];
-                self.confidence_values = [0.0; 7];
-                self.norm_ceil = [0.01; 7];
-                self.peak_bands = [0.0; 7];
-                self.bands_norm = [0.0; 7];
-                self.band_beat_intensity = [0.0; 7];
-                self.fireworks.shell_cooldown = 3.0; // allow shells on new track
+            if self.analysis.track_changed() {
+                self.effects.on_track_change();
             }
-
-            self.beat_intensity = audio.beat_intensity;
-            self.amplitude = audio.amplitude;
-            self.bass = audio.bass;
-            self.mids = audio.mids;
-            self.highs = audio.highs;
-            self.bands = audio.bands;
-            self.centroid = audio.centroid;
-            self.flux = audio.flux;
-            for i in 0..7 {
-                if audio.band_beats[i] {
-                    self.band_beat_intensity[i] = 1.0;
-                }
-            }
-            audio.band_beats = [false; 7]; // clear after reading
-            got_beat = audio.beat_intensity > 0.9; // fresh beat
-
-            // Feed analysis trackers
-            self.rolling_energy.update(&self.bands);
-            self.beat_confidence.update(&[
-                self.band_beat_intensity[0] > 0.95,
-                self.band_beat_intensity[1] > 0.95,
-                self.band_beat_intensity[2] > 0.95,
-                self.band_beat_intensity[3] > 0.95,
-                self.band_beat_intensity[4] > 0.95,
-                self.band_beat_intensity[5] > 0.95,
-                self.band_beat_intensity[6] > 0.95,
-            ], self.track_time);
-            self.energy_averages = self.rolling_energy.averages();
-            self.confidence_values = self.beat_confidence.confidence();
+            self.analysis.update(&mut audio, dt);
         }
+        let got_beat = self.analysis.got_beat;
 
-        // Track time + two-phase rank resolution
-        // Phase 1: sample 0-7s, lock at 7s (catches songs that start strong)
-        // Phase 2: sample 30-45s, reapply at 45s (catches slow ramp-ups)
-        self.track_time += dt;
-        let band_names = ["SUB", "BASS", "LMID", "MID", "UMID", "PRES", "BRIL"];
-
-        // Resolve ranks from current analysis state
-        let resolve = |energy: &RollingEnergy, conf: &BeatConfidence| -> [usize; 3] {
-            let dominant = energy.dominant_bands(3);
-            let confidence = conf.confidence();
-            let rank1 = *dominant.iter()
-                .max_by(|&&a, &&b| confidence[a].partial_cmp(&confidence[b]).unwrap())
-                .unwrap_or(&0);
-            let others: Vec<usize> = dominant.iter().filter(|&&b| b != rank1).copied().collect();
-            let rank2 = others.first().copied().unwrap_or(1);
-            let rank3 = others.get(1).copied().unwrap_or(2);
-            [rank1, rank2, rank3]
-        };
-
-        // Phase labels
-        if self.track_time < 7.0 {
-            self.toast_text = format!("SAMPLING {:.0}S", 7.0 - self.track_time);
-            self.toast_timer = 2.0;
-        } else if self.track_time >= 30.0 && self.track_time < 45.0 {
-            self.toast_text = format!("RESAMPLING {:.0}S", 45.0 - self.track_time);
-            self.toast_timer = 2.0;
-        }
-
-        // Phase 1: first lock at 7s
-        if !self.ranks_locked && self.track_time > 7.0 {
-            self.resolved_ranks = resolve(&self.rolling_energy, &self.beat_confidence);
-            self.ranks_locked = true;
-            let [r1, r2, r3] = self.resolved_ranks;
-            self.toast_text = format!("MAPPED: {} {} {}",
-                band_names[r1], band_names[r2], band_names[r3]);
-            self.toast_timer = 3.0;
-        }
-
-        // Phase 2: reapply at 45s after 15s of fresh sampling
-        if self.track_time > 45.0 && self.track_time - dt <= 45.0 {
-            let new_ranks = resolve(&self.rolling_energy, &self.beat_confidence);
-            if new_ranks != self.resolved_ranks {
-                self.resolved_ranks = new_ranks;
-                let [r1, r2, r3] = self.resolved_ranks;
-                self.toast_text = format!("REMAPPED: {} {} {}",
-                    band_names[r1], band_names[r2], band_names[r3]);
-                self.toast_timer = 3.0;
-            }
-        }
-
-        // Peak hold (slow decay — for visual indicator on FFT bars)
-        let peak_decay = dt as f32 * 0.4;
-        // Normalization ceiling (fast decay — adapts to current song section)
-        let ceil_decay = dt as f32 * 0.05;
-        for i in 0..7 {
-            // Visual peak
-            self.peak_bands[i] = if self.bands[i] > self.peak_bands[i] {
-                self.bands[i]
-            } else {
-                (self.peak_bands[i] - peak_decay).max(self.bands[i])
-            };
-            // Normalization ceiling — snaps up instantly, decays slowly toward current level
-            if self.bands[i] > self.norm_ceil[i] {
-                self.norm_ceil[i] = self.bands[i];
-            } else {
-                self.norm_ceil[i] = (self.norm_ceil[i] - ceil_decay).max(0.01);
-            }
-            // Normalize
-            self.bands_norm[i] = (self.bands[i] / self.norm_ceil[i]).min(1.0);
+        // Propagate analysis toast to world toast
+        if let Some((text, duration)) = self.analysis.toast.take() {
+            self.toast_text = text;
+            self.toast_timer = duration;
         }
 
         // (effect modules updated below after AudioFrame is built)
-
-        // Level-up rings still use legacy bg_rings vec
-        for ring in &mut self.bg_rings {
-            let progress = 1.0 - ring.life / ring.max_life;
-            ring.radius = 0.5 + progress * ring.max_radius;
-            ring.life -= dt as f32;
-        }
-        self.bg_rings.retain(|r| r.life > 0.0);
 
         // Upper-mids/presence beats (bands 4-5) → particle burst
         let w = THEME.win_w as f32;
@@ -471,20 +228,20 @@ impl GameWorld {
         let bh = h * 0.85;
         let bx = (w - bw) / 2.0;
         let by = (h - bh) / 2.0;
-        if self.effect_flags.particle_beat_pulse {
+        if self.effects.flags.particle_beat_pulse {
             for band in 4..6 {
-                if self.band_beat_intensity[band] > 0.95 {
-                    self.particles.spawn_beat_pulse(bx, by, bw, bh, 0.6);
+                if self.analysis.band_beat_intensity[band] > 0.95 {
+                    self.effects.particles.spawn_beat_pulse(bx, by, bw, bh, 0.6);
                 }
             }
-            if got_beat && !self.prev_beat && self.band_beat_intensity[4..6].iter().all(|&b| b < 0.95) {
-                self.particles.spawn_beat_pulse(bx, by, bw, bh, 1.0);
+            if got_beat && !self.prev_beat && self.analysis.band_beat_intensity[4..6].iter().all(|&b| b < 0.95) {
+                self.effects.particles.spawn_beat_pulse(bx, by, bw, bh, 1.0);
             }
         }
         self.prev_beat = got_beat;
 
         // Update particles and line clear animations
-        self.particles.update(dt as f32);
+        self.effects.particles.update(dt as f32);
         // HUD auto-fade (1.5s delay, then fast fade)
         self.hud_fade_timer -= dt as f32;
         if self.hud_fade_timer <= 0.0 {
@@ -496,52 +253,15 @@ impl GameWorld {
             self.hud_fade_timer = 1.5;
         }
 
-        for cell in &mut self.clearing_cells {
-            cell.timer -= dt as f32;
-            let progress = 1.0 - (cell.timer / LINE_CLEAR_DURATION).max(0.0);
-            cell.scale = 1.0 - progress; // shrink to 0
-        }
-        self.clearing_cells.retain(|c| c.timer > 0.0);
-
-        // Drop trail decay
-        for trail in &mut self.drop_trails {
-            trail.timer -= dt as f32;
-        }
-        self.drop_trails.retain(|t| t.timer > 0.0);
-
-        // Shatter fragment physics
-        for frag in &mut self.shatter_fragments {
-            frag.timer -= dt as f32;
-            frag.x += frag.vx * dt as f32;
-            frag.y += frag.vy * dt as f32;
-            frag.vy += 8.0 * dt as f32; // gravity (positive = downward in row coords)
-            frag.vx *= 0.97; // drag
-        }
-        self.shatter_fragments.retain(|f| f.timer > 0.0);
-
-        // Settle animation decay
-        for cell in &mut self.settle_cells {
-            cell.timer -= dt as f32;
-        }
-        self.settle_cells.retain(|c| c.timer > 0.0);
+        self.anims.update(dt as f32);
 
         // Level up detection
         let current_level = level_for_lines(self.session.total_lines);
         if current_level > self.last_level {
             self.hud_opacity = 1.0;
             self.hud_fade_timer = 2.0;
-            if self.effect_flags.level_up_rings {
-                self.level_up_flash = 1.0;
-            }
-            // Spawn celebratory rings
-            for i in 0..3 {
-                self.bg_rings.push(BgRing {
-                    radius: 0.5 + i as f32 * 0.3,
-                    max_radius: 25.0,
-                    life: 2.5 - i as f32 * 0.3,
-                    max_life: 2.5 - i as f32 * 0.3,
-                    color: [0.3, 0.8, 1.0, 0.5], // bright cyan
-                });
+            if self.effects.flags.level_up_rings {
+                self.anims.spawn_level_up_rings();
             }
             // Burst of particles from board center
             let w = THEME.win_w as f32;
@@ -549,11 +269,11 @@ impl GameWorld {
             let cx = w / 2.0;
             let cy = h / 2.0;
             for _ in 0..120 {
-                let angle = self.preview_angle + (self.particles.particles.len() as f32 * 0.7);
+                let angle = self.preview_angle + (self.effects.particles.particles.len() as f32 * 0.7);
                 let speed = 50.0 + (angle.sin().abs() * 80.0);
                 let vx = angle.cos() * speed;
                 let vy = angle.sin() * speed;
-                self.particles.particles.push(super::particles::Particle {
+                self.effects.particles.particles.push(super::particles::Particle {
                     x: cx + (angle * 3.0).cos() * 20.0,
                     y: cy + (angle * 3.0).sin() * 20.0,
                     vx, vy,
@@ -565,58 +285,37 @@ impl GameWorld {
             }
             self.last_level = current_level;
         }
-        self.level_up_flash = (self.level_up_flash - dt as f32 * 1.5).max(0.0);
 
         // Build AudioFrame BEFORE decay so effects see fresh beat triggers
-        self.audio_frame = AudioFrame {
-            bands: self.bands,
-            bands_norm: self.bands_norm,
-            peak_bands: self.peak_bands,
-            band_beats: self.band_beat_intensity,
-            centroid: self.centroid,
-            flux: self.flux,
-            danger: self.danger_level,
-            dt: dt as f32,
-        };
+        self.audio_frame = self.analysis.audio_frame(self.danger_level, dt as f32);
 
-        // Update all effect modules + camera (guarded by effect_flags)
-        use super::effects::AudioEffect;
-        let ef = &self.effect_flags;
-        // Set resolved band indices on effects before update
-        if ef.beat_rings {
-            self.beat_rings.trigger_band = self.resolve_rank(self.bindings.beat_rings);
-            self.beat_rings.update(&self.audio_frame);
+        // Update all effect modules
+        let fft_lock_hovered = self.btn_hovered(ButtonId::FftLock);
+        self.effects.update(&self.audio_frame, &self.analysis, &self.bindings, dt, self.fft_locked, fft_lock_hovered);
+
+        // Feed active piece positions to flow field (depends on game state)
+        if self.effects.flags.flow_field {
+            if self.session.state == GameState::Playing {
+                let cells = piece_cells(self.session.active_piece.piece_type, self.session.active_piece.rotation);
+                let piece_world: Vec<(f32, f32)> = cells.iter().map(|&(dr, dc)| {
+                    let c = (self.session.active_piece.col + dc) as f32 + 0.5;
+                    let r = (self.session.active_piece.row + dr) as f32 + 0.5;
+                    (c, r)
+                }).collect();
+                self.effects.flow_field.set_piece_cells(piece_world);
+            } else {
+                self.effects.flow_field.set_piece_cells(Vec::new());
+            }
         }
-        if ef.hex_background { self.hex_background.update(&self.audio_frame); }
-        self.fft_vis.locked = self.fft_locked;
-        self.fft_vis.lock_hovered = self.btn_hovered(ButtonId::FftLock);
-        if ef.fft_visualizer { self.fft_vis.update(&self.audio_frame); }
-        if ef.grid_lines {
-            self.grid_lines.distortion_enabled = ef.grid_distortion;
-            self.grid_lines.update(&self.audio_frame);
-        }
-        if ef.fireworks {
-            self.fireworks.trigger_band = Some(self.resolve_rank(self.bindings.fireworks));
-            self.fireworks.update(&self.audio_frame);
-        }
-        if ef.fire {
-            self.fire.update(&self.audio_frame);
-        }
-        if ef.starfield {
-            self.starfield.update(&self.audio_frame);
-        }
-        if ef.aurora {
-            self.aurora.update(&self.audio_frame);
-        }
-        if ef.camera_sway { self.camera.update(&self.audio_frame); }
+
+        // Camera (not managed by EffectManager — depends on audio_frame directly)
+        if self.effects.flags.camera_sway { self.camera.update(&self.audio_frame); }
 
         // Decay AFTER effects have consumed the frame
-        for i in 0..7 {
-            self.band_beat_intensity[i] = (self.band_beat_intensity[i] - dt as f32 * 8.0).max(0.0);
-        }
+        self.analysis.decay_beats(dt as f32);
 
         // T-spin flash decay
-        self.t_spin_flash = (self.t_spin_flash - dt as f32 * 1.0).max(0.0);
+        self.anims.t_spin_flash = (self.anims.t_spin_flash - dt as f32 * 1.0).max(0.0);
         self.toast_timer = (self.toast_timer - dt as f32).max(0.0);
 
         // Smooth escalation transition
@@ -660,30 +359,30 @@ impl GameWorld {
                     let r = pre_piece.row + dr;
                     let c = pre_piece.col + dc;
                     if r >= 0 && r < HEIGHT as i32 {
-                        self.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
+                        self.anims.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
                     }
                 }
                 if pre_is_t_spin {
-                    self.t_spin_flash = 1.0;
+                    self.anims.t_spin_flash = 1.0;
                 }
                 if lines_cleared > 0 {
                     let cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
                     let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
                     let piece_row = pre_piece.row + max_dr;
-                    if self.effect_flags.line_clear_particles {
+                    if self.effects.flags.line_clear_particles {
                         self.spawn_line_clear_particles(lines_cleared, piece_row);
                     }
                     // Shatter fragments for cleared rows (tick path)
-                    if self.effect_flags.clearing_flash {
-                        self.spawn_shatter_for_row_range(piece_row - lines_cleared as i32 + 1, lines_cleared);
+                    if self.effects.flags.clearing_flash {
+                        self.anims.spawn_shatter_for_row_range(piece_row - lines_cleared as i32 + 1, lines_cleared);
                     }
-                    if self.effect_flags.camera_shake {
+                    if self.effects.flags.camera_shake {
                         self.camera.trigger_shake((lines_cleared as f32 * 0.3).min(1.0));
                     }
-                    if self.effect_flags.grid_distortion {
+                    if self.effects.flags.grid_distortion {
                         let cx = pre_piece.col as f32;
                         let cy = piece_row as f32;
-                        self.grid_lines.add_force(cx, cy, lines_cleared as f32 * 0.6);
+                        self.effects.grid_lines.add_force(cx, cy, lines_cleared as f32 * 0.6);
                     }
                 }
                 // Secondary game over check: if new piece spawned in vanish zone
@@ -707,10 +406,9 @@ impl GameWorld {
             // If game over, restart
             if self.session.state == GameState::GameOver {
                 self.session = GameSession::new();
-                self.clearing_cells.clear();
-                self.bg_rings.clear();
+                self.anims.clear();
                 self.danger_level = 0.0;
-                self.level_up_flash = 0.0;
+                self.anims.level_up_flash = 0.0;
                 self.last_level = 1;
                 self.camera.reset();
             }
@@ -736,10 +434,9 @@ impl GameWorld {
             // Auto-restart on game over in demo mode
             if self.session.state == GameState::GameOver {
                 self.session = GameSession::new();
-                self.clearing_cells.clear();
-                self.bg_rings.clear();
+                self.anims.clear();
                 self.danger_level = 0.0;
-                self.level_up_flash = 0.0;
+                self.anims.level_up_flash = 0.0;
                 self.last_level = 1;
                 self.camera.reset();
             }
@@ -757,22 +454,18 @@ impl GameWorld {
             themes::default_theme,
             themes::water_theme,
             themes::space_theme,
+            themes::flow_theme,
+            themes::fluid_theme,
+            themes::crystal_theme,
             themes::debug_theme,
         ];
         self.theme_index = (self.theme_index + 1) % theme_fns.len();
         let theme = theme_fns[self.theme_index]();
-        self.effect_flags = theme.effects.clone();
+        self.effects.apply_theme(&theme);
         self.bindings = theme.bindings.clone();
         self.color_grade = theme.color_grade;
         self.piece_colors = theme.piece_colors;
-        self.beat_rings = BeatRings::new(theme.rings);
-        self.hex_background = HexBackground::new(theme.hex);
-        self.fft_vis = FftVisualizer::new(theme.fft);
-        self.grid_lines = GridLines::new(theme.grid);
         self.camera = CameraReactor::new(theme.camera);
-        self.particles.particles.clear();
-        self.fireworks.shells_only = false;
-        self.fireworks.bursts_only = theme.name == "Debug";
         self.toast_text = format!("THEME: {}", theme.name.to_uppercase());
         self.toast_timer = 2.0;
         self.save_settings();
@@ -837,10 +530,8 @@ impl GameWorld {
             // Restart fresh game when exiting demo
             self.session = GameSession::new();
             self.last_tick = Instant::now();
-            self.clearing_cells.clear();
-            self.bg_rings.clear();
+            self.anims.clear();
             self.danger_level = 0.0;
-            self.level_up_flash = 0.0;
             self.last_level = 1;
             self.camera.reset();
         }
@@ -883,7 +574,7 @@ impl GameWorld {
                             cleared_rows.push(row as i32);
                             for col in 0..WIDTH {
                                 if let CellState::Occupied(ti) = self.session.grid.cells[row][col] {
-                                    self.clearing_cells.push(ClearingCell {
+                                    self.anims.clearing_cells.push(ClearingCell {
                                         col: col as i32, row: row as i32,
                                         timer: LINE_CLEAR_DURATION,
                                         _color: rgba_to_f32(self.themed_piece_color(ti)),
@@ -895,7 +586,7 @@ impl GameWorld {
                     }
                     // Shatter fragments for cleared rows (hard drop path)
                     for &row in &cleared_rows {
-                        self.spawn_shatter_for_row_range(row, 1);
+                        self.anims.spawn_shatter_for_row_range(row, 1);
                     }
                     // Undo simulation
                     for &(dr, dc) in &cells {
@@ -914,7 +605,7 @@ impl GameWorld {
                             let sr = start_row + dr;
                             let er = land_row + dr;
                             if col >= 0 && col < WIDTH as i32 {
-                                self.drop_trails.push(DropTrail {
+                                self.anims.drop_trails.push(DropTrail {
                                     col,
                                     start_row: sr,
                                     end_row: er,
@@ -930,7 +621,7 @@ impl GameWorld {
                         let r = land_row + dr;
                         let c = piece_col + dc;
                         if r >= 0 && r < HEIGHT as i32 {
-                            self.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
+                            self.anims.settle_cells.push(SettleCell { col: c, row: r, timer: SETTLE_DURATION });
                         }
                     }
 
@@ -940,15 +631,23 @@ impl GameWorld {
                         TickResult::PieceLocked { lines_cleared } => lines_cleared,
                         _ => 0,
                     };
-                    if lines > 0 && self.effect_flags.line_clear_particles {
+                    if lines > 0 && self.effects.flags.line_clear_particles {
                         self.spawn_line_clear_particles(lines, land_bottom);
                     }
-                    if self.effect_flags.camera_shake {
+                    if self.effects.flags.camera_shake {
                         self.camera.trigger_shake((0.2 + lines as f32 * 0.25).min(1.0));
                     }
-                    if self.effect_flags.grid_distortion {
+                    if self.effects.flags.flow_field {
+                        // Shockwave at center of landing area
+                        let drop_x = piece_col as f32 + 0.5;
+                        let drop_y = land_bottom as f32 + 0.5;
+                        let drop_dist = (land_row - start_row).max(0) as f32;
+                        let intensity = 0.5 + (drop_dist / 20.0).min(1.0) * 0.5;
+                        self.effects.flow_field.trigger_drop(drop_x, drop_y, intensity);
+                    }
+                    if self.effects.flags.grid_distortion {
                         let cx = self.session.active_piece.col as f32;
-                        self.grid_lines.add_force(cx, land_bottom as f32, 0.3 + lines as f32 * 0.4);
+                        self.effects.grid_lines.add_force(cx, land_bottom as f32, 0.3 + lines as f32 * 0.4);
                     }
                     // Secondary game over check for vanish zone spawn
                     if self.session.active_piece.row < 0 && self.session.state == GameState::Playing {
@@ -980,10 +679,8 @@ impl GameWorld {
                     // Reset game state without restarting audio
                     self.session = GameSession::new();
                     self.last_tick = Instant::now();
-                    self.clearing_cells.clear();
-                    self.bg_rings.clear();
+                    self.anims.clear();
                     self.danger_level = 0.0;
-                    self.level_up_flash = 0.0;
                     self.last_level = 1;
                     self.camera.reset();
                     }
@@ -1009,41 +706,10 @@ impl GameWorld {
             _ => [1.0, 0.3, 0.8, 1.0], // tetris — magenta burst
         };
         for _ in 0..lines {
-            self.particles.spawn_line_clear(top_y, clear_height, bx, bw, color);
+            self.effects.particles.spawn_line_clear(top_y, clear_height, bx, bw, color);
         }
     }
 
-    fn spawn_shatter_for_row_range(&mut self, top_row: i32, lines: u32) {
-        // Use a simple deterministic scatter based on cell position
-        let mut seed = (top_row as u32).wrapping_mul(31).wrapping_add(lines * 17);
-        let pseudo = |s: &mut u32| -> f32 {
-            *s = s.wrapping_mul(1103515245).wrapping_add(12345);
-            ((*s >> 16) & 0x7FFF) as f32 / 32767.0
-        };
-        for row in top_row..(top_row + lines as i32) {
-            if row < 0 || row >= HEIGHT as i32 { continue; }
-            for col in 0..WIDTH as i32 {
-                let cx = col as f32 + 0.5;
-                let cy = row as f32 + 0.5;
-                let frags = 3 + (pseudo(&mut seed) * 2.0) as u32; // 3-4 fragments per cell
-                for _ in 0..frags {
-                    let angle = pseudo(&mut seed) * std::f32::consts::TAU;
-                    let speed = 2.0 + pseudo(&mut seed) * 4.0;
-                    let size = 0.1 + pseudo(&mut seed) * 0.2;
-                    self.shatter_fragments.push(ShatterFragment {
-                        x: cx,
-                        y: cy,
-                        vx: angle.cos() * speed,
-                        vy: angle.sin() * speed,
-                        size,
-                        color: [1.0, 1.0, 1.0, 0.9],
-                        timer: SHATTER_DURATION,
-                        max_life: SHATTER_DURATION,
-                    });
-                }
-            }
-        }
-    }
 
     /// Project a world-space point to screen pixel coords using the VP matrix.
     fn project_to_screen(vp: &[[f32; 4]; 4], point: [f32; 3], win_w: f32, win_h: f32) -> [f32; 2] {
