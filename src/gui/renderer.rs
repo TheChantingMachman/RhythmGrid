@@ -584,6 +584,14 @@ const SAMPLE_COUNT: u32 = 4;
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const REVEALAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
+/// Draw command for a GPU effect rendering in the OIT pass.
+/// The renderer sets scene uniforms at group 0; this provides the rest.
+pub struct GpuOitDrawCmd<'a> {
+    pub pipeline: &'a wgpu::RenderPipeline,
+    pub bind_group_1: &'a wgpu::BindGroup,
+    pub instances: u32,
+}
+
 pub struct GpuState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -610,6 +618,8 @@ pub struct GpuState {
     mandelbrot_uniform_buffer: wgpu::Buffer,
     mandelbrot_bgl: wgpu::BindGroupLayout,
     pub mandelbrot_active: bool,
+    // Scene bind group + layout (exposed for GpuEffect pipeline creation)
+    scene_bind_group_layout: wgpu::BindGroupLayout,
     // Persistent GPU buffers — reused across frames, grown as needed
     opaque_bufs: GpuBufferPair,
     transparent_bufs: GpuBufferPair,
@@ -1005,6 +1015,7 @@ impl GpuState {
             oit_accum_msaa, oit_accum_resolve, oit_reveal_msaa, oit_reveal_resolve,
             oit_composite_bgl,
             sampler, post_process, uniform_buffer, scene_bind_group,
+            scene_bind_group_layout,
             mandelbrot_pipeline, mandelbrot_uniform_buffer, mandelbrot_bgl,
             mandelbrot_active: false,
             opaque_bufs, transparent_bufs, hud_bufs,
@@ -1108,6 +1119,9 @@ impl GpuState {
     /// Access the GPU queue (for submitting compute work and buffer uploads).
     pub fn queue(&self) -> &wgpu::Queue { &self.queue }
 
+    /// Access the scene bind group layout (for GpuEffect pipeline creation).
+    pub fn scene_bgl(&self) -> &wgpu::BindGroupLayout { &self.scene_bind_group_layout }
+
     /// Submit a command encoder (for compute dispatches from GpuEffects).
     #[allow(dead_code)]
     pub fn submit(&self, encoder: wgpu::CommandEncoder) {
@@ -1128,10 +1142,12 @@ impl GpuState {
 
     /// Render scene (opaque + transparent 3D) and HUD (2D overlay).
     /// Call update_uniforms with the 3D camera before this.
+    /// `gpu_oit` provides an optional GPU effect draw command for the OIT pass.
     pub fn render(&mut self,
                   opaque_verts: &[Vertex], opaque_indices: &[u32],
                   transparent_verts: &[Vertex], transparent_indices: &[u32],
-                  hud_verts: &[Vertex], hud_indices: &[u32]) {
+                  hud_verts: &[Vertex], hud_indices: &[u32],
+                  gpu_oit: Option<&GpuOitDrawCmd>) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
             Err(_) => return,
@@ -1219,7 +1235,8 @@ impl GpuState {
         }
 
         // Pass 2: OIT Accumulation (transparent geometry → accum + revealage targets)
-        if !transparent_indices.is_empty() {
+        let has_transparent = !transparent_indices.is_empty() || gpu_oit.is_some();
+        if has_transparent {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1254,11 +1271,21 @@ impl GpuState {
                     }),
                     ..Default::default()
                 });
-                pass.set_pipeline(&self.oit_accum_pipeline);
-                pass.set_bind_group(0, &self.scene_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.transparent_bufs.vertex.slice(..));
-                pass.set_index_buffer(self.transparent_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..transparent_indices.len() as u32, 0, 0..1);
+                // CPU transparent geometry
+                if !transparent_indices.is_empty() {
+                    pass.set_pipeline(&self.oit_accum_pipeline);
+                    pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.transparent_bufs.vertex.slice(..));
+                    pass.set_index_buffer(self.transparent_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..transparent_indices.len() as u32, 0, 0..1);
+                }
+                // GPU effect particles (same OIT pass, different pipeline)
+                if let Some(cmd) = gpu_oit {
+                    pass.set_pipeline(cmd.pipeline);
+                    pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                    pass.set_bind_group(1, cmd.bind_group_1, &[]);
+                    pass.draw(0..6, 0..cmd.instances);
+                }
             }
             self.queue.submit(std::iter::once(encoder.finish()));
 

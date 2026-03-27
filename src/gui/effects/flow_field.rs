@@ -4,8 +4,9 @@
 // hard drops create expanding shockwaves.
 // Operates in world space (board is x: 0..10, y: 0..-20, z: 0).
 
-use super::{AudioEffect, AudioFrame, RenderContext, RenderPass};
+use super::{AudioEffect, AudioFrame, GpuEffect, RenderContext, RenderPass};
 use super::super::drawing::Vertex;
+use super::super::renderer::GpuOitDrawCmd;
 
 /// 3D value noise — hash-based, no dependencies.
 fn noise3d(x: f32, y: f32, z: f32) -> f32 {
@@ -253,6 +254,9 @@ pub struct FlowField {
     assembled_rotation: [f32; 3],
     assembled_center: [f32; 3],
     capture_cooldown: f32,  // seconds to skip capture after transition
+    // GPU compute port
+    gpu: Option<FlowFieldGpu>,
+    gpu_free_all_stuck: bool,
 }
 
 // World-space bounds (board: x 0..10, y 0..-20)
@@ -329,7 +333,20 @@ impl FlowField {
             assembled_rotation: [0.0; 3],
             assembled_center: [5.0, -10.0, -2.0],
             capture_cooldown: 0.0,
+            gpu: None,
+            gpu_free_all_stuck: false,
         }
+    }
+
+    /// Get GPU draw command for the OIT render pass (None if GPU inactive or no particles).
+    pub fn gpu_draw_cmd(&self) -> Option<GpuOitDrawCmd<'_>> {
+        let gpu = self.gpu.as_ref()?;
+        if gpu.active_count == 0 { return None; }
+        Some(GpuOitDrawCmd {
+            pipeline: &gpu.render_pipeline,
+            bind_group_1: &gpu.render_bind_group,
+            instances: gpu.active_count,
+        })
     }
 
     pub fn set_piece_cells(&mut self, cells: Vec<(f32, f32)>) {
@@ -359,7 +376,7 @@ impl FlowField {
             let z = SPAWN_Z_MIN + self.rand_f32().abs() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
             let life = 6.0 + self.rand_f32().abs() * 8.0;
             let hue = self.centroid + self.rand_f32() * 0.4; // wider range — mix of teal and magenta
-            let size = 0.08 + self.rand_f32().abs() * 0.12;
+            let size = 0.04 + self.rand_f32().abs() * 0.06;
             self.particles.push(FlowParticle {
                 x, y, z, life, max_life: life, hue, size,
                 trail_x: x, trail_y: y, trail_z: z,
@@ -393,12 +410,12 @@ impl AudioEffect for FlowField {
         // Boost spawn rate to compensate for stuck particles leaving the field sparse
         let stuck_count = self.particles.iter().filter(|p| p.stuck_to >= 0).count();
         let compensation = 1.0 + stuck_count as f32 * 0.1; // 10% more per stuck particle
-        let spawn_rate = (32.0 + self.energy * 160.0) * compensation;
+        let spawn_rate = (80.0 + self.energy * 400.0) * compensation;
         self.spawn_accum += spawn_rate * audio.dt;
 
         for band in 0..7 {
             if audio.band_beats[band] > 0.9 {
-                self.spawn_accum += 60.0;
+                self.spawn_accum += 150.0;
             }
         }
     }
@@ -493,7 +510,28 @@ impl AudioEffect for FlowField {
 pub fn tick_particles(field: &mut FlowField, dt: f32) {
     let to_spawn = field.spawn_accum as usize;
     if to_spawn > 0 {
-        field.spawn(to_spawn.min(30));
+        let count = to_spawn.min(80);
+        if field.gpu.is_some() {
+            // Generate particle data using field's RNG, then push to GPU pending list
+            let mut new_particles = Vec::with_capacity(count);
+            for _ in 0..count {
+                let x = SPAWN_X_MIN + field.rand_f32().abs() * (SPAWN_X_MAX - SPAWN_X_MIN);
+                let y = SPAWN_Y_MIN + field.rand_f32().abs() * (SPAWN_Y_MAX - SPAWN_Y_MIN);
+                let z = SPAWN_Z_MIN + field.rand_f32().abs() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
+                let life = 6.0 + field.rand_f32().abs() * 8.0;
+                let hue = field.centroid + field.rand_f32() * 0.4;
+                let size = 0.04 + field.rand_f32().abs() * 0.06;
+                new_particles.push(ParticleGpu {
+                    pos_life: [x, y, z, life],
+                    trail_maxlife: [x, y, z, life],
+                    attrs: [hue, size, -1.0, 0.0],
+                    stuck_offset: [0.0; 4],
+                });
+            }
+            field.gpu.as_mut().unwrap().pending_spawns.extend(new_particles);
+        } else {
+            field.spawn(count);
+        }
         field.spawn_accum -= to_spawn as f32;
     }
 
@@ -681,6 +719,7 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
                 field.capture_cooldown = 0.75;
                 field.capture_phase = CapturePhase::Assembled;
                 field.phase_timer = 50.0;
+                field.gpu_free_all_stuck = true;
             }
         }
         CapturePhase::Assembled => {
@@ -782,6 +821,7 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
             for t in &mut field.tetras {
                 t.assembled_verts = None;
             }
+            field.gpu_free_all_stuck = true;
             // Free all stuck particles — zero velocity, ghost lingers
             for p in &mut field.particles {
                 if p.stuck_to >= 0 {
@@ -824,4 +864,718 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
     }
 
     field.particles.retain(|p| p.life > 0.0 || p.stuck_to >= 0);
+}
+
+// ===== GPU Compute Port =====
+
+// Must exceed peak_spawn_rate × max_particle_lifetime to prevent wrapping
+// from overwriting stuck particles. Peak ~2800/sec × 94s ≈ 263K. 16MB GPU buffer.
+const MAX_PARTICLES: usize = 262144;
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ParticleGpu {
+    pos_life: [f32; 4],      // xyz = position, w = life
+    trail_maxlife: [f32; 4], // xyz = trail position, w = max_life
+    attrs: [f32; 4],         // x = hue, y = size, z = stuck_to (as f32, -1=free), w = pad
+    stuck_offset: [f32; 4],  // xyz = offset in tetra local space, w = pad
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct FlowUniformsGpu {
+    time: f32,
+    dt: f32,
+    noise_scale: f32,
+    speed: f32,
+    active_count: u32,
+    capture_phase: u32,
+    free_all_stuck: u32,
+    capture_enabled: u32,
+    assembled_center: [f32; 4],
+    assembled_rotation: [f32; 4],
+    phase_timer: f32,
+    _pad: [f32; 3],
+    tetra_verts: [[f32; 4]; 20],
+    tetra_centers: [[f32; 4]; 5],
+    tetra_rotations: [[f32; 4]; 5],
+}
+
+const FLOW_COMPUTE_WGSL: &str = r#"
+struct FlowUniforms {
+    time: f32,
+    dt: f32,
+    noise_scale: f32,
+    speed: f32,
+    active_count: u32,
+    capture_phase: u32,
+    free_all_stuck: u32,
+    capture_enabled: u32,
+    assembled_center: vec4<f32>,
+    assembled_rotation: vec4<f32>,
+    phase_timer: f32,
+    _pad0: f32, _pad1: f32, _pad2: f32,
+    tetra_verts: array<vec4<f32>, 20>,
+    tetra_centers: array<vec4<f32>, 5>,
+    tetra_rotations: array<vec4<f32>, 5>,
+};
+
+struct Particle {
+    pos_life: vec4<f32>,
+    trail_maxlife: vec4<f32>,
+    attrs: vec4<f32>,
+    stuck_offset: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> u: FlowUniforms;
+@group(0) @binding(1) var<storage, read_write> velocity_grid: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read_write> particles: array<Particle>;
+
+const GRID_X: u32 = 32u;
+const GRID_Y: u32 = 32u;
+const GRID_Z: u32 = 8u;
+const X_MIN: f32 = -12.0;
+const X_MAX: f32 = 22.0;
+const Y_MIN: f32 = -25.0;
+const Y_MAX: f32 = 5.0;
+const Z_MIN: f32 = -4.0;
+const Z_MAX: f32 = -0.5;
+
+fn hash3d(px: i32, py: i32, pz: i32) -> f32 {
+    var h = bitcast<u32>(px) * 374761393u + bitcast<u32>(py) * 668265263u + bitcast<u32>(pz) * 1274126177u;
+    h = h ^ (h >> 13u);
+    h = h * 1103515245u;
+    return f32(h) / 4294967295.0;
+}
+
+fn noise3d(x: f32, y: f32, z: f32) -> f32 {
+    let ix = i32(floor(x));
+    let iy = i32(floor(y));
+    let iz = i32(floor(z));
+    let fx = x - floor(x);
+    let fy = y - floor(y);
+    let fz = z - floor(z);
+    let ux = fx * fx * (3.0 - 2.0 * fx);
+    let uy = fy * fy * (3.0 - 2.0 * fy);
+    let uz = fz * fz * (3.0 - 2.0 * fz);
+
+    let n000 = hash3d(ix, iy, iz);
+    let n100 = hash3d(ix + 1, iy, iz);
+    let n010 = hash3d(ix, iy + 1, iz);
+    let n110 = hash3d(ix + 1, iy + 1, iz);
+    let n001 = hash3d(ix, iy, iz + 1);
+    let n101 = hash3d(ix + 1, iy, iz + 1);
+    let n011 = hash3d(ix, iy + 1, iz + 1);
+    let n111 = hash3d(ix + 1, iy + 1, iz + 1);
+
+    let nx00 = n000 + ux * (n100 - n000);
+    let nx10 = n010 + ux * (n110 - n010);
+    let nx01 = n001 + ux * (n101 - n001);
+    let nx11 = n011 + ux * (n111 - n011);
+    let nxy0 = nx00 + uy * (nx10 - nx00);
+    let nxy1 = nx01 + uy * (nx11 - nx01);
+    return nxy0 + uz * (nxy1 - nxy0);
+}
+
+fn curl_noise_3d(x: f32, y: f32, z: f32, scale: f32, time: f32) -> vec3<f32> {
+    let eps = 0.01;
+    let sx = x * scale + time * 0.1;
+    let sy = y * scale + time * 0.07;
+    let sz = z * scale + time * 0.05;
+
+    // Three decorrelated noise fields (offset by large constants)
+    let dn3_dy = (noise3d(sx + 71.235, sy + eps + 13.579, sz + 93.147) - noise3d(sx + 71.235, sy - eps + 13.579, sz + 93.147)) / (2.0 * eps);
+    let dn2_dz = (noise3d(sx + 31.416, sy + 47.853, sz + eps + 12.734) - noise3d(sx + 31.416, sy + 47.853, sz - eps + 12.734)) / (2.0 * eps);
+    let dn1_dz = (noise3d(sx, sy, sz + eps) - noise3d(sx, sy, sz - eps)) / (2.0 * eps);
+    let dn3_dx = (noise3d(sx + eps + 71.235, sy + 13.579, sz + 93.147) - noise3d(sx - eps + 71.235, sy + 13.579, sz + 93.147)) / (2.0 * eps);
+    let dn2_dx = (noise3d(sx + eps + 31.416, sy + 47.853, sz + 12.734) - noise3d(sx - eps + 31.416, sy + 47.853, sz + 12.734)) / (2.0 * eps);
+    let dn1_dy = (noise3d(sx, sy + eps, sz) - noise3d(sx, sy - eps, sz)) / (2.0 * eps);
+
+    return vec3<f32>(dn3_dy - dn2_dz, dn1_dz - dn3_dx, dn2_dx - dn1_dy);
+}
+
+// ---- Velocity grid compute ----
+@compute @workgroup_size(4, 4, 4)
+fn cs_velocity(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (id.x >= GRID_X || id.y >= GRID_Y || id.z >= GRID_Z) { return; }
+
+    let world_x = X_MIN + f32(id.x) / f32(GRID_X - 1u) * (X_MAX - X_MIN);
+    let world_y = Y_MIN + f32(id.y) / f32(GRID_Y - 1u) * (Y_MAX - Y_MIN);
+    let world_z = Z_MIN + f32(id.z) / f32(GRID_Z - 1u) * (Z_MAX - Z_MIN);
+
+    let v1 = curl_noise_3d(world_x, world_y, world_z, u.noise_scale, u.time);
+    let v2 = curl_noise_3d(world_x, world_y, world_z, u.noise_scale * 2.3, u.time * 1.7);
+    var vel = (v1 + v2 * 0.4) * u.speed;
+    vel.z *= 0.5;
+
+    let idx = id.x + id.y * GRID_X + id.z * GRID_X * GRID_Y;
+    velocity_grid[idx] = vec4<f32>(vel, 0.0);
+}
+
+// ---- Helpers ----
+fn sample_velocity(pos: vec3<f32>) -> vec3<f32> {
+    let gx = clamp((pos.x - X_MIN) / (X_MAX - X_MIN) * f32(GRID_X - 1u), 0.0, f32(GRID_X - 2u));
+    let gy = clamp((pos.y - Y_MIN) / (Y_MAX - Y_MIN) * f32(GRID_Y - 1u), 0.0, f32(GRID_Y - 2u));
+    let gz = clamp((pos.z - Z_MIN) / (Z_MAX - Z_MIN) * f32(GRID_Z - 1u), 0.0, f32(GRID_Z - 2u));
+
+    let ix = u32(floor(gx));
+    let iy = u32(floor(gy));
+    let iz = u32(floor(gz));
+    let fx = gx - floor(gx);
+    let fy = gy - floor(gy);
+    let fz = gz - floor(gz);
+
+    let i000 = ix + iy * GRID_X + iz * GRID_X * GRID_Y;
+    let v000 = velocity_grid[i000].xyz;
+    let v100 = velocity_grid[i000 + 1u].xyz;
+    let v010 = velocity_grid[i000 + GRID_X].xyz;
+    let v110 = velocity_grid[i000 + GRID_X + 1u].xyz;
+    let v001 = velocity_grid[i000 + GRID_X * GRID_Y].xyz;
+    let v101 = velocity_grid[i000 + GRID_X * GRID_Y + 1u].xyz;
+    let v011 = velocity_grid[i000 + GRID_X * GRID_Y + GRID_X].xyz;
+    let v111 = velocity_grid[i000 + GRID_X * GRID_Y + GRID_X + 1u].xyz;
+
+    let vx0 = mix(v000, v100, vec3(fx));
+    let vx1 = mix(v010, v110, vec3(fx));
+    let vx2 = mix(v001, v101, vec3(fx));
+    let vx3 = mix(v011, v111, vec3(fx));
+    let vy0 = mix(vx0, vx1, vec3(fy));
+    let vy1 = mix(vx2, vx3, vec3(fy));
+    return mix(vy0, vy1, vec3(fz));
+}
+
+fn rotate_xyz(p: vec3<f32>, rot: vec3<f32>) -> vec3<f32> {
+    let sx = sin(rot.x); let cx = cos(rot.x);
+    let sy = sin(rot.y); let cy = cos(rot.y);
+    let sz = sin(rot.z); let cz = cos(rot.z);
+    let y1 = p.y * cx - p.z * sx;
+    let z1 = p.y * sx + p.z * cx;
+    let x2 = p.x * cy + z1 * sy;
+    let z2 = -p.x * sy + z1 * cy;
+    let x3 = x2 * cz - y1 * sz;
+    let y3 = x2 * sz + y1 * cz;
+    return vec3(x3, y3, z2);
+}
+
+fn inverse_rotate(p: vec3<f32>, rot: vec3<f32>) -> vec3<f32> {
+    let sx = sin(-rot.x); let cx = cos(-rot.x);
+    let sy = sin(-rot.y); let cy = cos(-rot.y);
+    let sz = sin(-rot.z); let cz = cos(-rot.z);
+    let x1 = p.x * cz - p.y * sz;
+    let y1 = p.x * sz + p.y * cz;
+    let x2 = x1 * cy + p.z * sy;
+    let z2 = -x1 * sy + p.z * cy;
+    let y3 = y1 * cx - z2 * sx;
+    let z3 = y1 * sx + z2 * cx;
+    return vec3(x2, y3, z3);
+}
+
+fn point_in_tetra(p: vec3<f32>, ti: u32) -> bool {
+    let base = ti * 4u;
+    let v0 = u.tetra_verts[base].xyz;
+    let v1 = u.tetra_verts[base + 1u].xyz;
+    let v2 = u.tetra_verts[base + 2u].xyz;
+    let v3 = u.tetra_verts[base + 3u].xyz;
+
+    // Face 0: v0,v1,v2 — opposite v3
+    var ab = v1 - v0; var ac = v2 - v0; var n = cross(ab, ac);
+    var d_side = dot(v3 - v0, n); var p_side = dot(p - v0, n);
+    if (d_side * p_side < 0.0) { return false; }
+
+    // Face 1: v0,v2,v3 — opposite v1
+    ab = v2 - v0; ac = v3 - v0; n = cross(ab, ac);
+    d_side = dot(v1 - v0, n); p_side = dot(p - v0, n);
+    if (d_side * p_side < 0.0) { return false; }
+
+    // Face 2: v0,v1,v3 — opposite v2
+    ab = v1 - v0; ac = v3 - v0; n = cross(ab, ac);
+    d_side = dot(v2 - v0, n); p_side = dot(p - v0, n);
+    if (d_side * p_side < 0.0) { return false; }
+
+    // Face 3: v1,v2,v3 — opposite v0
+    ab = v2 - v1; ac = v3 - v1; n = cross(ab, ac);
+    d_side = dot(v0 - v1, n); p_side = dot(p - v1, n);
+    if (d_side * p_side < 0.0) { return false; }
+
+    return true;
+}
+
+// ---- Particle advection compute ----
+@compute @workgroup_size(64)
+fn cs_advect(@builtin(global_invocation_id) id: vec3<u32>) {
+    let idx = id.x;
+    if (idx >= u.active_count) { return; }
+
+    var p = particles[idx];
+    let life = p.pos_life.w;
+    let stuck_to = i32(p.attrs.z);
+
+    if (life <= 0.0 && stuck_to < 0) { return; }
+
+    // Free all stuck particles (phase transition signal from CPU)
+    if (u.free_all_stuck == 1u && stuck_to >= 0) {
+        p.attrs.z = -1.0;
+        p.trail_maxlife = vec4(p.pos_life.xyz, 6.0);
+        p.pos_life.w = 6.0;
+        particles[idx] = p;
+        return;
+    }
+
+    // Save trail
+    p.trail_maxlife = vec4(p.pos_life.xyz, p.trail_maxlife.w);
+
+    if (stuck_to >= 0) {
+        let ti = u32(stuck_to);
+        let offset = p.stuck_offset.xyz;
+        if (u.capture_phase == 2u) {
+            let rotated = rotate_xyz(offset, u.assembled_rotation.xyz);
+            p.pos_life = vec4(u.assembled_center.xyz + rotated, p.pos_life.w);
+        } else {
+            let rotated = rotate_xyz(offset, u.tetra_rotations[ti].xyz);
+            p.pos_life = vec4(u.tetra_centers[ti].xyz + rotated, p.pos_life.w);
+        }
+        p.trail_maxlife = vec4(p.pos_life.xyz, p.trail_maxlife.w);
+    } else {
+        var vel = sample_velocity(p.pos_life.xyz);
+
+        // Soft Z boundary
+        if (p.pos_life.z < Z_MIN + 0.5) { vel.z += (Z_MIN + 0.5 - p.pos_life.z) * -2.0; }
+        if (p.pos_life.z > Z_MAX - 0.2) { vel.z += (Z_MAX - 0.2 - p.pos_life.z) * -2.0; }
+
+        p.pos_life = vec4(p.pos_life.xyz + vel * u.dt, p.pos_life.w - u.dt);
+
+        // Tetra capture
+        if (u.capture_enabled == 1u && p.pos_life.w > 0.0) {
+            for (var ti = 0u; ti < 5u; ti++) {
+                if (point_in_tetra(p.pos_life.xyz, ti)) {
+                    p.attrs.z = f32(ti);
+                    if (u.capture_phase == 2u) {
+                        let rel = p.pos_life.xyz - u.assembled_center.xyz;
+                        p.stuck_offset = vec4(inverse_rotate(rel, u.assembled_rotation.xyz), 0.0);
+                    } else {
+                        let rel = p.pos_life.xyz - u.tetra_centers[ti].xyz;
+                        p.stuck_offset = vec4(inverse_rotate(rel, u.tetra_rotations[ti].xyz), 0.0);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    particles[idx] = p;
+}
+"#;
+
+const FLOW_RENDER_WGSL: &str = r#"
+struct SceneUniforms {
+    view_proj: mat4x4<f32>,
+    camera_pos: vec4<f32>,
+};
+
+struct Particle {
+    pos_life: vec4<f32>,
+    trail_maxlife: vec4<f32>,
+    attrs: vec4<f32>,
+    stuck_offset: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+@group(1) @binding(0) var<storage, read> particles: array<Particle>;
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) world_pos: vec3<f32>,
+};
+
+fn hue_to_color(hue: f32) -> vec4<f32> {
+    let h = fract(hue);
+    let r = min(0.1 + 0.5 * abs(sin(h * 3.0)), 0.8);
+    let g = min(0.15 + 0.4 * abs(sin(h * 3.0 + 1.0)), 0.7);
+    let b = min(0.3 + 0.5 * abs(sin(h * 2.0 + 0.5)), 1.0);
+    return vec4(r, g, b, 0.6);
+}
+
+@vertex
+fn vs_particle(
+    @builtin(vertex_index) vid: u32,
+    @builtin(instance_index) iid: u32,
+) -> VertexOutput {
+    var out: VertexOutput;
+    let p = particles[iid];
+    let life = p.pos_life.w;
+    let max_life = p.trail_maxlife.w;
+    let stuck_to = i32(p.attrs.z);
+
+    // Dead particle — degenerate triangle behind camera
+    if (life <= 0.0 && stuck_to < 0) {
+        out.clip_position = vec4(0.0, 0.0, 2.0, 1.0);
+        out.color = vec4(0.0);
+        out.uv = vec2(0.0);
+        out.world_pos = vec3(0.0);
+        return out;
+    }
+
+    let t = clamp(life / max(max_life, 0.001), 0.0, 1.0);
+    var alpha: f32;
+    if (t > 0.9) { alpha = (1.0 - t) * 10.0; } else { alpha = sqrt(t); }
+
+    let base_color = hue_to_color(p.attrs.x);
+    let color = vec4(base_color.rgb, base_color.a * alpha * 0.7);
+    let size = p.attrs.y * 0.5;
+
+    var offsets = array<vec2<f32>, 6>(
+        vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),
+        vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0),
+    );
+    let offset = offsets[vid];
+    let world_pos = vec3(p.pos_life.x + offset.x * size, p.pos_life.y + offset.y * size, p.pos_life.z);
+
+    out.clip_position = scene.view_proj * vec4(world_pos, 1.0);
+    out.color = color;
+    out.uv = offset;
+    out.world_pos = world_pos;
+    return out;
+}
+
+struct OitOutput {
+    @location(0) accum: vec4<f32>,
+    @location(1) revealage: vec4<f32>,
+};
+
+@fragment
+fn fs_particle(in: VertexOutput) -> OitOutput {
+    let dist = length(in.uv);
+    if (dist > 1.0) { discard; }
+    let soft = 1.0 - dist * dist;
+    let alpha = in.color.a * soft;
+    if (alpha < 0.001) { discard; }
+
+    let cam_dist = length(scene.camera_pos.xyz - in.world_pos);
+    let d_norm = clamp(cam_dist / 40.0, 0.0, 1.0);
+    let w = clamp(alpha * max(1e-2, 3e3 * pow(1.0 - d_norm, 4.0)), 1e-2, 3e3);
+
+    var out: OitOutput;
+    out.accum = vec4(in.color.rgb * alpha * w, alpha * w);
+    out.revealage = vec4(alpha, 0.0, 0.0, 0.0);
+    return out;
+}
+"#;
+
+struct FlowFieldGpu {
+    velocity_pipeline: wgpu::ComputePipeline,
+    advect_pipeline: wgpu::ComputePipeline,
+    compute_bind_group: wgpu::BindGroup,
+    render_pipeline: wgpu::RenderPipeline,
+    render_bind_group: wgpu::BindGroup,
+    uniform_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    velocity_grid_buffer: wgpu::Buffer,
+    particle_buffer: wgpu::Buffer,
+    spawn_cursor: usize,
+    active_count: u32,
+    pending_spawns: Vec<ParticleGpu>,
+}
+
+impl FlowFieldGpu {
+    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, scene_bgl: &wgpu::BindGroupLayout) -> Self {
+        // Buffers
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("flow_uniforms"),
+            size: std::mem::size_of::<FlowUniformsGpu>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let velocity_grid_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("flow_velocity_grid"),
+            size: (32 * 32 * 8 * 16) as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let particle_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("flow_particles"),
+            size: (MAX_PARTICLES * std::mem::size_of::<ParticleGpu>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Compute bind group layout + bind group
+        let compute_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("flow_compute_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false, min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false, min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false, min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("flow_compute_bg"),
+            layout: &compute_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: velocity_grid_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: particle_buffer.as_entire_binding() },
+            ],
+        });
+
+        // Compute pipelines
+        let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("flow_compute"),
+            source: wgpu::ShaderSource::Wgsl(FLOW_COMPUTE_WGSL.into()),
+        });
+        let compute_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None, bind_group_layouts: &[&compute_bgl], push_constant_ranges: &[],
+        });
+        let velocity_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("flow_velocity"), layout: Some(&compute_layout),
+            module: &compute_shader, entry_point: Some("cs_velocity"),
+            compilation_options: Default::default(), cache: None,
+        });
+        let advect_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("flow_advect"), layout: Some(&compute_layout),
+            module: &compute_shader, entry_point: Some("cs_advect"),
+            compilation_options: Default::default(), cache: None,
+        });
+
+        // Render bind group layout + bind group
+        let render_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("flow_render_bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0, visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false, min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("flow_render_bg"),
+            layout: &render_bgl,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: particle_buffer.as_entire_binding() }],
+        });
+
+        // Render pipeline (OIT-compatible)
+        let render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("flow_render"),
+            source: wgpu::ShaderSource::Wgsl(FLOW_RENDER_WGSL.into()),
+        });
+        let render_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None, bind_group_layouts: &[scene_bgl, &render_bgl], push_constant_ranges: &[],
+        });
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("flow_particle"),
+            layout: Some(&render_layout),
+            vertex: wgpu::VertexState {
+                module: &render_shader, entry_point: Some("vs_particle"),
+                buffers: &[], compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &render_shader, entry_point: Some("fs_particle"),
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R8Unorm,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 4, mask: !0, alpha_to_coverage_enabled: false,
+            },
+            multiview: None, cache: None,
+        });
+
+        FlowFieldGpu {
+            velocity_pipeline, advect_pipeline, compute_bind_group,
+            render_pipeline, render_bind_group,
+            uniform_buffer, velocity_grid_buffer, particle_buffer,
+            spawn_cursor: 0, active_count: 0,
+            pending_spawns: Vec::with_capacity(64),
+        }
+    }
+
+}
+
+impl FlowField {
+    fn build_gpu_uniforms(&self, dt: f32) -> FlowUniformsGpu {
+        let mut tetra_verts = [[0.0f32; 4]; 20];
+        let mut tetra_centers = [[0.0f32; 4]; 5];
+        let mut tetra_rotations = [[0.0f32; 4]; 5];
+
+        for (ti, t) in self.tetras.iter().enumerate() {
+            tetra_centers[ti] = [t.x, t.y, t.z, 0.0];
+            tetra_rotations[ti] = [t.ax, t.ay, t.az, 0.0];
+
+            if let Some(ref av) = t.assembled_verts {
+                for (vi, v) in av.iter().enumerate() {
+                    tetra_verts[ti * 4 + vi] = [v[0], v[1], v[2], 0.0];
+                }
+            } else {
+                for (vi, v) in TETRA_VERTS.iter().enumerate() {
+                    let scaled = [v[0] * t.scale, v[1] * t.scale, v[2] * t.scale];
+                    let rotated = t.rotate_point(scaled);
+                    tetra_verts[ti * 4 + vi] = [
+                        rotated[0] + t.x, rotated[1] + t.y, rotated[2] + t.z, 0.0,
+                    ];
+                }
+            }
+        }
+
+        let active_count = self.gpu.as_ref().map_or(0, |g| g.active_count);
+        FlowUniformsGpu {
+            time: self.time,
+            dt,
+            noise_scale: 0.15 * self.turbulence,
+            speed: 2.0 + self.energy * 6.0,
+            active_count,
+            capture_phase: match self.capture_phase {
+                CapturePhase::Scatter => 0,
+                CapturePhase::Attract => 1,
+                CapturePhase::Assembled => 2,
+                CapturePhase::Release => 3,
+                CapturePhase::Pause => 4,
+            },
+            free_all_stuck: if self.gpu_free_all_stuck { 1 } else { 0 },
+            capture_enabled: if self.capture_cooldown <= 0.0
+                && (self.capture_phase == CapturePhase::Scatter
+                    || self.capture_phase == CapturePhase::Assembled)
+            { 1 } else { 0 },
+            assembled_center: [
+                self.assembled_center[0], self.assembled_center[1],
+                self.assembled_center[2], 0.0,
+            ],
+            assembled_rotation: [
+                self.assembled_rotation[0], self.assembled_rotation[1],
+                self.assembled_rotation[2], 0.0,
+            ],
+            phase_timer: self.phase_timer,
+            _pad: [0.0; 3],
+            tetra_verts,
+            tetra_centers,
+            tetra_rotations,
+        }
+    }
+}
+
+impl GpuEffect for FlowField {
+    fn create_gpu_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, scene_bgl: &wgpu::BindGroupLayout) {
+        self.gpu = Some(FlowFieldGpu::new(device, queue, scene_bgl));
+    }
+
+    fn compute(&mut self, _device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, audio: &AudioFrame) {
+        let uniforms = self.build_gpu_uniforms(audio.dt);
+        let gpu = self.gpu.as_mut().unwrap();
+
+        // Upload new particles (wrap around — with 49K buffer and ~250 spawns/sec,
+        // wrapping happens after ~196s, far longer than any particle lifetime)
+        let spawns = std::mem::take(&mut gpu.pending_spawns);
+        if !spawns.is_empty() {
+            let particle_size = std::mem::size_of::<ParticleGpu>();
+            for p in &spawns {
+                let slot = gpu.spawn_cursor % MAX_PARTICLES;
+                let offset = (slot * particle_size) as u64;
+                queue.write_buffer(&gpu.particle_buffer, offset, bytemuck::cast_slice(std::slice::from_ref(p)));
+                gpu.spawn_cursor += 1;
+            }
+            gpu.active_count = gpu.active_count.max((gpu.spawn_cursor.min(MAX_PARTICLES)) as u32);
+        }
+
+        // Upload uniforms (with updated active_count)
+        let mut final_uniforms = uniforms;
+        final_uniforms.active_count = gpu.active_count;
+        queue.write_buffer(&gpu.uniform_buffer, 0, bytemuck::cast_slice(&[final_uniforms]));
+
+        // Dispatch velocity grid compute (32/4=8, 32/4=8, 8/4=2)
+        {
+            let mut cpass = encoder.begin_compute_pass(&Default::default());
+            cpass.set_pipeline(&gpu.velocity_pipeline);
+            cpass.set_bind_group(0, &gpu.compute_bind_group, &[]);
+            cpass.dispatch_workgroups(8, 8, 2);
+        }
+
+        // Dispatch particle advection
+        if gpu.active_count > 0 {
+            let mut cpass = encoder.begin_compute_pass(&Default::default());
+            cpass.set_pipeline(&gpu.advect_pipeline);
+            cpass.set_bind_group(0, &gpu.compute_bind_group, &[]);
+            cpass.dispatch_workgroups((gpu.active_count + 63) / 64, 1, 1);
+        }
+
+        self.gpu_free_all_stuck = false;
+    }
+
+    fn render_gpu<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene_bg: &'a wgpu::BindGroup) {
+        let gpu = match self.gpu.as_ref() {
+            Some(g) if g.active_count > 0 => g,
+            _ => return,
+        };
+        pass.set_pipeline(&gpu.render_pipeline);
+        pass.set_bind_group(0, scene_bg, &[]);
+        pass.set_bind_group(1, &gpu.render_bind_group, &[]);
+        pass.draw(0..6, 0..gpu.active_count);
+    }
+
+    fn gpu_active(&self) -> bool { self.gpu.is_some() }
 }

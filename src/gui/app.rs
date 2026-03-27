@@ -37,6 +37,8 @@ impl ApplicationHandler for App {
         }
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let gpu = GpuState::new(window.clone());
+        // Initialize GPU resources for effects that use compute shaders
+        self.world.effects.create_gpu_resources(gpu.device(), gpu.queue(), gpu.scene_bgl());
         self.gpu = Some(gpu);
         self.window = Some(window);
     }
@@ -132,8 +134,9 @@ impl ApplicationHandler for App {
                     }
                 }
                 let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
+                let gpu_draw = self.world.effects.flow_field.gpu_draw_cmd();
                 if let Some(gpu) = &mut self.gpu {
-                    gpu.render(&ov, &oi, &tv, &ti, &hv, &hi);
+                    gpu.render(&ov, &oi, &tv, &ti, &hv, &hi, gpu_draw.as_ref());
                 }
                 if let Some(w) = &self.window {
                     w.request_redraw();

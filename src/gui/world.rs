@@ -48,6 +48,7 @@ pub struct GameWorld {
     pub(super) toast_text: String,
     pub(super) toast_timer: f32,
     pub(super) theme_index: usize,
+    theme_auto_timer: f32,
     pub color_grade: [f32; 3],
     pub(super) music_folder: Option<String>,
     pub saved_window_width: u32,
@@ -163,6 +164,7 @@ impl GameWorld {
             toast_text: String::new(),
             toast_timer: 0.0,
             theme_index,
+            theme_auto_timer: 240.0, // 4 minutes
             color_grade: theme.color_grade,
             music_folder: settings.music_folder.clone(),
             saved_window_width: settings.window_width,
@@ -320,6 +322,18 @@ impl GameWorld {
         self.anims.t_spin_flash = (self.anims.t_spin_flash - dt as f32 * 1.0).max(0.0);
         self.toast_timer = (self.toast_timer - dt as f32).max(0.0);
 
+        // Auto-cycle themes every 4 minutes (skip Debug)
+        self.theme_auto_timer -= dt as f32;
+        if self.theme_auto_timer <= 0.0 {
+            self.theme_auto_timer = 240.0;
+            // Skip Debug theme (index 8) during auto-cycle
+            if self.theme_index != 8 {
+                let next = (self.theme_index + 1) % 8; // 0..7, skips 8 (Debug)
+                self.theme_index = next;
+                self.apply_theme_by_index(next);
+            }
+        }
+
         // Smooth escalation transition
         let target_danger = if escalation_stage(&self.session.grid) == EscalationStage::Danger { 1.0 } else { 0.0 };
         let danger_speed = 2.0; // transition speed
@@ -452,7 +466,14 @@ impl GameWorld {
     }
 
     pub fn cycle_theme(&mut self) {
-        let theme_fns: &[fn() -> themes::VisualTheme] = &[
+        let count = Self::theme_fns().len();
+        self.theme_index = (self.theme_index + 1) % count;
+        self.apply_theme_by_index(self.theme_index);
+        self.theme_auto_timer = 240.0; // reset auto-cycle on manual switch
+    }
+
+    fn theme_fns() -> &'static [fn() -> themes::VisualTheme] {
+        &[
             themes::default_theme,
             themes::water_theme,
             themes::space_theme,
@@ -462,9 +483,11 @@ impl GameWorld {
             themes::fractal_theme,
             themes::pipes_theme,
             themes::debug_theme,
-        ];
-        self.theme_index = (self.theme_index + 1) % theme_fns.len();
-        let theme = theme_fns[self.theme_index]();
+        ]
+    }
+
+    fn apply_theme_by_index(&mut self, idx: usize) {
+        let theme = Self::theme_fns()[idx]();
         self.effects.apply_theme(&theme);
         self.bindings = theme.bindings.clone();
         self.color_grade = theme.color_grade;

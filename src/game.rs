@@ -247,9 +247,9 @@ pub fn escalation_stage(grid: &Grid) -> EscalationStage {
 // --- Gravity ---
 
 pub fn gravity_interval_ms(level: u32) -> u64 {
-    let level = level.max(1);
-    let interval = 1000u64.saturating_sub((level as u64 - 1) * 100);
-    interval.max(100)
+    let level_f = level.max(1) as f64;
+    let interval_secs = (0.8 - (level_f - 1.0) * 0.007).powf(level_f - 1.0);
+    (interval_secs * 1000.0).max(1.0) as u64
 }
 
 pub fn gravity_tick(

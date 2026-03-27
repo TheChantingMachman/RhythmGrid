@@ -75,20 +75,25 @@ pub trait AudioEffect {
 ///    storage buffers, bind groups. The effect owns all its GPU state.
 /// 2. `compute` — called each frame before rendering. Dispatches compute work
 ///    (particle advection, noise field generation, etc.) using the audio frame for reactivity.
-/// 3. `render_gpu` — called during the appropriate render pass. Binds its own vertex/storage
-///    buffers and issues draw calls. The render pass is already begun by the caller.
+/// 3. `render_gpu` — called during the OIT render pass. Binds its own pipeline/buffers
+///    and issues draw calls. The pass is already begun by the caller.
 ///
 /// CPU AudioEffect and GPU GpuEffect coexist — the EffectManager dispatches to the right
 /// interface per effect. Effects can be ported from AudioEffect to GpuEffect one at a time.
-#[allow(dead_code)]
 pub trait GpuEffect {
     /// Allocate GPU resources: compute pipeline, storage buffers, bind groups.
-    fn create_gpu_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue);
+    /// `scene_bgl` is the scene uniform bind group layout (view_proj + camera_pos at group 0).
+    fn create_gpu_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, scene_bgl: &wgpu::BindGroupLayout);
 
     /// Dispatch compute work for this frame.
-    fn compute(&mut self, encoder: &mut wgpu::CommandEncoder, audio: &AudioFrame);
+    fn compute(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, audio: &AudioFrame);
 
-    /// Issue draw calls into the provided render pass.
-    /// The pass is already begun — the effect just needs to bind its pipeline/buffers and draw.
-    fn render_gpu<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>);
+    /// Issue draw calls into the OIT render pass.
+    /// The pass is already begun — set pipeline, bind groups, and draw.
+    /// `scene_bg` contains view_proj + camera_pos and should be set at group 0.
+    #[allow(dead_code)]
+    fn render_gpu<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene_bg: &'a wgpu::BindGroup);
+
+    /// Whether GPU resources have been initialized and the effect should use the GPU path.
+    fn gpu_active(&self) -> bool;
 }

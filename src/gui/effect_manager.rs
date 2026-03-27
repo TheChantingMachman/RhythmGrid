@@ -2,7 +2,7 @@
 // and render dispatch per scene layer. Adding a new effect requires only
 // changes here, not in world.rs or scene.rs.
 
-use super::effects::{AudioEffect, AudioFrame, RenderContext};
+use super::effects::{AudioEffect, AudioFrame, GpuEffect, RenderContext};
 use super::effects::beat_rings::BeatRings;
 use super::effects::hex_background::HexBackground;
 use super::effects::fft_visualizer::FftVisualizer;
@@ -37,6 +37,8 @@ pub struct EffectManager {
     pub pipes: Pipes,
     pub particles: ParticleSystem,
     pub flags: EffectFlags,
+    // Cached GPU init params for reinitializing after theme change
+    gpu_init: Option<(wgpu::Device, wgpu::Queue, wgpu::BindGroupLayout)>,
 }
 
 impl EffectManager {
@@ -57,10 +59,13 @@ impl EffectManager {
             pipes: Pipes::new(),
             particles: ParticleSystem::new(),
             flags: theme.effects.clone(),
+            gpu_init: None,
         }
     }
 
     /// Apply a new theme — recreate parameterized effects, reset state.
+    /// If GPU resources were previously initialized, pass device/queue/scene_bgl
+    /// to reinitialize them for the new theme.
     pub fn apply_theme(&mut self, theme: &VisualTheme) {
         self.beat_rings = BeatRings::new(theme.rings);
         self.hex_background = HexBackground::new(theme.hex);
@@ -75,6 +80,12 @@ impl EffectManager {
         self.pipes = Pipes::new();
         self.fireworks.shells_only = false;
         self.fireworks.bursts_only = theme.name == "Debug";
+        // Reinit GPU resources if we have cached device info
+        if let Some((device, queue, scene_bgl)) = self.gpu_init.clone() {
+            if self.flags.flow_field {
+                self.flow_field.create_gpu_resources(&device, &queue, &scene_bgl);
+            }
+        }
     }
 
     /// Update all effects from the current audio frame.
@@ -129,7 +140,7 @@ impl EffectManager {
         if ef.fire { self.fire.render(verts, indices, ctx); }
         if ef.starfield { self.starfield.render(verts, indices, ctx); }
         if ef.aurora { self.aurora.render(verts, indices, ctx); }
-        if ef.flow_field { self.flow_field.render(verts, indices, ctx); }
+        if ef.flow_field && !self.flow_field.gpu_active() { self.flow_field.render(verts, indices, ctx); }
         if ef.fluid { self.fluid.render(verts, indices, ctx); }
         if ef.crystal { self.crystal.render(verts, indices, ctx); }
         if ef.mandelbrot { self.mandelbrot.render(verts, indices, ctx); }
@@ -163,21 +174,35 @@ impl EffectManager {
 
     /// Initialize GPU resources for any effects that implement GpuEffect.
     /// Call once after GPU device is available (or on device recreation).
-    #[allow(dead_code)]
-    pub fn create_gpu_resources(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue) {
-        // No GPU effects registered yet. When an effect is ported to GpuEffect,
-        // call its create_gpu_resources here:
-        // self.flow_field_gpu.create_gpu_resources(device, queue);
+    pub fn create_gpu_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, scene_bgl: &wgpu::BindGroupLayout) {
+        // Cache for reinit after theme change
+        if self.gpu_init.is_none() {
+            self.gpu_init = Some((device.clone(), queue.clone(), scene_bgl.clone()));
+        }
+        if self.flags.flow_field {
+            self.flow_field.create_gpu_resources(device, queue, scene_bgl);
+        }
     }
 
     /// Dispatch compute work for all GPU effects.
     /// Call once per frame before rendering. Returns true if any compute work was submitted.
-    pub fn dispatch_compute(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, _audio: &AudioFrame) -> bool {
-        // No GPU effects registered yet. When an effect is ported to GpuEffect:
-        // let mut encoder = device.create_command_encoder(&Default::default());
-        // self.flow_field_gpu.compute(&mut encoder, audio);
-        // queue.submit(std::iter::once(encoder.finish()));
-        // return true;
+    pub fn dispatch_compute(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, audio: &AudioFrame) -> bool {
+        if self.flags.flow_field && self.flow_field.gpu_active() {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            self.flow_field.compute(device, queue, &mut encoder, audio);
+            queue.submit(std::iter::once(encoder.finish()));
+            return true;
+        }
         false
+    }
+
+    /// Returns a reference to flow_field if it's GPU-active, for the OIT render pass.
+    #[allow(dead_code)]
+    pub fn gpu_flow_field(&self) -> Option<&FlowField> {
+        if self.flags.flow_field && self.flow_field.gpu_active() {
+            Some(&self.flow_field)
+        } else {
+            None
+        }
     }
 }
