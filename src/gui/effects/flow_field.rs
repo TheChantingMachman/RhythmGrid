@@ -89,6 +89,143 @@ struct FlowParticle {
     trail_x: f32,
     trail_y: f32,
     trail_z: f32,
+    stuck_to: i32,     // -1 = free, 0..3 = stuck to tetra index
+    stuck_offset: [f32; 3], // offset relative to tetra center when stuck
+}
+
+// Regular tetrahedron vertices (unit scale)
+const TETRA_VERTS: [[f32; 3]; 4] = [
+    [ 1.0,  1.0,  1.0],
+    [ 1.0, -1.0, -1.0],
+    [-1.0,  1.0, -1.0],
+    [-1.0, -1.0,  1.0],
+];
+
+// 4 faces: (vertex indices, outward normal, opposite vertex index)
+const TETRA_FACES: [([usize; 3], [f32; 3]); 4] = [
+    ([0, 1, 2], [ 0.577,  0.577, -0.577]),  // opposite vertex: 3
+    ([0, 2, 3], [-0.577,  0.577,  0.577]),   // opposite vertex: 1
+    ([0, 1, 3], [ 0.577, -0.577,  0.577]),   // opposite vertex: 2
+    ([1, 2, 3], [-0.577, -0.577, -0.577]),   // opposite vertex: 0
+];
+// For each face, which vertex of the center tetra is NOT on that face
+const FACE_OPPOSITE: [usize; 4] = [3, 1, 2, 0];
+
+/// Compute the reflected apex for an outer tetra pressed face-to-face.
+/// The apex is the reflection of the center's opposite vertex through the face plane.
+fn reflect_through_face(face_idx: usize) -> [f32; 3] {
+    let opp = TETRA_VERTS[FACE_OPPOSITE[face_idx]];
+    let (_, normal) = TETRA_FACES[face_idx];
+    let face_verts = TETRA_FACES[face_idx].0;
+    let v0 = TETRA_VERTS[face_verts[0]];
+    // Distance from opposite vertex to face plane
+    let d = (opp[0]-v0[0])*normal[0] + (opp[1]-v0[1])*normal[1] + (opp[2]-v0[2])*normal[2];
+    // Reflect: P' = P - 2*d*N
+    [opp[0] - 2.0*d*normal[0], opp[1] - 2.0*d*normal[1], opp[2] - 2.0*d*normal[2]]
+}
+
+/// Get the 4 vertices of the i-th tetra in the assembled configuration (unit scale).
+/// Tetra 0-3: outer tetras (share 3 verts with center, apex reflected outward)
+/// Tetra 4: center tetra (original TETRA_VERTS)
+fn assembled_tetra_verts(i: usize) -> [[f32; 3]; 4] {
+    if i >= 4 {
+        return TETRA_VERTS;
+    }
+    let face_verts = TETRA_FACES[i].0;
+    let apex = reflect_through_face(i);
+    [
+        TETRA_VERTS[face_verts[0]],
+        TETRA_VERTS[face_verts[1]],
+        TETRA_VERTS[face_verts[2]],
+        apex,
+    ]
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum CapturePhase {
+    Scatter,    // tetra tumble independently, collecting particles
+    Attract,    // tetra pull toward each other
+    Assembled,  // big tetrahedron tumbles, collecting more
+    Release,    // disappear, free particles
+    Pause,      // nothing, wait to restart
+}
+
+struct MiniTetra {
+    x: f32, y: f32, z: f32,
+    ax: f32, ay: f32, az: f32,
+    spin: [f32; 3],
+    scale: f32,
+    target_x: f32, target_y: f32, target_z: f32,
+    // Assembled vertex positions (world space) — set during assembled phase
+    assembled_verts: Option<[[f32; 3]; 4]>,
+}
+
+impl MiniTetra {
+    fn rotate_point(&self, p: [f32; 3]) -> [f32; 3] {
+        let (sx, cx) = (self.ax.sin(), self.ax.cos());
+        let (sy, cy) = (self.ay.sin(), self.ay.cos());
+        let (sz, cz) = (self.az.sin(), self.az.cos());
+        let y1 = p[1] * cx - p[2] * sx;
+        let z1 = p[1] * sx + p[2] * cx;
+        let x2 = p[0] * cy + z1 * sy;
+        let z2 = -p[0] * sy + z1 * cy;
+        let x3 = x2 * cz - y1 * sz;
+        let y3 = x2 * sz + y1 * cz;
+        [x3, y3, z2]
+    }
+
+    /// Test if a point is inside a tetrahedron defined by explicit world-space vertices.
+    fn contains_explicit(verts: &[[f32; 3]; 4], px: f32, py: f32, pz: f32) -> bool {
+        let p = [px, py, pz];
+        // For each face (3 vertices), check that the point is on the same side as the 4th vertex
+        let faces: [[usize; 3]; 4] = [[0,1,2],[0,2,3],[0,1,3],[1,2,3]];
+        let opposite: [usize; 4] = [3, 1, 2, 0];
+        for fi in 0..4 {
+            let a = verts[faces[fi][0]];
+            let b = verts[faces[fi][1]];
+            let c = verts[faces[fi][2]];
+            let d = verts[opposite[fi]]; // the vertex not on this face
+            // Normal of face ABC
+            let ab = [b[0]-a[0], b[1]-a[1], b[2]-a[2]];
+            let ac = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
+            let n = [ab[1]*ac[2]-ab[2]*ac[1], ab[2]*ac[0]-ab[0]*ac[2], ab[0]*ac[1]-ab[1]*ac[0]];
+            // Dot product of (D-A) with normal — tells us which side D is on
+            let d_side = (d[0]-a[0])*n[0] + (d[1]-a[1])*n[1] + (d[2]-a[2])*n[2];
+            // Dot product of (P-A) with normal — must be same sign as d_side
+            let p_side = (p[0]-a[0])*n[0] + (p[1]-a[1])*n[1] + (p[2]-a[2])*n[2];
+            if d_side * p_side < 0.0 { return false; }
+        }
+        true
+    }
+
+    /// Test if a point is inside this tetrahedron (in world space, using rotation)
+    fn contains(&self, px: f32, py: f32, pz: f32) -> bool {
+        if let Some(ref verts) = self.assembled_verts {
+            return Self::contains_explicit(verts, px, py, pz);
+        }
+        // Transform point into local space
+        let local = [px - self.x, py - self.y, pz - self.z];
+        // Inverse rotation (negate angles)
+        let (sx, cx) = ((-self.ax).sin(), (-self.ax).cos());
+        let (sy, cy) = ((-self.ay).sin(), (-self.ay).cos());
+        let (sz, cz) = ((-self.az).sin(), (-self.az).cos());
+        // Reverse order: Z, Y, X
+        let x1 = local[0] * cz - local[1] * sz;
+        let y1 = local[0] * sz + local[1] * cz;
+        let x2 = x1 * cy + local[2] * sy;
+        let z2 = -x1 * sy + local[2] * cy;
+        let y3 = y1 * cx - z2 * sx;
+        let z3 = y1 * sx + z2 * cx;
+        let lp = [x2 / self.scale, y3 / self.scale, z3 / self.scale];
+
+        // Check all 4 face planes — point must be on the inside of all
+        for &(face_verts, normal) in &TETRA_FACES {
+            let v = TETRA_VERTS[face_verts[0]]; // use a vertex ON this face
+            let d = (lp[0] - v[0]) * normal[0] + (lp[1] - v[1]) * normal[1] + (lp[2] - v[2]) * normal[2];
+            if d > 0.0 { return false; }
+        }
+        true
+    }
 }
 
 struct Disturbance {
@@ -109,6 +246,12 @@ pub struct FlowField {
     spawn_accum: f32,
     disturbances: Vec<Disturbance>,
     piece_cells: Vec<(f32, f32)>,
+    // Invisible tetrahedron capture system
+    tetras: Vec<MiniTetra>,
+    capture_phase: CapturePhase,
+    phase_timer: f32,
+    assembled_rotation: [f32; 3],
+    assembled_center: [f32; 3],
 }
 
 // World-space bounds (board: x 0..10, y 0..-20)
@@ -122,16 +265,67 @@ const NORMAL: [f32; 3] = [0.0, 0.0, 1.0];
 
 impl FlowField {
     pub fn new() -> Self {
+        // 4 mini tetrahedra — will assemble into a larger one
+        let tetra_scale = 2.8; // 25% smaller than 3.75
+        let spread = 8.0;
+        // 5 tetrahedra: center (#4) + 4 outer ones that press face-to-face.
+        // Each outer tetra's target is opposite the center's face — its apex points outward.
+        // Face normals of center tetra (outward):
+        let face_normals = [
+            [ 0.577,  0.577, -0.577],
+            [-0.577,  0.577,  0.577],
+            [ 0.577, -0.577,  0.577],
+            [-0.577, -0.577, -0.577],
+        ];
+        // Distance from center to face center = inradius ≈ 0.577 for unit tetra.
+        // The outer tetra's center sits at 2 * inradius along the normal from center.
+        let face_offset = 1.15; // distance along normal for face-to-face touching
+        let mut tetra_starts: Vec<[f32; 3]> = Vec::new();
+        let mut tetra_targets: Vec<[f32; 3]> = Vec::new();
+        // Outer tetras 0-3
+        for i in 0..4 {
+            let n = face_normals[i];
+            // Scatter start: spread out
+            tetra_starts.push([n[0] * spread, n[1] * spread, n[2] * spread]);
+            // Assembly target: face-to-face with center
+            tetra_targets.push([n[0] * tetra_scale * face_offset, n[1] * tetra_scale * face_offset, n[2] * tetra_scale * face_offset]);
+        }
+        // Center tetra (#4)
+        tetra_starts.push([0.0, 0.0, 0.0]);
+        tetra_targets.push([0.0, 0.0, 0.0]);
+
+        let tetras = (0..5).map(|i| {
+            let s = tetra_starts[i];
+            let t = tetra_targets[i];
+            MiniTetra {
+                x: 5.0 + s[0],
+                y: -10.0 + s[1],
+                z: -2.0 + s[2],
+                ax: i as f32 * 0.5, ay: i as f32 * 0.7, az: i as f32 * 0.3,
+                spin: [0.1 + i as f32 * 0.03, 0.08 + i as f32 * 0.025, 0.06],
+                scale: tetra_scale,
+                target_x: 5.0 + t[0],
+                target_y: -10.0 + t[1],
+                target_z: -2.0 + t[2],
+                assembled_verts: None,
+            }
+        }).collect();
+
         FlowField {
             particles: Vec::with_capacity(800),
             time: 0.0,
             rng_state: 0xF10EF1E1DCAFE,
             turbulence: 1.0,
             energy: 0.0,
-            centroid: 0.5,
+            centroid: 0.2,
             spawn_accum: 0.0,
             disturbances: Vec::new(),
             piece_cells: Vec::new(),
+            tetras,
+            capture_phase: CapturePhase::Scatter,
+            phase_timer: 32.0, // scatter for 32 seconds first
+            assembled_rotation: [0.0; 3],
+            assembled_center: [5.0, -10.0, -2.0],
         }
     }
 
@@ -166,6 +360,7 @@ impl FlowField {
             self.particles.push(FlowParticle {
                 x, y, z, life, max_life: life, hue, size,
                 trail_x: x, trail_y: y, trail_z: z,
+                stuck_to: -1, stuck_offset: [0.0; 3],
             });
         }
     }
@@ -192,12 +387,15 @@ impl AudioEffect for FlowField {
         self.centroid += (audio.centroid - self.centroid) * 2.0 * audio.dt;
         self.turbulence += (audio.flux * 3.0 + 0.5 - self.turbulence) * 2.0 * audio.dt;
 
-        let spawn_rate = 16.0 + self.energy * 80.0;
+        // Boost spawn rate to compensate for stuck particles leaving the field sparse
+        let stuck_count = self.particles.iter().filter(|p| p.stuck_to >= 0).count();
+        let compensation = 1.0 + stuck_count as f32 * 0.1; // 10% more per stuck particle
+        let spawn_rate = (32.0 + self.energy * 160.0) * compensation;
         self.spawn_accum += spawn_rate * audio.dt;
 
         for band in 0..7 {
             if audio.band_beats[band] > 0.9 {
-                self.spawn_accum += 30.0;
+                self.spawn_accum += 60.0;
             }
         }
     }
@@ -318,11 +516,267 @@ pub fn tick_particles(field: &mut FlowField, dt: f32) {
             }
         }
 
-        p.x += vx * dt;
-        p.y += vy * dt;
-        p.z += vz * dt;
-        p.life -= dt;
+        if p.stuck_to >= 0 {
+            let ti = p.stuck_to as usize;
+            if ti < field.tetras.len() {
+                let t = &field.tetras[ti];
+                if field.capture_phase == CapturePhase::Assembled {
+                    // During assembly, position relative to assembled center
+                    // with assembled rotation (whole structure is one rigid body)
+                    let ar = field.assembled_rotation;
+                    let ac = field.assembled_center;
+                    let o = p.stuck_offset;
+                    let (sx, cx) = (ar[0].sin(), ar[0].cos());
+                    let (sy, cy) = (ar[1].sin(), ar[1].cos());
+                    let (sz, cz) = (ar[2].sin(), ar[2].cos());
+                    let y1 = o[1] * cx - o[2] * sx;
+                    let z1 = o[1] * sx + o[2] * cx;
+                    let x2 = o[0] * cy + z1 * sy;
+                    let z2 = -o[0] * sy + z1 * cy;
+                    let x3 = x2 * cz - y1 * sz;
+                    let y3 = x2 * sz + y1 * cz;
+                    p.x = ac[0] + x3;
+                    p.y = ac[1] + y3;
+                    p.z = ac[2] + z2;
+                } else {
+                    // During scatter/attract, use tetra's own rotation
+                    let rotated = t.rotate_point(p.stuck_offset);
+                    p.x = t.x + rotated[0];
+                    p.y = t.y + rotated[1];
+                    p.z = t.z + rotated[2];
+                }
+                p.trail_x = p.x;
+                p.trail_y = p.y;
+                p.trail_z = p.z;
+            }
+        } else {
+            p.x += vx * dt;
+            p.y += vy * dt;
+            p.z += vz * dt;
+            p.life -= dt;
+        }
     }
 
-    field.particles.retain(|p| p.life > 0.0);
+    // --- Tetrahedron capture system ---
+    field.phase_timer -= dt;
+
+    // Rotate all tetras
+    for t in &mut field.tetras {
+        t.ax += t.spin[0] * dt;
+        t.ay += t.spin[1] * dt;
+        t.az += t.spin[2] * dt;
+    }
+
+    match field.capture_phase {
+        CapturePhase::Scatter => {
+            // Tetras tumble independently — check for particle captures
+            for pi in 0..field.particles.len() {
+                if field.particles[pi].stuck_to >= 0 { continue; }
+                let px = field.particles[pi].x;
+                let py = field.particles[pi].y;
+                let pz = field.particles[pi].z;
+                for ti in 0..field.tetras.len() {
+                    if field.tetras[ti].contains(px, py, pz) {
+                        let t = &field.tetras[ti];
+                        // Compute offset in tetra's local rotated space
+                        let dx = px - t.x;
+                        let dy = py - t.y;
+                        let dz = pz - t.z;
+                        // Store in local space (inverse rotation)
+                        let (sx, cx) = ((-t.ax).sin(), (-t.ax).cos());
+                        let (sy, cy) = ((-t.ay).sin(), (-t.ay).cos());
+                        let (sz, cz) = ((-t.az).sin(), (-t.az).cos());
+                        let x1 = dx * cz - dy * sz;
+                        let y1 = dx * sz + dy * cz;
+                        let x2 = x1 * cy + dz * sy;
+                        let z2 = -x1 * sy + dz * cy;
+                        let y3 = y1 * cx - z2 * sx;
+                        let z3 = y1 * sx + z2 * cx;
+                        field.particles[pi].stuck_to = ti as i32;
+                        field.particles[pi].stuck_offset = [x2, y3, z3];
+                        break;
+                    }
+                }
+            }
+            if field.phase_timer <= 0.0 {
+                field.capture_phase = CapturePhase::Attract;
+                field.phase_timer = 6.0;
+            }
+        }
+        CapturePhase::Attract => {
+            // Pull tetras toward assembly positions — accelerating
+            let progress = 1.0 - (field.phase_timer / 6.0).max(0.0);
+            let pull = progress * progress * 8.0; // quadratic ramp, strong pull
+            for t in &mut field.tetras {
+                t.x += (t.target_x - t.x) * pull * dt;
+                t.y += (t.target_y - t.y) * pull * dt;
+                t.z += (t.target_z - t.z) * pull * dt;
+                // Gradually unify rotations toward zero (they'll sync in assembled phase)
+                t.ax *= 1.0 - progress * dt * 2.0;
+                t.ay *= 1.0 - progress * dt * 2.0;
+                t.az *= 1.0 - progress * dt * 2.0;
+            }
+            if field.phase_timer <= 0.0 {
+                for t in &mut field.tetras {
+                    t.x = t.target_x;
+                    t.y = t.target_y;
+                    t.z = t.target_z;
+                    t.ax = 0.0; t.ay = 0.0; t.az = 0.0; // sync rotations
+                }
+                // Free only outer tetra particles — center keeps its captured ones
+                // This gives the "skeleton" look: dense center + sparse outer surface
+                for p in &mut field.particles {
+                    if p.stuck_to >= 0 && p.stuck_to < 4 {
+                        p.stuck_to = -1;
+                        p.trail_x = p.x;
+                        p.trail_y = p.y;
+                        p.trail_z = p.z;
+                        p.life = 12.0;
+                        p.max_life = 12.0;
+                    }
+                }
+                // Convert center tetra particles' offsets to assembled frame
+                let ac = field.assembled_center;
+                for p in &mut field.particles {
+                    if p.stuck_to == 4 {
+                        // Recompute offset relative to assembled center (rotation is 0 at start)
+                        p.stuck_offset = [p.x - ac[0], p.y - ac[1], p.z - ac[2]];
+                    }
+                }
+                field.capture_phase = CapturePhase::Assembled;
+                field.phase_timer = 50.0;
+            }
+        }
+        CapturePhase::Assembled => {
+            // All tetras rotate together as one big tetrahedron
+            field.assembled_rotation[0] += 0.14 * dt;
+            field.assembled_rotation[1] += 0.10 * dt;
+            field.assembled_rotation[2] += 0.07 * dt;
+
+            let c = field.assembled_center;
+            let (sx, cxr) = (field.assembled_rotation[0].sin(), field.assembled_rotation[0].cos());
+            let (sy, cy) = (field.assembled_rotation[1].sin(), field.assembled_rotation[1].cos());
+            let (sz, cz) = (field.assembled_rotation[2].sin(), field.assembled_rotation[2].cos());
+            let rot = |p: [f32; 3]| -> [f32; 3] {
+                let y1 = p[1] * cxr - p[2] * sx;
+                let z1 = p[1] * sx + p[2] * cxr;
+                let x2 = p[0] * cy + z1 * sy;
+                let z2 = -p[0] * sy + z1 * cy;
+                let x3 = x2 * cz - y1 * sz;
+                let y3 = x2 * sz + y1 * cz;
+                [x3, y3, z2]
+            };
+            // Compute actual world-space vertices for each tetra in the assembled config.
+            // Each tetra's 4 vertices are: assembled_tetra_verts(i) * scale, rotated, + center.
+            for i in 0..field.tetras.len() {
+                let local_verts = assembled_tetra_verts(i);
+                let scale = field.tetras[i].scale;
+                let mut world_verts = [[0.0f32; 3]; 4];
+                let mut cx_sum = 0.0f32;
+                let mut cy_sum = 0.0f32;
+                let mut cz_sum = 0.0f32;
+                for (vi, lv) in local_verts.iter().enumerate() {
+                    let scaled = [lv[0] * scale, lv[1] * scale, lv[2] * scale];
+                    let rotated = rot(scaled);
+                    world_verts[vi] = [
+                        c[0] + rotated[0],
+                        c[1] + rotated[1],
+                        c[2] + rotated[2],
+                    ];
+                    cx_sum += world_verts[vi][0];
+                    cy_sum += world_verts[vi][1];
+                    cz_sum += world_verts[vi][2];
+                }
+                // Set tetra center to centroid of its vertices
+                field.tetras[i].x = cx_sum / 4.0;
+                field.tetras[i].y = cy_sum / 4.0;
+                field.tetras[i].z = cz_sum / 4.0;
+                field.tetras[i].assembled_verts = Some(world_verts);
+                // Set rotation to assembled rotation for stuck particle positioning
+                field.tetras[i].ax = field.assembled_rotation[0];
+                field.tetras[i].ay = field.assembled_rotation[1];
+                field.tetras[i].az = field.assembled_rotation[2];
+            }
+
+            // Continue capturing particles — store offset relative to assembled center
+            let ar = field.assembled_rotation;
+            let ac = field.assembled_center;
+            let (isx, icx) = ((-ar[0]).sin(), (-ar[0]).cos());
+            let (isy, icy) = ((-ar[1]).sin(), (-ar[1]).cos());
+            let (isz, icz) = ((-ar[2]).sin(), (-ar[2]).cos());
+            for pi in 0..field.particles.len() {
+                if field.particles[pi].stuck_to >= 0 { continue; }
+                let px = field.particles[pi].x;
+                let py = field.particles[pi].y;
+                let pz = field.particles[pi].z;
+                for ti in 0..field.tetras.len() {
+                    if field.tetras[ti].contains(px, py, pz) {
+                        // Store offset in assembled rotation's inverse frame
+                        let dx = px - ac[0];
+                        let dy = py - ac[1];
+                        let dz = pz - ac[2];
+                        // Inverse assembled rotation (Z, Y, X reverse order)
+                        let x1 = dx * icz - dy * isz;
+                        let y1 = dx * isz + dy * icz;
+                        let x2 = x1 * icy + dz * isy;
+                        let z2 = -x1 * isy + dz * icy;
+                        let y3 = y1 * icx - z2 * isx;
+                        let z3 = y1 * isx + z2 * icx;
+                        field.particles[pi].stuck_to = ti as i32;
+                        field.particles[pi].stuck_offset = [x2, y3, z3];
+                        break;
+                    }
+                }
+            }
+
+            if field.phase_timer <= 0.0 {
+                field.capture_phase = CapturePhase::Release;
+                field.phase_timer = 2.0;
+            }
+        }
+        CapturePhase::Release => {
+            // Clear assembled vertex cache
+            for t in &mut field.tetras {
+                t.assembled_verts = None;
+            }
+            // Free all stuck particles — zero velocity, ghost lingers
+            for p in &mut field.particles {
+                if p.stuck_to >= 0 {
+                    p.stuck_to = -1;
+                    p.trail_x = p.x;
+                    p.trail_y = p.y;
+                    p.trail_z = p.z;
+                    p.life = 6.0;
+                    p.max_life = 6.0;
+                }
+            }
+            if field.phase_timer <= 0.0 {
+                field.capture_phase = CapturePhase::Pause;
+                field.phase_timer = 10.0;
+            }
+        }
+        CapturePhase::Pause => {
+            if field.phase_timer <= 0.0 {
+                // Reset tetras to scattered positions
+                let spread = 8.0;
+                let face_normals = [
+                    [ 0.577f32,  0.577, -0.577],
+                    [-0.577,  0.577,  0.577],
+                    [ 0.577, -0.577,  0.577],
+                    [-0.577, -0.577, -0.577],
+                ];
+                for (i, t) in field.tetras.iter_mut().enumerate() {
+                    let v = if i < 4 { face_normals[i] } else { [0.0, 0.0, 0.0] };
+                    t.x = 5.0 + v[0] * spread;
+                    t.y = -10.0 + v[1] * spread;
+                    t.z = -2.0 + v[2] * spread;
+                }
+                field.capture_phase = CapturePhase::Scatter;
+                field.phase_timer = 32.0;
+                field.assembled_rotation = [0.0; 3];
+            }
+        }
+    }
+
+    field.particles.retain(|p| p.life > 0.0 || p.stuck_to >= 0);
 }
