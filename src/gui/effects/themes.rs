@@ -308,6 +308,65 @@ pub fn space_theme() -> VisualTheme {
     }
 }
 
+// TODO: Fractal theme is WIP — stick figure ragdoll tuning, palette variety,
+// deeper zoom with perturbation theory for f64 precision.
+pub fn fractal_theme() -> VisualTheme {
+    VisualTheme {
+        name: "Fractal",
+        color_grade: [1.0, 1.0, 1.0],
+        rings: RingParams {
+            max_radius: 20.0, base_life: 4.0,
+            color_r: 0.1, color_g: 0.1, color_b: 0.3, base_alpha: 0.1,
+        },
+        hex: HexParams {
+            dot_min_size: 0.04, dot_max_size: 0.15, base_speed: 0.1,
+            danger_speed_mult: 0.2,
+            base_r: 0.1, base_g: 0.1, base_b: 0.2, base_alpha: 0.02,
+            hex_rings: 4, ring_spacing: 3.5,
+        },
+        grid: GridParams {
+            base_r: 40.0, base_g: 40.0, base_b: 60.0,
+            base_thickness: 0.015, beat_thickness_add: 0.02,
+        },
+        fft: FftParams {
+            band_colors: [
+                [30, 20, 60], [50, 30, 80], [70, 40, 100],
+                [90, 60, 120], [120, 80, 140], [150, 100, 160], [180, 130, 180],
+            ],
+        },
+        camera: CameraParams {
+            sway_base: 0.0, sway_danger_add: 0.0,
+            jitter_x: 0.0, jitter_y: 0.0,
+            zoom_amount: 0.56, shake_decay: 0.9,
+        },
+        effects: {
+            let mut f = EffectFlags::all_on();
+            f.fire = false;
+            f.starfield = false;
+            f.aurora = false;
+            f.hex_background = false;
+            f.fireworks = false;
+            f.beat_rings = false;
+            f.flow_field = false;
+            f.fluid = false;
+            f.crystal = false;
+            f.particle_beat_pulse = false;
+            f.mandelbrot = true;
+            f
+        },
+        bindings: EffectBindings::default_bindings(),
+        piece_colors: Some([
+            [120, 80, 180, 255],  // I — purple
+            [180, 140, 220, 255], // O — lavender
+            [90, 60, 160, 255],   // T — deep purple
+            [140, 100, 200, 255], // S — violet
+            [70, 40, 140, 255],   // Z — dark violet
+            [160, 120, 200, 255], // J — light purple
+            [100, 70, 170, 255],  // L — medium purple
+        ]),
+    }
+}
+
 // TODO: Crystal theme is WIP — board/piece contrast against white background,
 // explosion fragment tuning, fog density balance.
 pub fn crystal_theme() -> VisualTheme {
@@ -495,7 +554,7 @@ pub fn debug_theme() -> VisualTheme {
     theme.effects.clearing_flash = true;
     theme.effects.line_clear_particles = true;
     // Effect under test: (swap this flag to isolate different effects)
-    theme.effects.mandelbrot = true;
+    theme.effects.aurora = true;
     theme.color_grade = [1.0, 1.0, 1.0]; // neutral for debug
     // Bindings: rings follow most active band, board pulse follows beat,
     // fireworks follow second most active

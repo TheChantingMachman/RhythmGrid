@@ -473,6 +473,113 @@ impl PostProcessChain {
     }
 }
 
+// Mandelbrot fractal zoom — GPU fragment shader
+const MANDELBROT_SHADER: &str = r#"
+struct MandelbrotUniforms {
+    center: vec2<f32>,
+    zoom: f32,
+    time: f32,
+    max_iter: u32,
+    color_offset: f32,
+    aspect: f32,
+    num_colors: u32,
+    palette: array<vec4<f32>, 6>,
+};
+@group(0) @binding(0) var<uniform> m: MandelbrotUniforms;
+
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_mandelbrot(@builtin(vertex_index) idx: u32) -> VsOut {
+    var pos = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    var uv = array<vec2<f32>, 3>(
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(2.0, 1.0),
+        vec2<f32>(0.0, -1.0),
+    );
+    var out: VsOut;
+    out.pos = vec4<f32>(pos[idx], 0.0, 1.0);
+    out.uv = uv[idx];
+    return out;
+}
+
+@fragment
+fn fs_mandelbrot(in: VsOut) -> @location(0) vec4<f32> {
+    let scale = 2.0 / m.zoom;
+    let cr = m.center.x + (in.uv.x - 0.5) * scale * m.aspect;
+    let ci = m.center.y + (in.uv.y - 0.5) * scale;
+
+    var zr = 0.0;
+    var zi = 0.0;
+    var iter = 0u;
+    let max_i = m.max_iter;
+
+    // Cardioid/bulb check
+    let q = (cr - 0.25) * (cr - 0.25) + ci * ci;
+    let in_cardioid = q * (q + (cr - 0.25)) < 0.25 * ci * ci;
+    let dx = cr + 1.0;
+    let in_bulb = dx * dx + ci * ci < 0.0625;
+
+    if (in_cardioid || in_bulb) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+
+    loop {
+        if (iter >= max_i) { break; }
+        let zr2 = zr * zr;
+        let zi2 = zi * zi;
+        if (zr2 + zi2 > 4.0) { break; }
+        zi = 2.0 * zr * zi + ci;
+        zr = zr2 - zi2 + cr;
+        iter += 1u;
+    }
+
+    if (iter == max_i) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+
+    // Smooth iteration count for anti-banding
+    let zr2 = zr * zr;
+    let zi2 = zi * zi;
+    let log_zn = log2(max(zr2 + zi2, 0.0001)) * 0.5;
+    let smooth_iter = f32(iter) + 1.0 - log2(max(log_zn, 0.001));
+
+    // Color mapping — sample from palette with smooth interpolation
+    let t = fract(smooth_iter / f32(max_i) * 3.0 + m.color_offset);
+    let n = f32(m.num_colors);
+    let idx_f = t * n;
+    let idx0 = u32(floor(idx_f)) % m.num_colors;
+    let idx1 = (idx0 + 1u) % m.num_colors;
+    let frac = fract(idx_f);
+    let c0 = m.palette[idx0].rgb;
+    let c1 = m.palette[idx1].rgb;
+    let color = mix(c0, c1, frac);
+
+    return vec4<f32>(color, 1.0);
+}
+"#;
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MandelbrotUniforms {
+    pub center_re: f32,
+    pub center_im: f32,
+    pub zoom: f32,
+    pub time: f32,
+    pub max_iter: u32,
+    pub color_offset: f32,
+    pub aspect: f32,
+    pub num_colors: u32,
+    pub palette: [[f32; 4]; 6], // up to 6 colors (RGBA, A unused)
+}
+
 const SAMPLE_COUNT: u32 = 4;
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const REVEALAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
@@ -498,6 +605,11 @@ pub struct GpuState {
     post_process: PostProcessChain,
     uniform_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
+    // Mandelbrot background
+    mandelbrot_pipeline: wgpu::RenderPipeline,
+    mandelbrot_uniform_buffer: wgpu::Buffer,
+    mandelbrot_bgl: wgpu::BindGroupLayout,
+    pub mandelbrot_active: bool,
     // Persistent GPU buffers — reused across frames, grown as needed
     opaque_bufs: GpuBufferPair,
     transparent_bufs: GpuBufferPair,
@@ -808,6 +920,58 @@ impl GpuState {
             multiview: None, cache: None,
         });
 
+        // Mandelbrot background pipeline
+        let mandelbrot_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mandelbrot_shader"), source: wgpu::ShaderSource::Wgsl(MANDELBROT_SHADER.into()),
+        });
+        let mandelbrot_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mandelbrot_bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0, visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let mandelbrot_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None, bind_group_layouts: &[&mandelbrot_bgl], push_constant_ranges: &[],
+        });
+        let mandelbrot_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mandelbrot"),
+            layout: Some(&mandelbrot_layout),
+            vertex: wgpu::VertexState {
+                module: &mandelbrot_shader, entry_point: Some("vs_mandelbrot"),
+                buffers: &[], compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &mandelbrot_shader, entry_point: Some("fs_mandelbrot"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: msaa_state,
+            multiview: None, cache: None,
+        });
+        let mandelbrot_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mandelbrot_uniforms"),
+            contents: bytemuck::cast_slice(&[MandelbrotUniforms {
+                center_re: -0.7436439,
+                center_im: 0.1318259,
+                zoom: 1.0, time: 0.0, max_iter: 128, color_offset: 0.0,
+                aspect: config.width as f32 / config.height.max(1) as f32,
+                num_colors: 3,
+                palette: [[1.0,0.0,0.0,0.0],[1.0,1.0,1.0,0.0],[0.0,0.0,0.0,0.0],
+                           [0.0;4],[0.0;4],[0.0;4]],
+            }]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
         // Textures
         let msaa_texture = Self::create_msaa_texture(&device, &config);
         let scene_texture = Self::create_render_texture(&device, &config);
@@ -841,6 +1005,8 @@ impl GpuState {
             oit_accum_msaa, oit_accum_resolve, oit_reveal_msaa, oit_reveal_resolve,
             oit_composite_bgl,
             sampler, post_process, uniform_buffer, scene_bind_group,
+            mandelbrot_pipeline, mandelbrot_uniform_buffer, mandelbrot_bgl,
+            mandelbrot_active: false,
             opaque_bufs, transparent_bufs, hud_bufs,
         }
     }
@@ -956,6 +1122,10 @@ impl GpuState {
         }
     }
 
+    pub fn update_mandelbrot(&self, uniforms: &MandelbrotUniforms) {
+        self.queue.write_buffer(&self.mandelbrot_uniform_buffer, 0, bytemuck::cast_slice(&[*uniforms]));
+    }
+
     /// Render scene (opaque + transparent 3D) and HUD (2D overlay).
     /// Call update_uniforms with the 3D camera before this.
     pub fn render(&mut self,
@@ -982,17 +1152,55 @@ impl GpuState {
             stencil_ops: None,
         };
 
+        // Pass 0 (optional): Mandelbrot background — fullscreen fractal
+        if self.mandelbrot_active {
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("mandelbrot_bg"),
+                layout: &self.mandelbrot_bgl,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.mandelbrot_uniform_buffer.as_entire_binding(),
+                }],
+            });
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("mandelbrot"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.msaa_texture,
+                        resolve_target: Some(&self.scene_texture),
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.mandelbrot_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            self.queue.submit(std::iter::once(encoder.finish()));
+        }
+
         // Pass 1: Opaque 3D scene (depth write ON, MSAA → resolve to scene_texture)
         {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             {
+                // Load if mandelbrot rendered, Clear if not
+                let color_load = if self.mandelbrot_active {
+                    wgpu::LoadOp::Load
+                } else {
+                    wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 })
+                };
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("scene_opaque"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &self.msaa_texture,
                         resolve_target: Some(&self.scene_texture),
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                            load: color_load,
                             store: wgpu::StoreOp::Store,
                         },
                     })],

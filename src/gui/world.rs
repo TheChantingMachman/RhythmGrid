@@ -105,7 +105,7 @@ impl GameWorld {
     pub fn save_settings(&self) {
         let vol = if let Ok(audio) = self.audio.lock() { audio.volume } else { 0.8 };
         let shuffled = if let Ok(audio) = self.audio.lock() { audio.shuffled } else { false };
-        let theme_names = ["Default", "Water", "Space", "Flow", "Fluid", "Crystal", "Debug"];
+        let theme_names = ["Default", "Water", "Space", "Flow", "Fluid", "Crystal", "Fractal", "Debug"];
         let settings = rhythm_grid::config::Settings {
             volume: vol,
             speed: 1.0,
@@ -132,7 +132,8 @@ impl GameWorld {
             "Flow" => (themes::flow_theme(), 3),
             "Fluid" => (themes::fluid_theme(), 4),
             "Crystal" => (themes::crystal_theme(), 5),
-            "Debug" => (themes::debug_theme(), 6),
+            "Fractal" => (themes::fractal_theme(), 6),
+            "Debug" => (themes::debug_theme(), 7),
             _ => (themes::default_theme(), 0),
         };
         let audio = audio_output::start_audio(settings.music_folder.as_deref());
@@ -457,6 +458,7 @@ impl GameWorld {
             themes::flow_theme,
             themes::fluid_theme,
             themes::crystal_theme,
+            themes::fractal_theme,
             themes::debug_theme,
         ];
         self.theme_index = (self.theme_index + 1) % theme_fns.len();
