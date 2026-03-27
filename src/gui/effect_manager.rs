@@ -2,7 +2,7 @@
 // and render dispatch per scene layer. Adding a new effect requires only
 // changes here, not in world.rs or scene.rs.
 
-use super::effects::{AudioEffect, AudioFrame, RenderContext};
+use super::effects::{AudioEffect, AudioFrame, GpuEffect, RenderContext};
 use super::effects::beat_rings::BeatRings;
 use super::effects::hex_background::HexBackground;
 use super::effects::fft_visualizer::FftVisualizer;
@@ -129,7 +129,7 @@ impl EffectManager {
         if ef.fire { self.fire.render(verts, indices, ctx); }
         if ef.starfield { self.starfield.render(verts, indices, ctx); }
         if ef.aurora { self.aurora.render(verts, indices, ctx); }
-        if ef.flow_field { self.flow_field.render(verts, indices, ctx); }
+        if ef.flow_field && !self.flow_field.gpu_active() { self.flow_field.render(verts, indices, ctx); }
         if ef.fluid { self.fluid.render(verts, indices, ctx); }
         if ef.crystal { self.crystal.render(verts, indices, ctx); }
         if ef.mandelbrot { self.mandelbrot.render(verts, indices, ctx); }
@@ -163,21 +163,31 @@ impl EffectManager {
 
     /// Initialize GPU resources for any effects that implement GpuEffect.
     /// Call once after GPU device is available (or on device recreation).
-    #[allow(dead_code)]
-    pub fn create_gpu_resources(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue) {
-        // No GPU effects registered yet. When an effect is ported to GpuEffect,
-        // call its create_gpu_resources here:
-        // self.flow_field_gpu.create_gpu_resources(device, queue);
+    pub fn create_gpu_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, scene_bgl: &wgpu::BindGroupLayout) {
+        if self.flags.flow_field {
+            self.flow_field.create_gpu_resources(device, queue, scene_bgl);
+        }
     }
 
     /// Dispatch compute work for all GPU effects.
     /// Call once per frame before rendering. Returns true if any compute work was submitted.
-    pub fn dispatch_compute(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, _audio: &AudioFrame) -> bool {
-        // No GPU effects registered yet. When an effect is ported to GpuEffect:
-        // let mut encoder = device.create_command_encoder(&Default::default());
-        // self.flow_field_gpu.compute(&mut encoder, audio);
-        // queue.submit(std::iter::once(encoder.finish()));
-        // return true;
+    pub fn dispatch_compute(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, audio: &AudioFrame) -> bool {
+        if self.flags.flow_field && self.flow_field.gpu_active() {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            self.flow_field.compute(device, queue, &mut encoder, audio);
+            queue.submit(std::iter::once(encoder.finish()));
+            return true;
+        }
         false
+    }
+
+    /// Returns a reference to flow_field if it's GPU-active, for the OIT render pass.
+    #[allow(dead_code)]
+    pub fn gpu_flow_field(&self) -> Option<&FlowField> {
+        if self.flags.flow_field && self.flow_field.gpu_active() {
+            Some(&self.flow_field)
+        } else {
+            None
+        }
     }
 }
