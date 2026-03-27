@@ -15,6 +15,8 @@ pub struct EffectFlags {
     pub flow_field: bool,
     pub fluid: bool,
     pub crystal: bool,
+    pub mandelbrot: bool,
+    pub pipes: bool,
     pub camera_sway: bool,
 
     // Inline scene effects
@@ -37,7 +39,7 @@ impl EffectFlags {
     pub fn all_on() -> Self {
         EffectFlags {
             beat_rings: true, hex_background: true, grid_lines: true,
-            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, camera_sway: true,
+            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, mandelbrot: false, pipes: false, camera_sway: true,
             cube_glow: true, ghost_piece: true, active_piece_pulse: true,
             clearing_flash: true, t_spin_flash: true, level_up_rings: true,
             combo_text: true, particle_beat_pulse: true,
@@ -48,7 +50,7 @@ impl EffectFlags {
     pub fn all_off() -> Self {
         EffectFlags {
             beat_rings: false, hex_background: false, grid_lines: false,
-            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, camera_sway: false,
+            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, mandelbrot: false, pipes: false, camera_sway: false,
             cube_glow: false, ghost_piece: false, active_piece_pulse: false,
             clearing_flash: false, t_spin_flash: false, level_up_rings: false,
             combo_text: false, particle_beat_pulse: false,
@@ -303,6 +305,124 @@ pub fn space_theme() -> VisualTheme {
             [200, 100, 255, 255], // Z — magenta
             [ 50,  60, 180, 255], // J — dark blue
             [120, 220, 255, 255], // L — ice blue
+        ]),
+    }
+}
+
+// TODO: Pipes theme is WIP — pipe collision avoidance, smoother fill transitions.
+pub fn pipes_theme() -> VisualTheme {
+    VisualTheme {
+        name: "Pipes",
+        color_grade: [0.95, 0.95, 1.05], // slight cool shift
+        rings: RingParams {
+            max_radius: 20.0, base_life: 4.0,
+            color_r: 0.1, color_g: 0.15, color_b: 0.2, base_alpha: 0.1,
+        },
+        hex: HexParams {
+            dot_min_size: 0.04, dot_max_size: 0.15, base_speed: 0.1,
+            danger_speed_mult: 0.2,
+            base_r: 0.08, base_g: 0.1, base_b: 0.15, base_alpha: 0.02,
+            hex_rings: 4, ring_spacing: 3.5,
+        },
+        grid: GridParams {
+            base_r: 30.0, base_g: 35.0, base_b: 50.0,
+            base_thickness: 0.015, beat_thickness_add: 0.02,
+        },
+        fft: FftParams {
+            band_colors: [
+                [30, 30, 80], [30, 50, 80], [30, 70, 50],
+                [50, 80, 30], [80, 80, 30], [80, 50, 30], [80, 30, 30],
+            ],
+        },
+        camera: CameraParams {
+            sway_base: 0.0, sway_danger_add: 0.0,
+            jitter_x: 0.0, jitter_y: 0.0,
+            zoom_amount: 0.56, shake_decay: 0.9,
+        },
+        effects: {
+            let mut f = EffectFlags::all_on();
+            f.fire = false;
+            f.starfield = false;
+            f.aurora = false;
+            f.hex_background = false;
+            f.fireworks = false;
+            f.beat_rings = false;
+            f.flow_field = false;
+            f.fluid = false;
+            f.crystal = false;
+            f.mandelbrot = false;
+            f.particle_beat_pulse = false;
+            f.pipes = true;
+            f
+        },
+        bindings: EffectBindings::default_bindings(),
+        piece_colors: Some([
+            [ 60,  60, 140, 255], // I — pipe blue
+            [ 60, 120,  60, 255], // O — pipe green
+            [140, 140,  60, 255], // T — pipe yellow
+            [ 60, 140, 100, 255], // S — pipe teal
+            [140,  60,  60, 255], // Z — pipe red
+            [100,  60, 140, 255], // J — pipe purple
+            [140, 100,  60, 255], // L — pipe orange
+        ]),
+    }
+}
+
+// TODO: Fractal theme is WIP — stick figure ragdoll tuning, palette variety,
+// deeper zoom with perturbation theory for f64 precision.
+pub fn fractal_theme() -> VisualTheme {
+    VisualTheme {
+        name: "Fractal",
+        color_grade: [1.0, 1.0, 1.0],
+        rings: RingParams {
+            max_radius: 20.0, base_life: 4.0,
+            color_r: 0.1, color_g: 0.1, color_b: 0.3, base_alpha: 0.1,
+        },
+        hex: HexParams {
+            dot_min_size: 0.04, dot_max_size: 0.15, base_speed: 0.1,
+            danger_speed_mult: 0.2,
+            base_r: 0.1, base_g: 0.1, base_b: 0.2, base_alpha: 0.02,
+            hex_rings: 4, ring_spacing: 3.5,
+        },
+        grid: GridParams {
+            base_r: 40.0, base_g: 40.0, base_b: 60.0,
+            base_thickness: 0.015, beat_thickness_add: 0.02,
+        },
+        fft: FftParams {
+            band_colors: [
+                [30, 20, 60], [50, 30, 80], [70, 40, 100],
+                [90, 60, 120], [120, 80, 140], [150, 100, 160], [180, 130, 180],
+            ],
+        },
+        camera: CameraParams {
+            sway_base: 0.0, sway_danger_add: 0.0,
+            jitter_x: 0.0, jitter_y: 0.0,
+            zoom_amount: 0.56, shake_decay: 0.9,
+        },
+        effects: {
+            let mut f = EffectFlags::all_on();
+            f.fire = false;
+            f.starfield = false;
+            f.aurora = false;
+            f.hex_background = false;
+            f.fireworks = false;
+            f.beat_rings = false;
+            f.flow_field = false;
+            f.fluid = false;
+            f.crystal = false;
+            f.particle_beat_pulse = false;
+            f.mandelbrot = true;
+            f
+        },
+        bindings: EffectBindings::default_bindings(),
+        piece_colors: Some([
+            [120, 80, 180, 255],  // I — purple
+            [180, 140, 220, 255], // O — lavender
+            [90, 60, 160, 255],   // T — deep purple
+            [140, 100, 200, 255], // S — violet
+            [70, 40, 140, 255],   // Z — dark violet
+            [160, 120, 200, 255], // J — light purple
+            [100, 70, 170, 255],  // L — medium purple
         ]),
     }
 }

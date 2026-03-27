@@ -429,7 +429,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         push_text_embossed(&mut verts, &mut indices, px, pa_y + 296.0,
                   &format!("VOL  {:.0}%", vol * 100.0), text_col, 2.0);
         // Theme
-        let theme_names = ["DEFAULT", "WATER", "SPACE", "FLOW", "FLUID", "CRYSTAL", "DEBUG"];
+        let theme_names = ["DEFAULT", "WATER", "SPACE", "FLOW", "FLUID", "CRYSTAL", "FRACTAL", "PIPES", "DEBUG"];
         let theme_name = theme_names.get(world.theme_index).unwrap_or(&"DEFAULT");
         push_text_embossed(&mut verts, &mut indices, px, pa_y + 322.0,
                   &format!("THEME  {}", theme_name), text_col, 2.0);
@@ -458,7 +458,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             || world.toast_text.starts_with("RESAMPLING")
             || world.toast_text.starts_with("REMAPPED")
             || world.toast_text.starts_with("ANALYZING");
-        let show = if is_analysis { world.theme_index == 6 } else { true }; // 2 = debug
+        let show = if is_analysis { world.theme_index == 8 } else { true }; // 2 = debug
         if show {
             let ta = (world.toast_timer.min(1.0) * 200.0) as u8;
             push_text(&mut verts, &mut indices, w / 2.0 - 60.0, h - 30.0,
@@ -482,7 +482,7 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     // Debug analysis dashboard (debug theme only, always visible)
-    if world.theme_index == 6 {
+    if world.theme_index == 8 {
         let band_names = ["SB", "BA", "LM", "MI", "UM", "PR", "BR"];
         let dx = 12.0;
         let dy = 210.0;
