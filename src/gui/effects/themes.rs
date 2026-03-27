@@ -191,7 +191,7 @@ pub fn default_theme() -> VisualTheme {
         camera: CameraParams {
             sway_base: 0.15, sway_danger_add: 0.1,
             jitter_x: 0.04, jitter_y: 0.025,
-            zoom_amount: 1.0, shake_decay: 1.3,
+            zoom_amount: 0.7, shake_decay: 1.3,
         },
         effects: {
             let mut f = EffectFlags::all_on();
@@ -230,7 +230,7 @@ pub fn water_theme() -> VisualTheme {
         camera: CameraParams {
             sway_base: 0.2, sway_danger_add: 0.08,
             jitter_x: 0.015, jitter_y: 0.01,
-            zoom_amount: 0.3, // gentle — less nausea than default
+            zoom_amount: 0.21, // gentle — less nausea than default
             shake_decay: 0.8,
         },
         effects: {
@@ -278,7 +278,7 @@ pub fn space_theme() -> VisualTheme {
         camera: CameraParams {
             sway_base: 0.12, sway_danger_add: 0.06,
             jitter_x: 0.02, jitter_y: 0.015,
-            zoom_amount: 1.2, shake_decay: 1.0,
+            zoom_amount: 0.84, shake_decay: 1.0,
         },
         effects: {
             let mut f = EffectFlags::all_on();
@@ -335,7 +335,7 @@ pub fn fluid_theme() -> VisualTheme {
         camera: CameraParams {
             sway_base: 0.0, sway_danger_add: 0.0,
             jitter_x: 0.0, jitter_y: 0.0,
-            zoom_amount: 0.8, shake_decay: 0.9,
+            zoom_amount: 0.56, shake_decay: 0.9,
         },
         effects: {
             let mut f = EffectFlags::all_on();
@@ -393,7 +393,7 @@ pub fn flow_theme() -> VisualTheme {
         camera: CameraParams {
             sway_base: 0.1, sway_danger_add: 0.05,
             jitter_x: 0.015, jitter_y: 0.01,
-            zoom_amount: 0.8, shake_decay: 0.9,
+            zoom_amount: 0.56, shake_decay: 0.9,
         },
         effects: {
             let mut f = EffectFlags::all_on();
