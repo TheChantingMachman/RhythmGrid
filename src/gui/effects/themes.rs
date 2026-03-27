@@ -15,6 +15,7 @@ pub struct EffectFlags {
     pub flow_field: bool,
     pub fluid: bool,
     pub crystal: bool,
+    pub mandelbrot: bool,
     pub camera_sway: bool,
 
     // Inline scene effects
@@ -37,7 +38,7 @@ impl EffectFlags {
     pub fn all_on() -> Self {
         EffectFlags {
             beat_rings: true, hex_background: true, grid_lines: true,
-            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, camera_sway: true,
+            fft_visualizer: true, fireworks: true, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, mandelbrot: false, camera_sway: true,
             cube_glow: true, ghost_piece: true, active_piece_pulse: true,
             clearing_flash: true, t_spin_flash: true, level_up_rings: true,
             combo_text: true, particle_beat_pulse: true,
@@ -48,7 +49,7 @@ impl EffectFlags {
     pub fn all_off() -> Self {
         EffectFlags {
             beat_rings: false, hex_background: false, grid_lines: false,
-            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, camera_sway: false,
+            fft_visualizer: false, fireworks: false, fire: false, starfield: false, aurora: false, flow_field: false, fluid: false, crystal: false, mandelbrot: false, camera_sway: false,
             cube_glow: false, ghost_piece: false, active_piece_pulse: false,
             clearing_flash: false, t_spin_flash: false, level_up_rings: false,
             combo_text: false, particle_beat_pulse: false,
@@ -494,7 +495,7 @@ pub fn debug_theme() -> VisualTheme {
     theme.effects.clearing_flash = true;
     theme.effects.line_clear_particles = true;
     // Effect under test: (swap this flag to isolate different effects)
-    theme.effects.aurora = true;
+    theme.effects.mandelbrot = true;
     theme.color_grade = [1.0, 1.0, 1.0]; // neutral for debug
     // Bindings: rings follow most active band, board pulse follows beat,
     // fireworks follow second most active

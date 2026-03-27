@@ -14,6 +14,7 @@ pub mod aurora;
 pub mod flow_field;
 pub mod fluid;
 pub mod crystal;
+pub mod mandelbrot;
 
 use super::drawing::Vertex;
 use wgpu;
