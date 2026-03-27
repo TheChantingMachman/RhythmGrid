@@ -14,6 +14,7 @@ use super::effects::aurora::Aurora;
 use super::effects::flow_field::{self, FlowField};
 use super::effects::fluid::{self, Fluid};
 use super::effects::crystal::Crystal;
+use super::effects::pipes::Pipes;
 use super::effects::mandelbrot::Mandelbrot;
 use super::effects::themes::{self, EffectFlags, VisualTheme};
 use super::particles::ParticleSystem;
@@ -33,6 +34,7 @@ pub struct EffectManager {
     pub fluid: Fluid,
     pub crystal: Crystal,
     pub mandelbrot: Mandelbrot,
+    pub pipes: Pipes,
     pub particles: ParticleSystem,
     pub flags: EffectFlags,
 }
@@ -52,6 +54,7 @@ impl EffectManager {
             fluid: Fluid::new(),
             crystal: Crystal::new(),
             mandelbrot: Mandelbrot::new(),
+            pipes: Pipes::new(),
             particles: ParticleSystem::new(),
             flags: theme.effects.clone(),
         }
@@ -69,6 +72,7 @@ impl EffectManager {
         self.fluid = Fluid::new();
         self.crystal = Crystal::new();
         self.mandelbrot = Mandelbrot::new();
+        self.pipes = Pipes::new();
         self.fireworks.shells_only = false;
         self.fireworks.bursts_only = theme.name == "Debug";
     }
@@ -115,6 +119,7 @@ impl EffectManager {
         }
         if ef.crystal { self.crystal.update(audio_frame); }
         if ef.mandelbrot { self.mandelbrot.update(audio_frame); }
+        if ef.pipes { self.pipes.update(audio_frame); }
     }
 
     /// Render background effects (transparent, behind board): fireworks, fire, starfield, aurora, flow_field.
@@ -128,6 +133,7 @@ impl EffectManager {
         if ef.fluid { self.fluid.render(verts, indices, ctx); }
         if ef.crystal { self.crystal.render(verts, indices, ctx); }
         if ef.mandelbrot { self.mandelbrot.render(verts, indices, ctx); }
+        if ef.pipes { self.pipes.render(verts, indices, ctx); }
     }
 
     /// Render grid lines (opaque, board layer).
