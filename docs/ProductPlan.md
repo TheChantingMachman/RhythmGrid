@@ -481,7 +481,7 @@ Firework bursts and line clears could cast momentary colored light onto nearby c
 - Would make burst flashes feel physically present rather than just overlaid
 
 ### Long-term roadmap
-1. **More themes** — currently 6 (Default, Water, Space, Flow, Fluid, Debug). Target 8-10 distinct visual personalities for adaptive theme selection
+1. **More themes** — currently 9 (Default, Water, Space, Flow, Fluid, Crystal, Fractal, Pipes, Debug). Adaptive theme selection becomes viable at this count
 2. **Adaptive theme selection** — auto-switch themes based on music energy (see above)
 3. **Music-reactive demo AI** — demo mode that performs to the music (see above)
 4. **Background environments** — procedural or authored 3D scenes behind the board (underwater, space, city) per theme

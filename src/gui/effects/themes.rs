@@ -542,9 +542,9 @@ pub fn fluid_theme() -> VisualTheme {
     }
 }
 
-// TODO: Flow theme needs more love — custom color palette tuning, possibly
-// flow-field-aware grid lines, particle size/density tied to danger level,
-// and a signature visual for line clears (vortex implosion?).
+// TODO: Flow theme — color palette tuning, danger escalation (density/turbulence),
+// line clear vortex signature, flow-field-aware grid lines.
+// Has invisible tetrahedron capture system (scatter → assemble → release cycle).
 pub fn flow_theme() -> VisualTheme {
     VisualTheme {
         name: "Flow",
@@ -591,9 +591,9 @@ pub fn flow_theme() -> VisualTheme {
         piece_colors: Some([
             [ 80, 180, 200, 255], // I — teal
             [ 60, 160, 160, 255], // O — dark teal
-            [100, 140, 200, 255], // T — steel blue
+            [180,  60, 140, 255], // T — magenta
             [ 80, 200, 140, 255], // S — seafoam
-            [ 60, 120, 180, 255], // Z — ocean blue
+            [140,  40, 110, 255], // Z — dark magenta
             [ 40,  80, 160, 255], // J — deep blue
             [100, 220, 180, 255], // L — aquamarine
         ]),
