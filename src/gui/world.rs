@@ -39,6 +39,7 @@ pub struct GameWorld {
     pub(super) preview_rotation: usize,
     preview_timer: f32,
     pub audio: Arc<Mutex<AudioState>>,
+    pub audio_actions: Arc<audio_output::AudioActions>,
     pub analysis: super::audio_analysis::AudioAnalysis,
     pub(super) prev_beat: bool,
     pub anims: super::animations::Animations,
@@ -171,7 +172,7 @@ impl GameWorld {
         };
         // Start with embedded default track on title screen;
         // user's music library loads when they press Play
-        let audio = audio_output::start_audio(None);
+        let (audio, audio_actions) = audio_output::start_audio(None);
         if let Ok(mut a) = audio.try_lock() { a.volume = settings.volume; }
         let mut world = GameWorld {
             session: GameSession::new(),
@@ -181,6 +182,7 @@ impl GameWorld {
             preview_rotation: 0,
             preview_timer: 0.0,
             audio,
+            audio_actions,
             analysis: super::audio_analysis::AudioAnalysis::new(),
             prev_beat: false,
             anims: super::animations::Animations::new(),
@@ -520,6 +522,14 @@ impl GameWorld {
                     self.anims.t_spin_flash = 1.0;
                 }
                 if lines_cleared > 0 {
+                    // Audio feedback: line clear
+                    let clear_flag = match lines_cleared {
+                        1 => audio_output::AudioActions::CLEAR_1,
+                        2 => audio_output::AudioActions::CLEAR_2,
+                        3 => audio_output::AudioActions::CLEAR_3,
+                        _ => audio_output::AudioActions::CLEAR_4,
+                    };
+                    self.audio_actions.trigger(clear_flag);
                     let cells = piece_cells(pre_piece.piece_type, pre_piece.rotation);
                     let max_dr = cells.iter().map(|(dr, _)| *dr).max().unwrap_or(0);
                     let piece_row = pre_piece.row + max_dr;
@@ -819,7 +829,9 @@ impl GameWorld {
             let volume = if let Ok(a) = self.audio.try_lock() { a.volume } else { 0.8 };
             // Shut down the old audio thread before starting a new one
             if let Ok(mut a) = self.audio.lock() { a.shutdown = true; }
-            self.audio = audio_output::start_audio(self.music_folder.as_deref());
+            let (new_audio, new_actions) = audio_output::start_audio(self.music_folder.as_deref());
+            self.audio = new_audio;
+            self.audio_actions = new_actions;
             if let Ok(mut a) = self.audio.try_lock() { a.volume = volume; }
         }
     }
@@ -842,8 +854,16 @@ impl GameWorld {
         self.exit_demo();
         match self.session.state {
             GameState::Playing => match action {
-                GameAction::MoveLeft => { self.session.move_horizontal(-1); }
-                GameAction::MoveRight => { self.session.move_horizontal(1); }
+                GameAction::MoveLeft => {
+                    if self.session.move_horizontal(-1) {
+                        self.audio_actions.trigger(audio_output::AudioActions::MOVE);
+                    }
+                }
+                GameAction::MoveRight => {
+                    if self.session.move_horizontal(1) {
+                        self.audio_actions.trigger(audio_output::AudioActions::MOVE);
+                    }
+                }
                 GameAction::SoftDrop => {
                     move_down(&self.session.grid, &mut self.session.active_piece);
                     self.session.gravity_accumulator_ms = 0;
@@ -925,12 +945,24 @@ impl GameWorld {
                         }
                     }
 
+                    // Audio feedback: hard drop
+                    self.audio_actions.trigger(audio_output::AudioActions::HARD_DROP);
+
                     // Use session method — handles lock, score, spawn, lock delay reset
                     let result = self.session.hard_drop();
                     let lines = match result {
                         TickResult::PieceLocked { lines_cleared } => lines_cleared,
                         _ => 0,
                     };
+                    if lines > 0 {
+                        let clear_flag = match lines {
+                            1 => audio_output::AudioActions::CLEAR_1,
+                            2 => audio_output::AudioActions::CLEAR_2,
+                            3 => audio_output::AudioActions::CLEAR_3,
+                            _ => audio_output::AudioActions::CLEAR_4,
+                        };
+                        self.audio_actions.trigger(clear_flag);
+                    }
                     if lines > 0 && self.effects.flags.line_clear_particles {
                         self.spawn_line_clear_particles(lines, land_bottom);
                     }
@@ -972,8 +1004,16 @@ impl GameWorld {
                         }
                     }
                 }
-                GameAction::RotateCW => { self.session.rotate(true); }
-                GameAction::RotateCCW => { self.session.rotate(false); }
+                GameAction::RotateCW => {
+                    if self.session.rotate(true) {
+                        self.audio_actions.trigger(audio_output::AudioActions::ROTATE);
+                    }
+                }
+                GameAction::RotateCCW => {
+                    if self.session.rotate(false) {
+                        self.audio_actions.trigger(audio_output::AudioActions::ROTATE);
+                    }
+                }
                 GameAction::Hold => { self.session.hold_piece(); }
                 GameAction::TogglePause | GameAction::BackToMenu => {
                     self.session.state = GameState::Paused;
@@ -1187,7 +1227,9 @@ impl GameWorld {
                 audio.shutdown = true;
             }
             std::thread::sleep(std::time::Duration::from_millis(300));
-            self.audio = audio_output::start_audio(Some(&folder_str));
+            let (new_audio, new_actions) = audio_output::start_audio(Some(&folder_str));
+            self.audio = new_audio;
+            self.audio_actions = new_actions;
         }
 
         if was_playing {
