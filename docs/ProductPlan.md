@@ -46,10 +46,13 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 - ~~Visual juice (Phase A)~~ — done. Z-shake on hard drop, smoother trails, board wave on tetris.
 - ~~Title screen~~ — done. Play/Settings/Credits/Exit, keyboard nav, theme backgrounds, idle fade.
 - ~~Demo AI~~ — done. Greedy placer with scoring (height, holes, clears, bumpiness).
+- ~~Action audio feedback (Phase A)~~ — done. Music-amplification EQ boost via ActionAudioProcessor. Swappable architecture with enabled flag. Gets ~80% of the way to proper feel.
+- ~~Journey mode~~ — done. 8 themes escalate by coolness every 25 lines, F1 unlocks at 200.
+- ~~Vanish zone collision fix~~ — done. Column bounds checked in vanish zone.
 
 ### High Priority
 
-**Action audio feedback (Phase A)** — per-band EQ boost on the music at the moment of player actions, with quiet percussive tap fallback during silence. The game is visually rich but audibly unresponsive during gameplay. Blocked on design research (study Tetris Effect). See [Action-Reactive Audio](#action-reactive-audio-the-feel-gap) below.
+*No high priority items currently. Next impactful work is in medium/low priority.*
 
 ### Medium Priority
 
@@ -70,6 +73,12 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 **3D font / SDF text** — replace the 3x5 bitmap font with proper text rendering. Options: SDF font atlas (smooth at any scale), or 3D extruded letter meshes for the title screen. Current bitmap font is functional but visibly pixelated at large scales (title screen).
 
 **Expand built-in music library** — more CC/royalty-free tracks. Organize in `assets/music/` with a manifest (artist, title, license, source URL). OGG Vorbis preferred for size.
+
+**Action audio feedback tuning** — the EQ boost approach (ActionAudioProcessor) gets ~80% there but needs further work:
+- Tune ramp rate, decay curves, and per-action intensity levels
+- Experiment with simple non-invasive SFX as an alternative or complement — quiet mechanical taps/clicks that don't conflict harmonically with any genre
+- Explore SFX sets matched to song profile: percussive set for electronic, soft clicks for acoustic/classical, pitched tones for melodic tracks. Could auto-select based on spectral centroid or beat confidence.
+- The ActionAudioProcessor is swappable — new approaches can be prototyped without rearchitecting. Settings toggle (enabled flag) ready for when settings menu ships.
 
 ---
 
@@ -168,17 +177,14 @@ The louder the music, the less the game adds. The quieter the music, the more th
 
 ## Roadmap
 
-### Next up — "feel" release
-1. **Action audio feedback (Phase A)** — music-amplification boost + percussive tap fallback. Blocked on Tetris Effect design research.
-
-### Near-term — journey polish + "complete product"
-2. **Journey system polish (WIP)** — current implementation works but needs:
+### Next up — near-term
+1. **Journey system polish (WIP)** — current implementation works but needs:
    - *Transition effect/fanfare* — theme changes are abrupt. Add a visual transition (flash, fade, particle burst) when advancing to the next stage. Should feel like an event, not a glitch.
    - *Auto-registration of new themes* — current JOURNEY_ORDER is a hardcoded array that must be manually updated when themes are added. Refactor so new themes auto-register with a coolness rank, and the journey builds the order dynamically. Eliminates maintenance.
    - *Pro player scaling* — 200 lines is trivial for experienced players. Consider: journey length scales with game speed setting, or journey milestones are level-based not line-based, or journey is a percentage of the player's historical average game length. Default should never feel like a gate to someone who clears 200 lines in 5 minutes.
    - *Settings exposure* — future settings menu should allow: journey length (100/200/500/endless), disable journey (free theme switching from start), lock to a single theme. The current defaults should be good for casual players without configuration.
-3. **Playlists** — save/load/reorder, track metadata
-4. **Controller support** — gamepad via gilrs + DAS/ARR (deprioritized)
+2. **Playlists** — save/load/reorder, track metadata
+3. **Controller support** — gamepad via gilrs + DAS/ARR (deprioritized)
 
 ### Medium-term — polish
 4. **Settings menu**
@@ -187,6 +193,7 @@ The louder the music, the less the game adds. The quieter the music, the more th
 7. **Repeat mode**
 8. **Folder drag-and-drop**
 9. **3D font / SDF text**
+10. **Action audio feedback tuning** — further iteration on EQ boost + SFX experiments
 
 ### Long-term — differentiation
 10. **Advanced visualizer AI** — music-aware demo that paces to the beat, chases tetrises during high-energy sections, times clears to strong beats
