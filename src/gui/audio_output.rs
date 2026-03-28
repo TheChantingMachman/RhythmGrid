@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::collections::VecDeque;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rhythm_grid::audio::{fft_bands, spectral_centroid, BeatDetector, MultiBeatDetector, SpectralFluxDetector, StreamingDecoder};
@@ -10,6 +11,232 @@ use rhythm_grid::music::{scan_folder, Playlist};
 
 const DEFAULT_TRACK: &[u8] = include_bytes!("../../assets/default_track.ogg");
 const DEFAULT_TRACK_NAME: &str = "Neon Underworld";
+
+// ===== Action-Reactive Audio =====
+
+/// Lock-free action events from game thread → audio callback.
+/// Each action is a bit flag. Game thread ORs bits in; callback reads and clears.
+pub struct AudioActions {
+    flags: AtomicU32,
+}
+
+impl AudioActions {
+    pub const HARD_DROP: u32  = 1 << 0;
+    pub const LOCK: u32       = 1 << 1;
+    pub const ROTATE: u32     = 1 << 2;
+    pub const MOVE: u32       = 1 << 3;
+    pub const CLEAR_1: u32    = 1 << 4;  // single
+    pub const CLEAR_2: u32    = 1 << 5;  // double
+    pub const CLEAR_3: u32    = 1 << 6;  // triple
+    pub const CLEAR_4: u32    = 1 << 7;  // tetris
+
+    pub fn new() -> Self {
+        AudioActions { flags: AtomicU32::new(0) }
+    }
+
+    /// Game thread: signal that an action occurred.
+    pub fn trigger(&self, action: u32) {
+        self.flags.fetch_or(action, Ordering::Relaxed);
+    }
+
+    /// Audio callback: read and clear all pending actions.
+    fn take(&self) -> u32 {
+        self.flags.swap(0, Ordering::Relaxed)
+    }
+}
+
+/// Action-reactive audio processor. Sits in the audio callback, receives action
+/// events, and modifies the output signal. Designed to be swappable — replace this
+/// struct with an alternative implementation to experiment with different approaches.
+/// Set `enabled = false` to bypass entirely (passthrough).
+struct ActionAudioProcessor {
+    enabled: bool,
+    boost: BoostState,
+    filter_bank: Option<FilterBank>,
+}
+
+impl ActionAudioProcessor {
+    fn new(sample_rate: f32) -> Self {
+        ActionAudioProcessor {
+            enabled: true,
+            boost: BoostState::new(),
+            filter_bank: Some(FilterBank::new(sample_rate)),
+        }
+    }
+
+    /// Feed current band energy from AudioState.
+    fn set_band_energy(&mut self, bands: [f32; 7]) {
+        self.boost.band_energy = bands;
+    }
+
+    /// Process action flags into boost targets.
+    fn on_actions(&mut self, actions: u32) {
+        if self.enabled {
+            self.boost.apply_actions(actions);
+        }
+    }
+
+    /// Apply EQ boost to a single sample. Returns the processed sample.
+    fn process_sample(&mut self, sample: f32) -> f32 {
+        if !self.enabled {
+            return sample;
+        }
+        if let Some(ref mut fb) = self.filter_bank {
+            fb.process(sample, &self.boost.gains)
+        } else {
+            sample
+        }
+    }
+
+    /// Update envelopes (call once per callback).
+    fn update(&mut self, dt: f32) {
+        if self.enabled {
+            self.boost.update(dt);
+        }
+    }
+}
+
+/// Per-band EQ boost state — rate-limited ramp + slow decay.
+struct BoostState {
+    /// Current gain per band (1.0 = no boost)
+    gains: [f32; 7],
+    /// Target gain per band — gains ramp toward this
+    targets: [f32; 7],
+    /// Current energy per band (read from AudioState)
+    band_energy: [f32; 7],
+}
+
+const BOOST_MAX_ACCEL: f32 = 8.0; // max gain units per second — controls ramp speed
+
+impl BoostState {
+    fn new() -> Self {
+        BoostState {
+            gains: [1.0; 7],
+            targets: [1.0; 7],
+            band_energy: [0.0; 7],
+        }
+    }
+
+    /// Process action flags into per-band gain boosts.
+    /// Boosts are proportional to current band energy — amplify what's already loud.
+    fn apply_actions(&mut self, actions: u32) {
+        if actions == 0 { return; }
+
+        // Determine boost intensity by action type
+        let intensity = if actions & AudioActions::CLEAR_4 != 0 {
+            3.0
+        } else if actions & AudioActions::CLEAR_3 != 0 {
+            2.2
+        } else if actions & AudioActions::CLEAR_2 != 0 {
+            1.8
+        } else if actions & AudioActions::CLEAR_1 != 0 {
+            1.5
+        } else if actions & AudioActions::HARD_DROP != 0 {
+            2.0
+        } else if actions & AudioActions::ROTATE != 0 {
+            1.4
+        } else if actions & AudioActions::MOVE != 0 {
+            1.2
+        } else if actions & AudioActions::LOCK != 0 {
+            1.3
+        } else {
+            return;
+        };
+
+        // Find the dominant bands and concentrate the boost there.
+        // Blend between uniform boost and energy-weighted boost so even
+        // bands with modest energy get a meaningful lift.
+        let total: f32 = self.band_energy.iter().sum::<f32>().max(0.001);
+        for i in 0..7 {
+            let weight = self.band_energy[i] / total;
+            let target = 1.0 + (intensity - 1.0) * weight * 7.0;
+            self.targets[i] = self.targets[i].max(target).min(4.0);
+        }
+    }
+
+    /// Ramp gains toward targets (rate-limited), then decay targets and gains.
+    fn update(&mut self, dt: f32) {
+        for i in 0..7 {
+            // Ramp gain toward target at max acceleration
+            if self.gains[i] < self.targets[i] {
+                self.gains[i] = (self.gains[i] + BOOST_MAX_ACCEL * dt).min(self.targets[i]);
+            }
+            // Decay target back toward 1.0 (slow — sets the sustain duration)
+            if self.targets[i] > 1.0 {
+                self.targets[i] = 1.0 + (self.targets[i] - 1.0) * (1.0 - dt * 1.5).max(0.0);
+            }
+            // Decay gain back toward 1.0 (very slow — imperceptible fade)
+            if self.gains[i] > 1.0 && self.gains[i] >= self.targets[i] {
+                self.gains[i] = 1.0 + (self.gains[i] - 1.0) * (1.0 - dt * 1.2).max(0.0);
+            }
+        }
+    }
+}
+
+/// Simple 2nd-order biquad filter (direct form 1).
+struct Biquad {
+    b0: f32, b1: f32, b2: f32,
+    a1: f32, a2: f32,
+    x1: f32, x2: f32,
+    y1: f32, y2: f32,
+}
+
+impl Biquad {
+    fn bandpass(center_freq: f32, bandwidth: f32, sample_rate: f32) -> Self {
+        let omega = 2.0 * std::f32::consts::PI * center_freq / sample_rate;
+        let alpha = omega.sin() * (2.0f32.ln() / 2.0 * bandwidth * omega / omega.sin()).sinh();
+        let a0 = 1.0 + alpha;
+        Biquad {
+            b0: alpha / a0,
+            b1: 0.0,
+            b2: -alpha / a0,
+            a1: -2.0 * omega.cos() / a0,
+            a2: (1.0 - alpha) / a0,
+            x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
+        }
+    }
+
+    fn process(&mut self, x: f32) -> f32 {
+        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
+              - self.a1 * self.y1 - self.a2 * self.y2;
+        self.x2 = self.x1;
+        self.x1 = x;
+        self.y2 = self.y1;
+        self.y1 = y;
+        y
+    }
+}
+
+/// 7-band filter bank for per-band EQ processing.
+struct FilterBank {
+    filters: [Biquad; 7],
+}
+
+impl FilterBank {
+    fn new(sample_rate: f32) -> Self {
+        // Center frequencies for each band, bandwidth in octaves
+        FilterBank {
+            filters: [
+                Biquad::bandpass(40.0, 1.5, sample_rate),     // sub-bass
+                Biquad::bandpass(150.0, 1.5, sample_rate),    // bass
+                Biquad::bandpass(370.0, 1.0, sample_rate),    // low-mids
+                Biquad::bandpass(1000.0, 1.5, sample_rate),   // mids
+                Biquad::bandpass(3000.0, 1.0, sample_rate),   // upper-mids
+                Biquad::bandpass(6000.0, 1.0, sample_rate),   // presence
+                Biquad::bandpass(14000.0, 1.5, sample_rate),  // brilliance
+            ],
+        }
+    }
+
+    /// Split a sample into 7 bands, apply per-band gain, recombine.
+    fn process(&mut self, sample: f32, gains: &[f32; 7]) -> f32 {
+        let mut out = 0.0f32;
+        for (i, filter) in self.filters.iter_mut().enumerate() {
+            out += filter.process(sample) * gains[i];
+        }
+        out
+    }
+}
 
 /// Shared state between the audio thread and the game loop.
 pub struct AudioState {
@@ -176,7 +403,17 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32, channels: u16) -> Vec
 }
 
 fn track_name_from_path(path: &PathBuf) -> String {
-    path.file_name()
+    // Try metadata tags first (artist + title), fall back to filename
+    if let Some(meta) = rhythm_grid::audio::read_track_meta(path) {
+        match (meta.artist, meta.title) {
+            (Some(artist), Some(title)) => return format!("{} - {}", artist, title),
+            (None, Some(title)) => return title,
+            (Some(artist), None) => return artist,
+            _ => {}
+        }
+    }
+    // Fallback: filename without extension
+    path.file_stem()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "Unknown".to_string())
 }
@@ -297,10 +534,12 @@ fn stream_decode_bytes(
     true
 }
 
-/// Starts the audio output stream. Returns shared state for the game loop.
-pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
+/// Starts the audio output stream. Returns shared state + action channel.
+pub fn start_audio(music_folder: Option<&str>) -> (Arc<Mutex<AudioState>>, Arc<AudioActions>) {
     let state = Arc::new(Mutex::new(AudioState::new()));
+    let actions = Arc::new(AudioActions::new());
     let state_clone = state.clone();
+    let actions_clone = actions.clone();
     let folder_owned = music_folder.map(|s| s.to_string());
 
     std::thread::spawn(move || {
@@ -487,16 +726,27 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
         };
 
         let mut smooth_vol: f32 = 0.5; // smoothed volume to avoid step discontinuities
+        let mut processor = ActionAudioProcessor::new(sample_rate as f32);
+        let actions_cb = actions_clone;
+        let callback_dt = 512.0 / sample_rate as f32; // ~12ms per callback
 
         let stream = device.build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut chunk_mono = Vec::with_capacity(data.len() / out_channels);
 
-                // Read volume and pause state
+                // Read action events (lock-free)
+                let pending_actions = actions_cb.take();
+
+                // Read volume, pause state, and current band energy for adaptive boost
                 let (target_vol, is_paused) = state_play.try_lock()
-                    .map(|s| (s.volume, s.paused))
+                    .map(|s| {
+                        processor.set_band_energy(s.bands);
+                        (s.volume, s.paused)
+                    })
                     .unwrap_or((smooth_vol, false));
+
+                processor.on_actions(pending_actions);
 
                 if is_paused {
                     for s in data.iter_mut() { *s = 0.0; }
@@ -520,9 +770,10 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                             }
                             for ch in 0..src_ch {
                                 if let Some(sample) = buf.samples.pop_front() {
-                                    mono += sample;
+                                    let eq_sample = processor.process_sample(sample);
+                                    mono += eq_sample;
                                     let out_ch_idx = ch % out_channels;
-                                    frame[out_ch_idx] += sample * smooth_vol;
+                                    frame[out_ch_idx] += eq_sample * smooth_vol;
                                 }
                             }
                             chunk_mono.push(mono / src_ch as f32);
@@ -534,6 +785,9 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
                     // Couldn't get lock — silence
                     for s in data.iter_mut() { *s = 0.0; }
                 }
+
+                // Update boost envelopes
+                processor.update(callback_dt);
 
                 // Snap to target to avoid drift
                 smooth_vol = target_vol;
@@ -558,5 +812,5 @@ pub fn start_audio(music_folder: Option<&str>) -> Arc<Mutex<AudioState>> {
         // stream drops here, stopping audio output
     });
 
-    state
+    (state, actions)
 }

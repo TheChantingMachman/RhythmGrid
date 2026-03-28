@@ -10,6 +10,61 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
 pub const SUPPORTED_FORMATS: &[&str] = &["mp3", "wav", "flac", "ogg"];
+
+/// Track metadata extracted from audio file tags (ID3v2, Vorbis Comments, etc.)
+pub struct TrackMeta {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+}
+
+/// Read metadata tags from an audio file. Returns None on any error (no panic).
+pub fn read_track_meta(path: &Path) -> Option<TrackMeta> {
+    use symphonia::core::meta::StandardTagKey;
+
+    let file = std::fs::File::open(path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let mut probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .ok()?;
+
+    let mut title = None;
+    let mut artist = None;
+
+    // Check metadata from the probe result (container-level tags)
+    if let Some(md) = probed.metadata.get() {
+        if let Some(rev) = md.current() {
+            for tag in rev.tags() {
+                if let Some(std_key) = tag.std_key {
+                    match std_key {
+                        StandardTagKey::TrackTitle => title = Some(tag.value.to_string()),
+                        StandardTagKey::Artist => artist = Some(tag.value.to_string()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    // Also check in-stream metadata (some formats put tags here)
+    let metadata = probed.format.metadata();
+    if let Some(rev) = metadata.current() {
+        for tag in rev.tags() {
+            if let Some(std_key) = tag.std_key {
+                match std_key {
+                    StandardTagKey::TrackTitle if title.is_none() => title = Some(tag.value.to_string()),
+                    StandardTagKey::Artist if artist.is_none() => artist = Some(tag.value.to_string()),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    Some(TrackMeta { title, artist })
+}
 pub const DEFAULT_BPM: u32 = 120;
 
 pub const DEFAULT_VOLUME: f32 = 0.8;

@@ -91,17 +91,24 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let gh = HEIGHT as f32;
 
     // Background effects + hex/beat_rings + level-up rings
-    {
-        let fx_ctx = super::effects::RenderContext {
-            board_width: gw, board_height: gh,
-            win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
-            window_aspect: world.window_aspect,
-            preview_angle: world.preview_angle,
-            hud_opacity: world.hud_opacity,
-        };
-        world.effects.render_dashboard(&mut tv, &mut ti, &fx_ctx);
-        world.effects.render_background(&mut tv, &mut ti, &fx_ctx);
+    let fx_ctx = super::effects::RenderContext {
+        board_width: gw, board_height: gh,
+        win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
+        window_aspect: world.window_aspect,
+        preview_angle: world.preview_angle,
+        hud_opacity: world.hud_opacity,
+    };
+    world.effects.render_background(&mut tv, &mut ti, &fx_ctx);
+
+    // Title screen — render only background effects + title overlay, skip game board/HUD
+    if world.show_title {
+        let mut verts = Vec::new();
+        let mut indices = Vec::new();
+        build_title_screen(&mut verts, &mut indices, world);
+        return ((sv, si), (tv, ti), (verts, indices));
     }
+
+    world.effects.render_dashboard(&mut tv, &mut ti, &fx_ctx);
     // Level-up rings (animation-driven, not an effect module)
     build_level_up_rings(&mut tv, &mut ti, world, gw, gh);
 
@@ -127,19 +134,38 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         if r + 1 < HEIGHT && g[r+1][c] != CellState::Empty { nb |= 2; }
         if c > 0 && g[r][c-1] != CellState::Empty { nb |= 4; }
         if c + 1 < WIDTH && g[r][c+1] != CellState::Empty { nb |= 8; }
+        // Board wave — pulse of light radiating through occupied cells
+        let mut wave_bright = 0.0f32;
+        for wave in &world.anims.board_waves {
+            let (g, _) = wave.glow_at(cell.col as f32, cell.row as f32);
+            wave_bright += g;
+        }
+        wave_bright = wave_bright.min(3.0);
+        if wave_bright > 0.01 {
+            // Additive white flash — cells glow bright as wave passes
+            let add = wave_bright * 0.9;
+            color[0] = (color[0] + add).min(1.0);
+            color[1] = (color[1] + add).min(1.0);
+            color[2] = (color[2] + add).min(1.0);
+        }
         // Check settle animation for this cell
         let settle = world.anims.settle_cells.iter()
             .find(|s| s.col == cell.col && s.row == cell.row)
             .map(|s| (s.timer / super::animations::SETTLE_DURATION).clamp(0.0, 1.0))
             .unwrap_or(0.0);
-        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow, nb, settle);
+        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow + wave_bright * 2.0, nb, settle);
     }
 
-    // Ghost piece
+    // Ghost piece — dark on light backgrounds, piece-colored otherwise
     if ef.ghost_piece {
+        let bright_bg = world.color_grade.iter().sum::<f32>() > 2.5;
         for cell in &world.render_board.ghost {
-            let base_color = world.themed_piece_color(cell.type_index);
-            let ghost_color = rgba_to_f32([base_color[0], base_color[1], base_color[2], 40]);
+            let ghost_color = if bright_bg {
+                rgba_to_f32([10, 10, 10, 140])
+            } else {
+                let c = world.themed_piece_color(cell.type_index);
+                rgba_to_f32([c[0], c[1], c[2], 40])
+            };
             push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0, 0, 0.0);
         }
     }
@@ -185,17 +211,19 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 
     // Hard drop trails — translucent streaks from start to landing
     for trail in &world.anims.drop_trails {
-        let progress = 1.0 - (trail.timer / super::animations::DROP_TRAIL_DURATION).max(0.0);
-        let alpha = (1.0 - progress) * 0.35;
+        let life = (trail.timer / super::animations::DROP_TRAIL_DURATION).clamp(0.0, 1.0);
+        let alpha = life * life * 0.35; // quadratic fade — smooth disappearance
         let mut color = rgba_to_f32(world.themed_piece_color(trail.type_index));
         color[3] = alpha;
-        // Cap trail length to 6 rows near the landing point
-        let trail_start = trail.start_row.max(trail.end_row - 6);
+        // Trail extends up to 10 rows from landing, fades upward
+        let trail_start = trail.start_row.max(trail.end_row - 10);
+        let trail_len = (trail.end_row - trail_start).max(1) as f32;
         for row in trail_start..trail.end_row {
             if row >= 0 && row < HEIGHT as i32 {
-                let fade = (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
+                let fade = (row - trail_start) as f32 / trail_len;
+                let fade = fade * fade; // quadratic spatial fade — smooth gradient
                 let mut c = color;
-                c[3] = alpha * fade; // brightest at landing, fades upward
+                c[3] = alpha * fade;
                 push_cube_3d(&mut tv, &mut ti, trail.col as f32, row as f32, cube_depth * 0.15, c, 0.0, 0, 0.0);
             }
         }
@@ -433,8 +461,32 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         let theme_name = theme_names.get(world.theme_index).unwrap_or(&"DEFAULT");
         push_text_embossed(&mut verts, &mut indices, px, pa_y + 322.0,
                   &format!("THEME  {}", theme_name), text_col, 2.0);
-        push_text_embossed(&mut verts, &mut indices, px, pa_y + 430.0, "ESC  MENU", dim_col, 2.0);
+        // Selectable action buttons
+        let pause_sel = world.pause_selection;
+        let btn_labels = ["RESUME", "EXIT TO TITLE"];
+        let btn_base_y = pa_y + 420.0;
+        let pbtn_w = pa_w - 24.0;
+        let pbtn_h = 24.0;
+        let pbtn_spacing = 32.0;
+        let pbtn_scale = 2.0;
+        let pbtn_text_h = 5.0 * pbtn_scale;
+        for (i, &label) in btn_labels.iter().enumerate() {
+            let by = btn_base_y + i as f32 * pbtn_spacing;
+            let is_sel = i == pause_sel;
+            if is_sel {
+                push_quad(&mut verts, &mut indices, px - 2.0, by - 2.0, pbtn_w + 4.0, pbtn_h + 4.0,
+                          rgba_to_f32([255, 255, 100, 60]), 0.085);
+            }
+            push_panel(&mut verts, &mut indices, px, by, pbtn_w, pbtn_h, 0.095);
+            let lw = label.len() as f32 * 4.0 * pbtn_scale;
+            let lx = px + (pbtn_w - lw) / 2.0;
+            let ly = by + (pbtn_h - pbtn_text_h) / 2.0;
+            let col = if is_sel { rgba_to_f32([255, 255, 100, 255]) } else { rgba_to_f32([255, 255, 255, 255]) };
+            push_text_embossed(&mut verts, &mut indices, lx, ly, label, col, pbtn_scale);
+        }
     }
+
+
 
     // Particles (always visible, not affected by HUD fade)
     world.effects.render_particles(&mut verts, &mut indices);
@@ -553,4 +605,125 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     (verts, indices)
+}
+
+fn build_title_screen(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, _world: &GameWorld) {
+    let w = THEME.win_w as f32;
+    let h = THEME.win_h as f32;
+    let buttons_visible = _world.title_buttons_visible;
+
+    // Dimmer overlay when buttons visible, subtle when faded
+    let bg_alpha = if buttons_visible { 140 } else { 40 };
+    push_quad(verts, indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, bg_alpha]), 0.08);
+
+    // Title — always visible
+    let title_scale = 6.0;
+    let title_text = "RHYTHMGRID";
+    let title_w = title_text.len() as f32 * 4.0 * title_scale;
+    let title_x = (w - title_w) / 2.0;
+    let title_y = h * 0.25;
+    push_text_embossed(verts, indices, title_x, title_y, title_text,
+              rgba_to_f32([255, 255, 255, 255]), title_scale);
+
+    if _world.show_credits {
+        build_credits_screen(verts, indices, w, h);
+        return;
+    }
+
+    if !buttons_visible { return; }
+
+    // Buttons
+    let btn_w = 200.0;
+    let btn_h = 40.0;
+    let btn_x = (w - btn_w) / 2.0;
+    let btn_y_start = h * 0.45;
+    let btn_spacing = 56.0;
+    let btn_scale = 3.0;
+    let text_h = 5.0 * btn_scale;
+    let text_w = |s: &str| s.len() as f32 * 4.0 * btn_scale;
+    let text_cx = |s: &str| btn_x + (btn_w - text_w(s)) / 2.0;
+    let text_cy = |by: f32| by + (btn_h - text_h) / 2.0;
+
+    let active_col = rgba_to_f32([255, 255, 255, 255]);
+    let selected_col = rgba_to_f32([255, 255, 100, 255]);
+    let disabled_col = rgba_to_f32([100, 100, 100, 120]);
+    let sel = _world.title_selection;
+
+    let labels = ["PLAY", "SETTINGS", "CREDITS", "EXIT"];
+    let enabled = [true, false, true, true];
+
+    for (i, &label) in labels.iter().enumerate() {
+        let by = btn_y_start + i as f32 * btn_spacing;
+        let is_selected = i == sel;
+        if enabled[i] {
+            push_panel(verts, indices, btn_x, by, btn_w, btn_h, 0.09);
+            if is_selected {
+                // Selection highlight border
+                push_quad(verts, indices, btn_x - 2.0, by - 2.0, btn_w + 4.0, btn_h + 4.0,
+                          rgba_to_f32([255, 255, 100, 60]), 0.085);
+            }
+            let col = if is_selected { selected_col } else { active_col };
+            push_text_embossed(verts, indices, text_cx(label), text_cy(by), label, col, btn_scale);
+        } else {
+            push_quad(verts, indices, btn_x, by, btn_w, btn_h, rgba_to_f32([30, 30, 30, 100]), 0.09);
+            push_text_embossed(verts, indices, text_cx(label), text_cy(by), label, disabled_col, btn_scale);
+        }
+    }
+}
+
+fn build_credits_screen(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, w: f32, h: f32) {
+    let highlight = rgba_to_f32([255, 255, 100, 255]);
+    let text_col = rgba_to_f32([220, 220, 230, 255]);
+    let dim_col = rgba_to_f32([150, 150, 160, 200]);
+    let cx = w / 2.0;
+
+    let title = "CREDITS";
+    let title_scale = 4.0;
+    let title_w = title.len() as f32 * 4.0 * title_scale;
+    push_text_embossed(verts, indices, cx - title_w / 2.0, h * 0.18, title, highlight, title_scale);
+
+    let mut y = h * 0.30;
+    let line_h = 20.0;
+    let section_gap = 12.0;
+
+    let centered = |verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, y: f32, text: &str, color: [f32; 4], scale: f32| {
+        let tw = text.len() as f32 * 4.0 * scale;
+        push_text_embossed(verts, indices, cx - tw / 2.0, y, text, color, scale);
+    };
+
+    // Development
+    centered(verts, indices, y, "DEVELOPMENT", highlight, 2.5);
+    y += line_h + 4.0;
+    centered(verts, indices, y, "BY NATHAN", text_col, 2.0);
+    y += line_h + section_gap;
+
+    // Thanks
+    centered(verts, indices, y, "THANKS TO", highlight, 2.5);
+    y += line_h + 4.0;
+    centered(verts, indices, y, "BRIAN  BRYAN  MCCABE", text_col, 2.0);
+    y += line_h + section_gap;
+
+    // Technology
+    centered(verts, indices, y, "BUILT WITH", highlight, 2.5);
+    y += line_h + 4.0;
+    centered(verts, indices, y, "RUST  WGPU  WINIT  CPAL", dim_col, 1.5);
+    y += line_h + section_gap;
+
+    // Music attribution (CC BY 3.0 requires full credit)
+    centered(verts, indices, y, "MUSIC", highlight, 2.5);
+    y += line_h + 4.0;
+    centered(verts, indices, y, "NEON UNDERWORLD BY PUNCH DECK", text_col, 1.8);
+    y += line_h - 2.0;
+    centered(verts, indices, y, "SOUNDCLOUD.COM/PUNCH-DECK", dim_col, 1.3);
+    y += line_h - 4.0;
+    centered(verts, indices, y, "ROYALTY FREE MUSIC BY", dim_col, 1.3);
+    y += line_h - 4.0;
+    centered(verts, indices, y, "FREE-STOCK-MUSIC.COM", dim_col, 1.3);
+    y += line_h - 4.0;
+    centered(verts, indices, y, "CC BY 3.0 UNPORTED", dim_col, 1.3);
+    y += line_h - 4.0;
+    centered(verts, indices, y, "CREATIVECOMMONS.ORG/LICENSES/BY/3.0", dim_col, 1.0);
+    y += line_h + section_gap;
+
+    centered(verts, indices, y + 20.0, "PRESS ANY KEY", dim_col, 1.5);
 }

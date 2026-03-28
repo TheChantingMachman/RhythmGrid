@@ -39,10 +39,12 @@ impl CameraReactor {
     }
 
     pub fn apply(&self, _audio: &AudioFrame, _preview_angle: f32, base_eye: [f32; 3]) -> [f32; 3] {
+        // Z-axis shake — gentle push/pull, no lateral movement
+        let shake_z = self.shake_intensity * (self.shake_time * 3.0).sin() * 0.15;
         [
             base_eye[0],
             base_eye[1],
-            base_eye[2] - self.smooth_zoom,
+            base_eye[2] - self.smooth_zoom + shake_z,
         ]
     }
 

@@ -7,6 +7,7 @@ pub enum CellState {
     Occupied(u32),
 }
 
+#[derive(Clone)]
 pub struct Grid {
     pub cells: [[CellState; WIDTH]; HEIGHT],
 }
