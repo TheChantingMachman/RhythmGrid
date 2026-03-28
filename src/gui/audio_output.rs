@@ -403,7 +403,17 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32, channels: u16) -> Vec
 }
 
 fn track_name_from_path(path: &PathBuf) -> String {
-    path.file_name()
+    // Try metadata tags first (artist + title), fall back to filename
+    if let Some(meta) = rhythm_grid::audio::read_track_meta(path) {
+        match (meta.artist, meta.title) {
+            (Some(artist), Some(title)) => return format!("{} - {}", artist, title),
+            (None, Some(title)) => return title,
+            (Some(artist), None) => return artist,
+            _ => {}
+        }
+    }
+    // Fallback: filename without extension
+    path.file_stem()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "Unknown".to_string())
 }

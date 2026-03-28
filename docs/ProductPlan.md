@@ -49,6 +49,7 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 - ~~Action audio feedback (Phase A)~~ — done. Music-amplification EQ boost via ActionAudioProcessor. Swappable architecture with enabled flag. Gets ~80% of the way to proper feel.
 - ~~Journey mode~~ — done. 8 themes escalate by coolness every 25 lines, F1 unlocks at 200.
 - ~~Vanish zone collision fix~~ — done. Column bounds checked in vanish zone.
+- ~~Track metadata display~~ — done. ID3/Vorbis tags via symphonia: "Artist - Title" with filename fallback.
 
 ### High Priority
 
@@ -73,6 +74,15 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 **3D font / SDF text** — replace the 3x5 bitmap font with proper text rendering. Options: SDF font atlas (smooth at any scale), or 3D extruded letter meshes for the title screen. Current bitmap font is functional but visibly pixelated at large scales (title screen).
 
 **Expand built-in music library** — more CC/royalty-free tracks. Organize in `assets/music/` with a manifest (artist, title, license, source URL). OGG Vorbis preferred for size.
+
+**Music UI overhaul** — the current audio controls are a minimal HUD overlay. For the audiophile use case, needs a full rethink:
+- *Track display*: title + artist as separate fields with size limits, scrolling text for overflow. Track progress bar.
+- *Playlist manager*: folder button opens a proper playlist view (define later). Save/load/reorder playlists.
+- *Visual cleanup*: remove beat pulse from EQ visualizer and audio control buttons — they're information displays, not effects.
+- *Audiophile mode*: toggle (key or setting) that auto-pauses the game, hides the board, lets the visualizer and music take over. Mouse movement reveals audio controls. Keyboard input resumes game.
+- *Gamer/audiophile quick-switch*: casual mouse unhides audio controls in either mode. In audiophile mode, space = play/pause (not hard drop).
+- *AI play toggle*: setting to allow demo AI during visualizer mode, or pure visualizer with no game. Deferred.
+- *Future considerations*: album art from ID3/Vorbis tags, track progress with click-to-seek, scrobble-friendly track change events.
 
 **Action audio feedback tuning** — the EQ boost approach (ActionAudioProcessor) gets ~80% there but needs further work:
 - Tune ramp rate, decay curves, and per-action intensity levels
