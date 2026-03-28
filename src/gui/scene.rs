@@ -91,17 +91,24 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
     let gh = HEIGHT as f32;
 
     // Background effects + hex/beat_rings + level-up rings
-    {
-        let fx_ctx = super::effects::RenderContext {
-            board_width: gw, board_height: gh,
-            win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
-            window_aspect: world.window_aspect,
-            preview_angle: world.preview_angle,
-            hud_opacity: world.hud_opacity,
-        };
-        world.effects.render_dashboard(&mut tv, &mut ti, &fx_ctx);
-        world.effects.render_background(&mut tv, &mut ti, &fx_ctx);
+    let fx_ctx = super::effects::RenderContext {
+        board_width: gw, board_height: gh,
+        win_w: THEME.win_w as f32, win_h: THEME.win_h as f32,
+        window_aspect: world.window_aspect,
+        preview_angle: world.preview_angle,
+        hud_opacity: world.hud_opacity,
+    };
+    world.effects.render_background(&mut tv, &mut ti, &fx_ctx);
+
+    // Title screen — render only background effects + title overlay, skip game board/HUD
+    if world.show_title {
+        let mut verts = Vec::new();
+        let mut indices = Vec::new();
+        build_title_screen(&mut verts, &mut indices, world);
+        return ((sv, si), (tv, ti), (verts, indices));
     }
+
+    world.effects.render_dashboard(&mut tv, &mut ti, &fx_ctx);
     // Level-up rings (animation-driven, not an effect module)
     build_level_up_rings(&mut tv, &mut ti, world, gw, gh);
 
@@ -433,8 +440,32 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
         let theme_name = theme_names.get(world.theme_index).unwrap_or(&"DEFAULT");
         push_text_embossed(&mut verts, &mut indices, px, pa_y + 322.0,
                   &format!("THEME  {}", theme_name), text_col, 2.0);
-        push_text_embossed(&mut verts, &mut indices, px, pa_y + 430.0, "ESC  MENU", dim_col, 2.0);
+        // Selectable action buttons
+        let pause_sel = world.pause_selection;
+        let btn_labels = ["RESUME", "EXIT TO TITLE"];
+        let btn_base_y = pa_y + 420.0;
+        let pbtn_w = pa_w - 24.0;
+        let pbtn_h = 24.0;
+        let pbtn_spacing = 32.0;
+        let pbtn_scale = 2.0;
+        let pbtn_text_h = 5.0 * pbtn_scale;
+        for (i, &label) in btn_labels.iter().enumerate() {
+            let by = btn_base_y + i as f32 * pbtn_spacing;
+            let is_sel = i == pause_sel;
+            if is_sel {
+                push_quad(&mut verts, &mut indices, px - 2.0, by - 2.0, pbtn_w + 4.0, pbtn_h + 4.0,
+                          rgba_to_f32([255, 255, 100, 60]), 0.085);
+            }
+            push_panel(&mut verts, &mut indices, px, by, pbtn_w, pbtn_h, 0.095);
+            let lw = label.len() as f32 * 4.0 * pbtn_scale;
+            let lx = px + (pbtn_w - lw) / 2.0;
+            let ly = by + (pbtn_h - pbtn_text_h) / 2.0;
+            let col = if is_sel { rgba_to_f32([255, 255, 100, 255]) } else { rgba_to_f32([255, 255, 255, 255]) };
+            push_text_embossed(&mut verts, &mut indices, lx, ly, label, col, pbtn_scale);
+        }
     }
+
+
 
     // Particles (always visible, not affected by HUD fade)
     world.effects.render_particles(&mut verts, &mut indices);
@@ -553,4 +584,63 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
     }
 
     (verts, indices)
+}
+
+fn build_title_screen(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, _world: &GameWorld) {
+    let w = THEME.win_w as f32;
+    let h = THEME.win_h as f32;
+    let buttons_visible = _world.title_buttons_visible;
+
+    // Dimmer overlay when buttons visible, subtle when faded
+    let bg_alpha = if buttons_visible { 140 } else { 40 };
+    push_quad(verts, indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, bg_alpha]), 0.08);
+
+    // Title — always visible
+    let title_scale = 6.0;
+    let title_text = "RHYTHMGRID";
+    let title_w = title_text.len() as f32 * 4.0 * title_scale;
+    let title_x = (w - title_w) / 2.0;
+    let title_y = h * 0.25;
+    push_text_embossed(verts, indices, title_x, title_y, title_text,
+              rgba_to_f32([255, 255, 255, 255]), title_scale);
+
+    if !buttons_visible { return; }
+
+    // Buttons
+    let btn_w = 200.0;
+    let btn_h = 40.0;
+    let btn_x = (w - btn_w) / 2.0;
+    let btn_y_start = h * 0.45;
+    let btn_spacing = 56.0;
+    let btn_scale = 3.0;
+    let text_h = 5.0 * btn_scale;
+    let text_w = |s: &str| s.len() as f32 * 4.0 * btn_scale;
+    let text_cx = |s: &str| btn_x + (btn_w - text_w(s)) / 2.0;
+    let text_cy = |by: f32| by + (btn_h - text_h) / 2.0;
+
+    let active_col = rgba_to_f32([255, 255, 255, 255]);
+    let selected_col = rgba_to_f32([255, 255, 100, 255]);
+    let disabled_col = rgba_to_f32([100, 100, 100, 120]);
+    let sel = _world.title_selection;
+
+    let labels = ["PLAY", "SETTINGS", "CREDITS", "EXIT"];
+    let enabled = [true, false, false, true];
+
+    for (i, &label) in labels.iter().enumerate() {
+        let by = btn_y_start + i as f32 * btn_spacing;
+        let is_selected = i == sel;
+        if enabled[i] {
+            push_panel(verts, indices, btn_x, by, btn_w, btn_h, 0.09);
+            if is_selected {
+                // Selection highlight border
+                push_quad(verts, indices, btn_x - 2.0, by - 2.0, btn_w + 4.0, btn_h + 4.0,
+                          rgba_to_f32([255, 255, 100, 60]), 0.085);
+            }
+            let col = if is_selected { selected_col } else { active_col };
+            push_text_embossed(verts, indices, text_cx(label), text_cy(by), label, col, btn_scale);
+        } else {
+            push_quad(verts, indices, btn_x, by, btn_w, btn_h, rgba_to_f32([30, 30, 30, 100]), 0.09);
+            push_text_embossed(verts, indices, text_cx(label), text_cy(by), label, disabled_col, btn_scale);
+        }
+    }
 }

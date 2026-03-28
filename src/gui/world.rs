@@ -57,10 +57,22 @@ pub struct GameWorld {
     pub saved_window_y: Option<i32>,
     pub logical_window_size: [u32; 2],
     pub(super) bindings: themes::EffectBindings,
+    pub(super) show_title: bool,
+    pub should_quit: bool,
+    title_theme_idx: usize, // index into TITLE_THEMES
+    saved_theme_index: usize, // user's preferred theme, restored on Play
+    pub(super) title_btn_rects: [[f32; 4]; 4], // Play, Settings, Credits, Exit — screen-space [x,y,w,h]
+    pub(super) pause_exit_rect: [f32; 4],     // "EXIT TO TITLE" button in pause menu
+    pub(super) title_selection: usize,        // 0=Play, 1=Settings, 2=Credits, 3=Exit
+    pub(super) title_idle_timer: f32,         // seconds since last input on title screen
+    pub(super) title_buttons_visible: bool,
+    pub(super) pause_selection: usize,        // 0=Resume, 1=Exit to Title
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
     demo_rng: u64,
+    demo_target: Option<(usize, i32)>, // (rotation, column) target for current piece
+    demo_last_piece: Option<(TetrominoType, usize)>, // track piece changes
     pub(super) track_queue_rects: Vec<([f32; 4], usize)>, // (x,y,w,h), track_index
 }
 
@@ -138,9 +150,11 @@ impl GameWorld {
             "Debug" => (themes::debug_theme(), 8),
             _ => (themes::default_theme(), 0),
         };
-        let audio = audio_output::start_audio(settings.music_folder.as_deref());
+        // Start with embedded default track on title screen;
+        // user's music library loads when they press Play
+        let audio = audio_output::start_audio(None);
         if let Ok(mut a) = audio.try_lock() { a.volume = settings.volume; }
-        GameWorld {
+        let mut world = GameWorld {
             session: GameSession::new(),
             last_tick: Instant::now(),
             camera_angle: DEFAULT_CAM_ANGLE,
@@ -196,12 +210,36 @@ impl GameWorld {
                 Button { id: ButtonId::Folder, world_x: 12.5, world_y: 18.2, world_w: 3.0, world_h: 0.6, screen_rect: [0.0; 4], hovered: false },
             ],
             fft_locked: false,
+            show_title: true,
+            should_quit: false,
+            title_theme_idx: 0,
+            saved_theme_index: theme_index,
+            title_btn_rects: [[0.0; 4]; 4],
+            pause_exit_rect: [0.0; 4],
+            title_selection: 0,
+            title_idle_timer: 0.0,
+            title_buttons_visible: true,
+            pause_selection: 0,
             demo_mode: false,
             demo_idle_timer: 0.0,
             demo_action_timer: 0.0,
             demo_rng: 0xDEADBEEF42,
+            demo_target: None,
+            demo_last_piece: None,
             track_queue_rects: Vec::new(),
-        }
+        };
+        // Random title theme from rotation (Flow, Fluid, Crystal)
+        const TITLE_THEMES: [usize; 4] = [3, 4, 5, 7];
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as usize)
+            .unwrap_or(0);
+        let pick = seed % TITLE_THEMES.len();
+        world.title_theme_idx = pick;
+        let idx = TITLE_THEMES[pick];
+        world.apply_theme_by_index(idx);
+        world.theme_index = idx;
+        world
     }
 
     pub fn tick(&mut self) {
@@ -322,16 +360,75 @@ impl GameWorld {
         self.anims.t_spin_flash = (self.anims.t_spin_flash - dt as f32 * 1.0).max(0.0);
         self.toast_timer = (self.toast_timer - dt as f32).max(0.0);
 
-        // Auto-cycle themes every 4 minutes (skip Debug)
+        // Title screen button rects — theme virtual coords → physical screen pixels
+        if self.show_title {
+            let tw = THEME.win_w as f32;
+            let th = THEME.win_h as f32;
+            let sw = self.window_size[0];
+            let sh = self.window_size[1];
+            let btn_w = 200.0;
+            let btn_h = 40.0;
+            let btn_x = (tw - btn_w) / 2.0;
+            let btn_y_start = th * 0.45;
+            let btn_spacing = 56.0;
+            // Convert from theme coords to screen coords
+            let sx = |x: f32| x / tw * sw;
+            let sy = |y: f32| y / th * sh;
+            let scale_w = sw / tw;
+            let scale_h = sh / th;
+            for i in 0..4 {
+                let by = btn_y_start + i as f32 * btn_spacing;
+                self.title_btn_rects[i as usize] = [sx(btn_x), sy(by), btn_w * scale_w, btn_h * scale_h];
+            }
+            self.title_idle_timer += dt as f32;
+            if self.title_idle_timer >= 15.0 {
+                self.title_buttons_visible = false;
+            }
+        }
+
+        // Pause menu "EXIT TO TITLE" button rect
+        if self.session.state == GameState::Paused && !self.show_title {
+            let tw = THEME.win_w as f32;
+            let th = THEME.win_h as f32;
+            let sw = self.window_size[0];
+            let sh = self.window_size[1];
+            let pa_w = 280.0;
+            let pa_h = 480.0;
+            let pa_x = (tw - pa_w) / 2.0;
+            let pa_y = (th - pa_h) / 2.0;
+            let btn_x = pa_x + 12.0;
+            let btn_y = pa_y + 450.0;
+            let btn_w = pa_w - 24.0;
+            let btn_h = 24.0;
+            self.pause_exit_rect = [
+                btn_x / tw * sw, btn_y / th * sh,
+                btn_w / tw * sw, btn_h / th * sh,
+            ];
+        }
+
+        // Auto-cycle themes
         self.theme_auto_timer -= dt as f32;
         if self.theme_auto_timer <= 0.0 {
             self.theme_auto_timer = 240.0;
-            // Skip Debug theme (index 8) during auto-cycle
-            if self.theme_index != 8 {
-                let next = (self.theme_index + 1) % 8; // 0..7, skips 8 (Debug)
+            if self.show_title {
+                // Title screen: rotate between Flow, Fluid, Crystal
+                const TITLE_THEMES: [usize; 4] = [3, 4, 5, 7];
+                self.title_theme_idx = (self.title_theme_idx + 1) % TITLE_THEMES.len();
+                let idx = TITLE_THEMES[self.title_theme_idx];
+                self.theme_index = idx;
+                self.apply_theme_by_index(idx);
+            } else if self.theme_index != 8 {
+                // In-game: cycle all themes except Debug
+                let next = (self.theme_index + 1) % 8;
                 self.theme_index = next;
                 self.apply_theme_by_index(next);
             }
+        }
+
+        // Title screen — only run audio analysis and effects, skip game logic
+        if self.show_title {
+            self.last_tick = now;
+            return;
         }
 
         // Smooth escalation transition
@@ -430,22 +527,34 @@ impl GameWorld {
             }
         }
         if self.demo_mode && self.session.state == GameState::Playing {
+            // Detect new piece — recompute target placement
+            let cur = (self.session.active_piece.piece_type, self.session.active_piece.rotation);
+            if self.demo_last_piece != Some(cur) || self.demo_target.is_none() {
+                self.demo_last_piece = Some(cur);
+                self.demo_target = Some(demo_best_placement(
+                    &self.session.grid,
+                    self.session.active_piece.piece_type,
+                    &mut self.demo_rng,
+                ));
+            }
+
             self.demo_action_timer -= dt as f32;
             if self.demo_action_timer <= 0.0 {
-                // Random action
-                self.demo_rng = self.demo_rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                let action = (self.demo_rng >> 33) % 10;
-                match action {
-                    0..=2 => { self.session.move_horizontal(-1); }  // move left
-                    3..=5 => { self.session.move_horizontal(1); }   // move right
-                    6 => { self.session.rotate(true); }             // rotate CW
-                    7 => { self.session.rotate(false); }            // rotate CCW
-                    8 => { move_down(&self.session.grid, &mut self.session.active_piece); } // soft drop
-                    _ => { self.session.hard_drop(); }              // hard drop
-                    }
-                // Faster actions at higher levels
-                let level = level_for_lines(self.session.total_lines);
-                self.demo_action_timer = 0.15 - (level as f32 * 0.005).min(0.1);
+                let (target_rot, target_col) = self.demo_target.unwrap_or((0, 4));
+                let piece = &self.session.active_piece;
+                if piece.rotation != target_rot {
+                    // Rotate toward target (shortest path)
+                    let cw_dist = (target_rot + 4 - piece.rotation) % 4;
+                    self.session.rotate(cw_dist <= 2);
+                } else if piece.col != target_col {
+                    // Move toward target column
+                    self.session.move_horizontal(if target_col > piece.col { 1 } else { -1 });
+                } else {
+                    // In position — hard drop
+                    self.session.hard_drop();
+                    self.demo_target = None;
+                }
+                self.demo_action_timer = 0.08;
             }
             // Auto-restart on game over in demo mode
             if self.session.state == GameState::GameOver {
@@ -549,6 +658,93 @@ impl GameWorld {
     pub fn on_mouse_activity(&mut self) {
         self.hud_opacity = 1.0;
         self.hud_fade_timer = 1.5;
+        if self.show_title {
+            self.title_idle_timer = 0.0;
+            self.title_buttons_visible = true;
+        }
+    }
+
+    /// Handle Up/Down/Enter for menu navigation. Returns true if key was consumed.
+    pub fn handle_menu_key(&mut self, code: &winit::keyboard::KeyCode) -> bool {
+        use winit::keyboard::KeyCode as K;
+        if self.show_title {
+            // Any navigation key wakes the buttons
+            if matches!(code, K::ArrowUp | K::ArrowDown | K::Enter | K::Space) {
+                self.title_idle_timer = 0.0;
+                self.title_buttons_visible = true;
+            }
+            match code {
+                K::ArrowUp => {
+                    // Skip disabled items (Settings=1, Credits=2) going up
+                    self.title_selection = match self.title_selection {
+                        0 => 3,  // wrap to Exit
+                        3 => 0,  // skip disabled, go to Play
+                        _ => 0,
+                    };
+                    true
+                }
+                K::ArrowDown => {
+                    self.title_selection = match self.title_selection {
+                        0 => 3,  // skip disabled, go to Exit
+                        3 => 0,  // wrap to Play
+                        _ => 3,
+                    };
+                    true
+                }
+                K::Enter | K::Space => {
+                    match self.title_selection {
+                        0 => self.start_game_from_title(),
+                        3 => { self.save_settings(); self.should_quit = true; }
+                        _ => {} // disabled
+                    }
+                    true
+                }
+                _ => false,
+            }
+        } else if self.session.state == GameState::Paused {
+            match code {
+                K::ArrowUp | K::ArrowDown => {
+                    self.pause_selection = 1 - self.pause_selection; // toggle 0↔1
+                    true
+                }
+                K::Enter => {
+                    match self.pause_selection {
+                        0 => {
+                            self.session.state = GameState::Playing;
+                            self.last_tick = Instant::now();
+                            self.camera_angle = DEFAULT_CAM_ANGLE;
+                        }
+                        1 => { self.show_title = true; }
+                        _ => {}
+                    }
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+
+    fn start_game_from_title(&mut self) {
+        self.show_title = false;
+        self.demo_mode = false;
+        self.demo_idle_timer = 0.0;
+        self.session = GameSession::new();
+        self.last_tick = Instant::now();
+        self.anims.clear();
+        self.danger_level = 0.0;
+        self.last_level = 1;
+        self.camera.reset();
+        // Restore user's preferred theme
+        self.theme_index = self.saved_theme_index;
+        self.apply_theme_by_index(self.saved_theme_index);
+        // Switch from embedded track to user's music folder
+        if self.music_folder.is_some() {
+            let volume = if let Ok(a) = self.audio.try_lock() { a.volume } else { 0.8 };
+            self.audio = audio_output::start_audio(self.music_folder.as_deref());
+            if let Ok(mut a) = self.audio.try_lock() { a.volume = volume; }
+        }
     }
 
     fn exit_demo(&mut self) {
@@ -688,11 +884,14 @@ impl GameWorld {
                 GameAction::RotateCW => { self.session.rotate(true); }
                 GameAction::RotateCCW => { self.session.rotate(false); }
                 GameAction::Hold => { self.session.hold_piece(); }
-                GameAction::TogglePause => { self.session.state = GameState::Paused; }
+                GameAction::TogglePause | GameAction::BackToMenu => {
+                    self.session.state = GameState::Paused;
+                    self.pause_selection = 0;
+                }
                 _ => {}
             }
             GameState::Paused => match action {
-                GameAction::TogglePause => {
+                GameAction::TogglePause | GameAction::BackToMenu => {
                     self.session.state = GameState::Playing;
                     self.last_tick = Instant::now();
                     self.camera_angle = DEFAULT_CAM_ANGLE;
@@ -702,15 +901,22 @@ impl GameWorld {
                 _ => {}
             }
             GameState::GameOver | GameState::Menu => {
-                if action == GameAction::StartGame {
-                    // Reset game state without restarting audio
-                    self.session = GameSession::new();
-                    self.last_tick = Instant::now();
-                    self.anims.clear();
-                    self.danger_level = 0.0;
-                    self.last_level = 1;
-                    self.camera.reset();
+                if action == GameAction::StartGame || (self.show_title && action == GameAction::HardDrop) {
+                    if self.show_title {
+                        self.start_game_from_title();
+                    } else {
+                        // Restart from game over
+                        self.session = GameSession::new();
+                        self.last_tick = Instant::now();
+                        self.anims.clear();
+                        self.danger_level = 0.0;
+                        self.last_level = 1;
+                        self.camera.reset();
                     }
+                }
+                if action == GameAction::BackToMenu {
+                    self.show_title = true;
+                }
             }
         }
     }
@@ -801,6 +1007,31 @@ impl GameWorld {
     }
 
     pub fn handle_click(&mut self) {
+        // Title screen buttons
+        if self.show_title {
+            let [mx, my] = self.cursor_pos;
+            let hit = |r: [f32; 4]| mx >= r[0] && mx <= r[0]+r[2] && my >= r[1] && my <= r[1]+r[3];
+            if hit(self.title_btn_rects[0]) {
+                self.start_game_from_title();
+            }
+            // Settings (index 1) and Credits (index 2) are greyed out — no action
+            if hit(self.title_btn_rects[3]) {
+                // Exit
+                self.save_settings();
+                self.should_quit = true;
+            }
+            return;
+        }
+        // Pause menu "EXIT TO TITLE" click
+        if self.session.state == GameState::Paused && !self.show_title {
+            let [mx, my] = self.cursor_pos;
+            let r = self.pause_exit_rect;
+            if mx >= r[0] && mx <= r[0]+r[2] && my >= r[1] && my <= r[1]+r[3] {
+                self.show_title = true;
+                self.session.state = GameState::Paused;
+                return;
+            }
+        }
         let clicked = self.buttons.iter().find(|b| b.hovered).map(|b| b.id);
         match clicked {
             Some(ButtonId::Folder) => self.pick_music_folder(),
@@ -888,4 +1119,104 @@ impl GameWorld {
     pub fn build_scene_and_hud(&self) -> ((Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>), (Vec<Vertex>, Vec<u32>)) {
         super::scene::build_scene_and_hud(self)
     }
+}
+
+/// Demo AI: greedy placement evaluator. Tries all rotations × columns,
+/// simulates the drop, scores the result, picks the best with slight randomness.
+fn demo_best_placement(grid: &Grid, piece_type: TetrominoType, rng: &mut u64) -> (usize, i32) {
+    let mut best_score = f32::NEG_INFINITY;
+    let mut best = (0usize, 4i32);
+    let mut candidates: [(usize, i32, f32); 40] = [(0, 0, f32::NEG_INFINITY); 40];
+    let mut n_candidates = 0;
+
+    for rot in 0..4usize {
+        let cells = piece_cells(piece_type, rot);
+        for col in -2..12i32 {
+            // Find landing row
+            let mut row = -2i32;
+            if !is_valid_position(grid, &cells, row, col) { continue; }
+            loop {
+                if is_valid_position(grid, &cells, row + 1, col) {
+                    row += 1;
+                } else {
+                    break;
+                }
+            }
+            // Simulate placement on a grid copy
+            let mut sim = grid.clone();
+            for &(dr, dc) in &cells {
+                let r = (row + dr) as usize;
+                let c = (col + dc) as usize;
+                if r < HEIGHT && c < WIDTH {
+                    sim.cells[r][c] = CellState::Occupied(piece_type as u32);
+                }
+            }
+            let score = demo_score_grid(&sim);
+            if n_candidates < 40 {
+                candidates[n_candidates] = (rot, col, score);
+                n_candidates += 1;
+            }
+            if score > best_score {
+                best_score = score;
+                best = (rot, col);
+            }
+        }
+    }
+
+    // Add slight randomness: 20% chance to pick a top-3 candidate instead of #1
+    *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    if (*rng >> 33) % 5 == 0 && n_candidates > 1 {
+        // Sort top candidates, pick from top 3
+        candidates[..n_candidates].sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        let pick = ((*rng >> 40) as usize) % n_candidates.min(3);
+        best = (candidates[pick].0, candidates[pick].1);
+    }
+
+    best
+}
+
+/// Score a grid state for the demo AI. Higher = better.
+fn demo_score_grid(grid: &Grid) -> f32 {
+    let mut score = 0.0f32;
+    let mut col_heights = [0i32; WIDTH];
+    let mut holes = 0i32;
+    let mut lines_cleared = 0i32;
+    let mut bumpiness = 0i32;
+
+    // Column heights and holes
+    for c in 0..WIDTH {
+        let mut found_top = false;
+        for r in 0..HEIGHT {
+            if grid.cells[r][c] != CellState::Empty {
+                if !found_top {
+                    col_heights[c] = (HEIGHT - r) as i32;
+                    found_top = true;
+                }
+            } else if found_top {
+                holes += 1;
+            }
+        }
+    }
+
+    // Complete lines
+    for r in 0..HEIGHT {
+        if grid.cells[r].iter().all(|c| *c != CellState::Empty) {
+            lines_cleared += 1;
+        }
+    }
+
+    // Bumpiness (height difference between adjacent columns)
+    for c in 0..WIDTH - 1 {
+        bumpiness += (col_heights[c] - col_heights[c + 1]).abs();
+    }
+
+    let aggregate_height: i32 = col_heights.iter().sum();
+
+    // Weights tuned for survival + line clears
+    score += lines_cleared as f32 * 8.0;          // strongly reward clears
+    score -= aggregate_height as f32 * 0.5;        // keep the stack low
+    score -= holes as f32 * 3.5;                   // holes are very bad
+    score -= bumpiness as f32 * 0.3;               // prefer flat surfaces
+
+    score
 }

@@ -65,6 +65,11 @@ Every crate and asset must have its license verified before being added to the p
 | winit | Windowing | Apache-2.0 |
 | cpal | Audio output | Apache-2.0 |
 | symphonia | Audio decoding | MPL-2.0* |
+| bytemuck | GPU struct casting | MIT/Apache-2.0 |
+| pollster | Async block_on | MIT/Apache-2.0 |
+| rfd | Native file dialogs | MIT |
+| rustfft | FFT analysis | MIT/Apache-2.0 |
+| serde + toml | Settings serialization | MIT/Apache-2.0 |
 
 *\* **symphonia note:** MPL-2.0 is file-level copyleft — modified symphonia source files must stay MPL-2.0, but it does not infect your own code. Generally considered safe for use in proprietary/permissive projects. However, before any public release, revisit whether a pure MIT/Apache-2.0 decoder alternative exists. Don't forget this — it's the one license outlier in the stack.*
 

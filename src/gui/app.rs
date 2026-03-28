@@ -78,9 +78,12 @@ impl ApplicationHandler for App {
                     K::Equal | K::NumpadAdd => self.world.adjust_volume(0.05),
                     K::Minus | K::NumpadSubtract => self.world.adjust_volume(-0.05),
                     _ => {
-                        let rg_key = winit_to_rg(code);
-                        if let Some(action) = input::map_key(rg_key) {
-                            self.world.handle_action(action);
+                        // Menu navigation takes priority over game actions
+                        if !self.world.handle_menu_key(&code) {
+                            let rg_key = winit_to_rg(code);
+                            if let Some(action) = input::map_key(rg_key) {
+                                self.world.handle_action(action);
+                            }
                         }
                     }
                 }
@@ -109,11 +112,13 @@ impl ApplicationHandler for App {
                         self.world.save_settings(); // persist new size
                     }
                 }
-                self.world.tick();
                 if let Some(gpu) = &self.gpu {
                     self.world.window_aspect = gpu.aspect_ratio();
                     let (sw, sh) = gpu.size();
                     self.world.window_size = [sw, sh];
+                }
+                self.world.tick();
+                if let Some(gpu) = &self.gpu {
                     let uniforms = self.world.compute_uniforms(gpu.aspect_ratio());
                     self.world.update_button_rects(&uniforms, gpu.aspect_ratio());
                     self.world.update_track_queue_rects();
@@ -137,6 +142,11 @@ impl ApplicationHandler for App {
                 let gpu_draw = self.world.effects.flow_field.gpu_draw_cmd();
                 if let Some(gpu) = &mut self.gpu {
                     gpu.render(&ov, &oi, &tv, &ti, &hv, &hi, gpu_draw.as_ref());
+                }
+                if self.world.should_quit {
+                    self.world.save_settings();
+                    event_loop.exit();
+                    return;
                 }
                 if let Some(w) = &self.window {
                     w.request_redraw();
