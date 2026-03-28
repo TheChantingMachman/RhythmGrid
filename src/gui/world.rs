@@ -485,6 +485,20 @@ impl GameWorld {
                     if self.effects.flags.line_clear_particles {
                         self.spawn_line_clear_particles(lines_cleared, piece_row);
                     }
+                    // Tetris: radial light wave through board cells
+                    if lines_cleared >= 4 {
+                        self.anims.board_waves.push(super::animations::BoardWave {
+                            origin_col: pre_piece.col as f32 + 0.5,
+                            origin_row: piece_row as f32,
+                            radius: 0.0,
+                            speed: 16.0,
+                            width: 2.5,
+                            intensity: 3.0,
+                            color: [1.0, 0.9, 0.6],
+                            life: 1.5,
+                            max_life: 1.5,
+                        });
+                    }
                     // Shatter fragments for cleared rows (tick path)
                     if self.effects.flags.clearing_flash {
                         self.anims.spawn_shatter_for_row_range(piece_row - lines_cleared as i32 + 1, lines_cleared);
@@ -742,6 +756,8 @@ impl GameWorld {
         // Switch from embedded track to user's music folder
         if self.music_folder.is_some() {
             let volume = if let Ok(a) = self.audio.try_lock() { a.volume } else { 0.8 };
+            // Shut down the old audio thread before starting a new one
+            if let Ok(mut a) = self.audio.lock() { a.shutdown = true; }
             self.audio = audio_output::start_audio(self.music_folder.as_deref());
             if let Ok(mut a) = self.audio.try_lock() { a.volume = volume; }
         }
@@ -856,6 +872,20 @@ impl GameWorld {
                     };
                     if lines > 0 && self.effects.flags.line_clear_particles {
                         self.spawn_line_clear_particles(lines, land_bottom);
+                    }
+                    // Tetris: radial light wave through board cells
+                    if lines >= 4 {
+                        self.anims.board_waves.push(super::animations::BoardWave {
+                            origin_col: piece_col as f32 + 0.5,
+                            origin_row: land_bottom as f32,
+                            radius: 0.0,
+                            speed: 16.0,
+                            width: 2.5,
+                            intensity: 3.0,
+                            color: [1.0, 0.9, 0.6],
+                            life: 1.5,
+                            max_life: 1.5,
+                        });
                     }
                     if self.effects.flags.camera_shake {
                         self.camera.trigger_shake((0.2 + lines as f32 * 0.25).min(1.0));

@@ -134,19 +134,38 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
         if r + 1 < HEIGHT && g[r+1][c] != CellState::Empty { nb |= 2; }
         if c > 0 && g[r][c-1] != CellState::Empty { nb |= 4; }
         if c + 1 < WIDTH && g[r][c+1] != CellState::Empty { nb |= 8; }
+        // Board wave — pulse of light radiating through occupied cells
+        let mut wave_bright = 0.0f32;
+        for wave in &world.anims.board_waves {
+            let (g, _) = wave.glow_at(cell.col as f32, cell.row as f32);
+            wave_bright += g;
+        }
+        wave_bright = wave_bright.min(3.0);
+        if wave_bright > 0.01 {
+            // Additive white flash — cells glow bright as wave passes
+            let add = wave_bright * 0.9;
+            color[0] = (color[0] + add).min(1.0);
+            color[1] = (color[1] + add).min(1.0);
+            color[2] = (color[2] + add).min(1.0);
+        }
         // Check settle animation for this cell
         let settle = world.anims.settle_cells.iter()
             .find(|s| s.col == cell.col && s.row == cell.row)
             .map(|s| (s.timer / super::animations::SETTLE_DURATION).clamp(0.0, 1.0))
             .unwrap_or(0.0);
-        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow, nb, settle);
+        push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, depth, color, band_glow + wave_bright * 2.0, nb, settle);
     }
 
-    // Ghost piece
+    // Ghost piece — dark on light backgrounds, piece-colored otherwise
     if ef.ghost_piece {
+        let bright_bg = world.color_grade.iter().sum::<f32>() > 2.5;
         for cell in &world.render_board.ghost {
-            let base_color = world.themed_piece_color(cell.type_index);
-            let ghost_color = rgba_to_f32([base_color[0], base_color[1], base_color[2], 40]);
+            let ghost_color = if bright_bg {
+                rgba_to_f32([10, 10, 10, 140])
+            } else {
+                let c = world.themed_piece_color(cell.type_index);
+                rgba_to_f32([c[0], c[1], c[2], 40])
+            };
             push_cube_3d(&mut tv, &mut ti, cell.col as f32, cell.row as f32, cube_depth * 0.2, ghost_color, 0.0, 0, 0.0);
         }
     }
@@ -192,17 +211,19 @@ pub fn build_scene_and_hud(world: &GameWorld) -> ((Vec<Vertex>, Vec<u32>), (Vec<
 
     // Hard drop trails — translucent streaks from start to landing
     for trail in &world.anims.drop_trails {
-        let progress = 1.0 - (trail.timer / super::animations::DROP_TRAIL_DURATION).max(0.0);
-        let alpha = (1.0 - progress) * 0.35;
+        let life = (trail.timer / super::animations::DROP_TRAIL_DURATION).clamp(0.0, 1.0);
+        let alpha = life * life * 0.35; // quadratic fade — smooth disappearance
         let mut color = rgba_to_f32(world.themed_piece_color(trail.type_index));
         color[3] = alpha;
-        // Cap trail length to 6 rows near the landing point
-        let trail_start = trail.start_row.max(trail.end_row - 6);
+        // Trail extends up to 10 rows from landing, fades upward
+        let trail_start = trail.start_row.max(trail.end_row - 10);
+        let trail_len = (trail.end_row - trail_start).max(1) as f32;
         for row in trail_start..trail.end_row {
             if row >= 0 && row < HEIGHT as i32 {
-                let fade = (row - trail_start) as f32 / (trail.end_row - trail_start).max(1) as f32;
+                let fade = (row - trail_start) as f32 / trail_len;
+                let fade = fade * fade; // quadratic spatial fade — smooth gradient
                 let mut c = color;
-                c[3] = alpha * fade; // brightest at landing, fades upward
+                c[3] = alpha * fade;
                 push_cube_3d(&mut tv, &mut ti, trail.col as f32, row as f32, cube_depth * 0.15, c, 0.0, 0, 0.0);
             }
         }

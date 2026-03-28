@@ -47,9 +47,38 @@ pub struct SettleCell {
     pub timer: f32,
 }
 
+/// A wave of light that radiates through board cells from an origin point.
+pub struct BoardWave {
+    pub origin_col: f32,
+    pub origin_row: f32,
+    pub radius: f32,
+    pub speed: f32,
+    pub width: f32,
+    pub intensity: f32,
+    pub color: [f32; 3],
+    pub life: f32,
+    pub max_life: f32,
+}
+
+impl BoardWave {
+    /// Returns the glow intensity (0.0-1.0) and color for a cell at (col, row).
+    pub fn glow_at(&self, col: f32, row: f32) -> (f32, [f32; 3]) {
+        let dx = col - self.origin_col;
+        let dy = row - self.origin_row;
+        let dist = (dx * dx + dy * dy).sqrt();
+        let ring_dist = (dist - self.radius).abs();
+        if ring_dist < self.width {
+            let strength = (1.0 - ring_dist / self.width) * self.intensity * (self.life / self.max_life);
+            (strength, self.color)
+        } else {
+            (0.0, [0.0; 3])
+        }
+    }
+}
+
 pub const LINE_CLEAR_DURATION: f32 = 0.4;
 pub const SHATTER_DURATION: f32 = 0.3;
-pub const DROP_TRAIL_DURATION: f32 = 0.2;
+pub const DROP_TRAIL_DURATION: f32 = 0.35;
 pub const SETTLE_DURATION: f32 = 0.15;
 
 pub struct Animations {
@@ -58,6 +87,7 @@ pub struct Animations {
     pub settle_cells: Vec<SettleCell>,
     pub shatter_fragments: Vec<ShatterFragment>,
     pub bg_rings: Vec<BgRing>,
+    pub board_waves: Vec<BoardWave>,
     pub t_spin_flash: f32,
     pub level_up_flash: f32,
 }
@@ -70,6 +100,7 @@ impl Animations {
             settle_cells: Vec::new(),
             shatter_fragments: Vec::new(),
             bg_rings: Vec::new(),
+            board_waves: Vec::new(),
             t_spin_flash: 0.0,
             level_up_flash: 0.0,
         }
@@ -114,6 +145,13 @@ impl Animations {
             cell.timer -= dt;
         }
         self.settle_cells.retain(|c| c.timer > 0.0);
+
+        // Board waves — expand and decay
+        for wave in &mut self.board_waves {
+            wave.radius += wave.speed * dt;
+            wave.life -= dt;
+        }
+        self.board_waves.retain(|w| w.life > 0.0);
 
         // Flash decays
         self.t_spin_flash = (self.t_spin_flash - dt * 1.0).max(0.0);
@@ -169,5 +207,6 @@ impl Animations {
     pub fn clear(&mut self) {
         self.clearing_cells.clear();
         self.bg_rings.clear();
+        self.board_waves.clear();
     }
 }

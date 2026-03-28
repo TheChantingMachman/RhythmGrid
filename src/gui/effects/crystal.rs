@@ -536,7 +536,7 @@ impl AudioEffect for Crystal {
 
         // Volumetric smoke — layered dark soft circles at varying depths
         // Heavy, smoky look like a photographic negative
-        let fog_layers = 18;
+        let fog_layers = 28;
         let fog_center_x = 5.0;
         let fog_center_y = -10.0;
         let hash = |n: f32| -> f32 {
@@ -547,10 +547,10 @@ impl AudioEffect for Crystal {
             let t = layer as f32 / fog_layers as f32;
             let z = -4.8 + t * 4.0;
             let seed = layer as f32 + self.time * 0.02;
-            let ox = (hash(seed) - 0.5) * 18.0;
-            let oy = (hash(seed + 7.3) - 0.5) * 18.0;
-            let size = 3.0 + hash(seed + 13.7) * 10.0;
-            let density = 0.04 + hash(seed + 23.1) * 0.08;
+            let ox = (hash(seed) - 0.5) * 20.0;
+            let oy = (hash(seed + 7.3) - 0.5) * 20.0;
+            let size = 4.0 + hash(seed + 13.7) * 12.0;
+            let density = 0.06 + hash(seed + 23.1) * 0.12;
 
             let fx = fog_center_x + ox;
             let fy = fog_center_y + oy;

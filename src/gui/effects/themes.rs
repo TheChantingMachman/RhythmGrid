@@ -474,13 +474,13 @@ pub fn crystal_theme() -> VisualTheme {
         },
         bindings: EffectBindings::default_bindings(),
         piece_colors: Some([
-            [ 30,  30,  50, 255], // I — dark slate
-            [ 40,  40,  60, 255], // O — charcoal
-            [ 20,  20,  40, 255], // T — deep navy
-            [ 50,  50,  70, 255], // S — steel
-            [ 25,  25,  45, 255], // Z — dark blue
-            [ 15,  15,  35, 255], // J — near black
-            [ 45,  45,  65, 255], // L — medium slate
+            [ 15,  15,  30, 255], // I — dark slate
+            [ 20,  20,  35, 255], // O — charcoal
+            [ 10,  10,  25, 255], // T — deep navy
+            [ 25,  25,  40, 255], // S — steel
+            [ 12,  12,  28, 255], // Z — dark blue
+            [  8,   8,  20, 255], // J — near black
+            [ 22,  22,  38, 255], // L — medium slate
         ]),
     }
 }
