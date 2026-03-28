@@ -58,6 +58,7 @@ pub struct GameWorld {
     pub logical_window_size: [u32; 2],
     pub(super) bindings: themes::EffectBindings,
     pub(super) show_title: bool,
+    pub(super) show_credits: bool,
     pub should_quit: bool,
     title_theme_idx: usize, // index into TITLE_THEMES
     saved_theme_index: usize, // user's preferred theme, restored on Play
@@ -211,6 +212,7 @@ impl GameWorld {
             ],
             fft_locked: false,
             show_title: true,
+            show_credits: false,
             should_quit: false,
             title_theme_idx: 0,
             saved_theme_index: theme_index,
@@ -687,29 +689,40 @@ impl GameWorld {
                 self.title_idle_timer = 0.0;
                 self.title_buttons_visible = true;
             }
+            // Handle back from credits
+            if self.show_credits {
+                match code {
+                    K::Escape | K::Enter | K::Space => { self.show_credits = false; }
+                    _ => {}
+                }
+                return true;
+            }
             match code {
                 K::ArrowUp => {
-                    // Skip disabled items (Settings=1, Credits=2) going up
+                    // Cycle: Play(0) → Credits(2) → Exit(3), skip Settings(1)
                     self.title_selection = match self.title_selection {
-                        0 => 3,  // wrap to Exit
-                        3 => 0,  // skip disabled, go to Play
+                        0 => 3,
+                        2 => 0,
+                        3 => 2,
                         _ => 0,
                     };
                     true
                 }
                 K::ArrowDown => {
                     self.title_selection = match self.title_selection {
-                        0 => 3,  // skip disabled, go to Exit
-                        3 => 0,  // wrap to Play
-                        _ => 3,
+                        0 => 2,
+                        2 => 3,
+                        3 => 0,
+                        _ => 0,
                     };
                     true
                 }
                 K::Enter | K::Space => {
                     match self.title_selection {
                         0 => self.start_game_from_title(),
+                        2 => { self.show_credits = true; }
                         3 => { self.save_settings(); self.should_quit = true; }
-                        _ => {} // disabled
+                        _ => {}
                     }
                     true
                 }
@@ -1041,10 +1054,17 @@ impl GameWorld {
         if self.show_title {
             let [mx, my] = self.cursor_pos;
             let hit = |r: [f32; 4]| mx >= r[0] && mx <= r[0]+r[2] && my >= r[1] && my <= r[1]+r[3];
+            if self.show_credits {
+                // Any click dismisses credits
+                self.show_credits = false;
+                return;
+            }
             if hit(self.title_btn_rects[0]) {
                 self.start_game_from_title();
             }
-            // Settings (index 1) and Credits (index 2) are greyed out — no action
+            if hit(self.title_btn_rects[2]) {
+                self.show_credits = true;
+            }
             if hit(self.title_btn_rects[3]) {
                 // Exit
                 self.save_settings();

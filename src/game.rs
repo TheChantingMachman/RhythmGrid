@@ -34,10 +34,14 @@ pub fn is_valid_position(grid: &Grid, cells: &[(i32, i32)], row: i32, col: i32) 
     for &(dr, dc) in cells {
         let r = row + dr;
         let c = col + dc;
+        // Column bounds always checked — even in the vanish zone (r < 0)
+        if c < 0 || c as usize >= WIDTH {
+            return false;
+        }
         if r < 0 {
             continue;
         }
-        if c < 0 || c as usize >= WIDTH || r as usize >= HEIGHT {
+        if r as usize >= HEIGHT {
             return false;
         }
         if grid.cells[r as usize][c as usize] != CellState::Empty {

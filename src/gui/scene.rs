@@ -625,6 +625,11 @@ fn build_title_screen(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, _world: &
     push_text_embossed(verts, indices, title_x, title_y, title_text,
               rgba_to_f32([255, 255, 255, 255]), title_scale);
 
+    if _world.show_credits {
+        build_credits_screen(verts, indices, w, h);
+        return;
+    }
+
     if !buttons_visible { return; }
 
     // Buttons
@@ -645,7 +650,7 @@ fn build_title_screen(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, _world: &
     let sel = _world.title_selection;
 
     let labels = ["PLAY", "SETTINGS", "CREDITS", "EXIT"];
-    let enabled = [true, false, false, true];
+    let enabled = [true, false, true, true];
 
     for (i, &label) in labels.iter().enumerate() {
         let by = btn_y_start + i as f32 * btn_spacing;
@@ -664,4 +669,61 @@ fn build_title_screen(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, _world: &
             push_text_embossed(verts, indices, text_cx(label), text_cy(by), label, disabled_col, btn_scale);
         }
     }
+}
+
+fn build_credits_screen(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, w: f32, h: f32) {
+    let highlight = rgba_to_f32([255, 255, 100, 255]);
+    let text_col = rgba_to_f32([220, 220, 230, 255]);
+    let dim_col = rgba_to_f32([150, 150, 160, 200]);
+    let cx = w / 2.0;
+
+    let title = "CREDITS";
+    let title_scale = 4.0;
+    let title_w = title.len() as f32 * 4.0 * title_scale;
+    push_text_embossed(verts, indices, cx - title_w / 2.0, h * 0.18, title, highlight, title_scale);
+
+    let mut y = h * 0.30;
+    let line_h = 20.0;
+    let section_gap = 12.0;
+
+    let centered = |verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, y: f32, text: &str, color: [f32; 4], scale: f32| {
+        let tw = text.len() as f32 * 4.0 * scale;
+        push_text_embossed(verts, indices, cx - tw / 2.0, y, text, color, scale);
+    };
+
+    // Development
+    centered(verts, indices, y, "DEVELOPMENT", highlight, 2.5);
+    y += line_h + 4.0;
+    centered(verts, indices, y, "BY NATHAN", text_col, 2.0);
+    y += line_h + section_gap;
+
+    // Thanks
+    centered(verts, indices, y, "THANKS TO", highlight, 2.5);
+    y += line_h + 4.0;
+    centered(verts, indices, y, "BRIAN  BRYAN  MCCABE", text_col, 2.0);
+    y += line_h + section_gap;
+
+    // Technology
+    centered(verts, indices, y, "BUILT WITH", highlight, 2.5);
+    y += line_h + 4.0;
+    centered(verts, indices, y, "RUST  WGPU  WINIT  CPAL", dim_col, 1.5);
+    y += line_h + section_gap;
+
+    // Music attribution (CC BY 3.0 requires full credit)
+    centered(verts, indices, y, "MUSIC", highlight, 2.5);
+    y += line_h + 4.0;
+    centered(verts, indices, y, "NEON UNDERWORLD BY PUNCH DECK", text_col, 1.8);
+    y += line_h - 2.0;
+    centered(verts, indices, y, "SOUNDCLOUD.COM/PUNCH-DECK", dim_col, 1.3);
+    y += line_h - 4.0;
+    centered(verts, indices, y, "ROYALTY FREE MUSIC BY", dim_col, 1.3);
+    y += line_h - 4.0;
+    centered(verts, indices, y, "FREE-STOCK-MUSIC.COM", dim_col, 1.3);
+    y += line_h - 4.0;
+    centered(verts, indices, y, "CC BY 3.0 UNPORTED", dim_col, 1.3);
+    y += line_h - 4.0;
+    centered(verts, indices, y, "CREATIVECOMMONS.ORG/LICENSES/BY/3.0", dim_col, 1.0);
+    y += line_h + section_gap;
+
+    centered(verts, indices, y + 20.0, "PRESS ANY KEY", dim_col, 1.5);
 }
