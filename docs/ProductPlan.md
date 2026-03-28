@@ -41,21 +41,21 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 
 ## Priority Backlog
 
-### High Priority (ship blockers)
+### Completed
+- ~~Credits screen~~ — done. Full CC BY 3.0 attribution, accessible from title menu.
+- ~~Visual juice (Phase A)~~ — done. Z-shake on hard drop, smoother trails, board wave on tetris.
+- ~~Title screen~~ — done. Play/Settings/Credits/Exit, keyboard nav, theme backgrounds, idle fade.
+- ~~Demo AI~~ — done. Greedy placer with scoring (height, holes, clears, bumpiness).
 
-**Action audio feedback (Phase A)** — per-band EQ boost on the music at the moment of player actions, with quiet percussive tap fallback during silence. The game is visually rich but audibly unresponsive during gameplay. See [Action-Reactive Audio](#action-reactive-audio-the-feel-gap) below.
+### High Priority
 
-**Credits screen** — attribute built-in music artists. License requires attribution — distribution blocker. Accessible from pause/title menu.
-
-**Visual juice (Phase A)** — camera Z-shake on hard drop, line clear flash, lock particle burst, combo scale animation. Pairs with SFX for the full action-feedback loop.
+**Action audio feedback (Phase A)** — per-band EQ boost on the music at the moment of player actions, with quiet percussive tap fallback during silence. The game is visually rich but audibly unresponsive during gameplay. Blocked on design research (study Tetris Effect). See [Action-Reactive Audio](#action-reactive-audio-the-feel-gap) below.
 
 ### Medium Priority
 
-**Title screen** — main menu (Play, Settings, Credits, Quit). Current launch-straight-to-game feels like a prototype.
-
-**Controller support** — gamepad input + DAS/ARR tuning. winit supports gamepad events. Needs input abstraction layer.
-
 **Playlists** — save/load named playlists, queue management, drag-to-reorder. Currently folder-only with sequential/shuffle play.
+
+**Controller support** — gamepad input via gilrs (MIT/Apache-2.0, license-clean) + DAS/ARR tuning. Deprioritized for now.
 
 ### Low Priority
 
@@ -68,8 +68,6 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 **Repeat mode** — repeat-one / repeat-all toggle alongside existing shuffle.
 
 **3D font / SDF text** — replace the 3x5 bitmap font with proper text rendering. Options: SDF font atlas (smooth at any scale), or 3D extruded letter meshes for the title screen. Current bitmap font is functional but visibly pixelated at large scales (title screen).
-
-**Credits screen expansion** — as built-in library grows, credits must scale.
 
 **Expand built-in music library** — more CC/royalty-free tracks. Organize in `assets/music/` with a manifest (artist, title, license, source URL). OGG Vorbis preferred for size.
 
@@ -157,7 +155,7 @@ The louder the music, the less the game adds. The quieter the music, the more th
 - Decide project license: MIT or Apache-2.0 (see Guidelines.md — unresolved since project start)
 - Symphonia (audio decoder) is MPL-2.0 — file-level copyleft. Evaluate whether a pure MIT/Apache alternative exists before public distribution. It's the one license outlier in the stack.
 - Full dependency license audit (`cargo license` or manual) — verify no GPL/LGPL crept in via transitive deps
-- Built-in music attribution — credits screen is a ship blocker (see Priority Backlog)
+- Built-in music attribution — ✓ done (credits screen + assets/LICENSES.md)
 
 ### Platform Testing
 - Vulkan on AMD/NVIDIA/Intel Linux
@@ -171,38 +169,38 @@ The louder the music, the less the game adds. The quieter the music, the more th
 ## Roadmap
 
 ### Next up — "feel" release
-1. **Action audio feedback (Phase A)** — music-amplification boost + percussive tap fallback
-2. **Visual juice (Phase A)** — hard drop shake, clear flash, lock burst
-3. **Credits screen** — artist attribution (distribution blocker)
+1. **Action audio feedback (Phase A)** — music-amplification boost + percussive tap fallback. Blocked on Tetris Effect design research.
 
-### Near-term — "complete product"
-4. **Demo AI improvement** — smarter placement for a visually satisfying idle experience (greedy column-height minimizer, T-spin/tetris chasing, paced to avoid instant game-overs)
-5. **Title screen** — main menu
-5. **Controller support** — gamepad + DAS/ARR
-6. **Playlists** — save/load/reorder, track metadata
+### Near-term — journey polish + "complete product"
+2. **Journey system polish (WIP)** — current implementation works but needs:
+   - *Transition effect/fanfare* — theme changes are abrupt. Add a visual transition (flash, fade, particle burst) when advancing to the next stage. Should feel like an event, not a glitch.
+   - *Auto-registration of new themes* — current JOURNEY_ORDER is a hardcoded array that must be manually updated when themes are added. Refactor so new themes auto-register with a coolness rank, and the journey builds the order dynamically. Eliminates maintenance.
+   - *Pro player scaling* — 200 lines is trivial for experienced players. Consider: journey length scales with game speed setting, or journey milestones are level-based not line-based, or journey is a percentage of the player's historical average game length. Default should never feel like a gate to someone who clears 200 lines in 5 minutes.
+   - *Settings exposure* — future settings menu should allow: journey length (100/200/500/endless), disable journey (free theme switching from start), lock to a single theme. The current defaults should be good for casual players without configuration.
+3. **Playlists** — save/load/reorder, track metadata
+4. **Controller support** — gamepad via gilrs + DAS/ARR (deprioritized)
 
 ### Medium-term — polish
-7. **Settings menu**
-8. **5-6 next preview** — minimalist, respects clean UI
-9. **Expand built-in music library**
-10. **Repeat mode**
-11. **Folder drag-and-drop**
+4. **Settings menu**
+5. **5-6 next preview** — minimalist, respects clean UI
+6. **Expand built-in music library**
+7. **Repeat mode**
+8. **Folder drag-and-drop**
+9. **3D font / SDF text**
 
 ### Long-term — differentiation
-12. **Advanced visualizer AI** — upgrade demo mode from greedy placer to a music-aware performer. Pace piece placement to the beat, chase tetrises/T-spins during high-energy sections, play conservatively during quiet passages. Time line clears to land on strong beats. The AI should make the visualizer look *choreographed* rather than algorithmic.
-13. **Adaptive theme selection** — auto-switch based on music energy
-13. **Background environments** — procedural 3D scenes per theme
-14. **Screen-space effects** — chromatic aberration, vignette, radial blur
-15. **GPU particle generalization** — extend compute shader to all effects
-16. **SDF text rendering** — smooth scalable fonts
-17. **Visualizer-only mode** — fullscreen music visualization, no game
-18. **Music-reactive demo AI** — demo that performs to the music
+10. **Advanced visualizer AI** — music-aware demo that paces to the beat, chases tetrises during high-energy sections, times clears to strong beats
+11. **Adaptive theme selection** — auto-switch based on music energy
+12. **Background environments** — procedural 3D scenes per theme
+13. **Screen-space effects** — chromatic aberration, vignette, radial blur
+14. **GPU particle generalization** — extend compute shader to all effects
+15. **Visualizer-only mode** — fullscreen music visualization, no game
 
 ### Horizon — "rivals Tetris Effect"
-19. **Beat-quantized boost (Phase B)** — snap EQ boosts to beat subdivisions via tempo tracker
-20. **Key-matched synthesis (Phase C)** — chromagram key detection, pentatonic action tones blended with boost
-21. **Custom music analysis** — pre-scan for BPM, sections, energy map
-22. **Platform expansion** — web (WebGPU), macOS, Steam
+16. **Beat-quantized boost (Phase B)** — snap EQ boosts to beat subdivisions via tempo tracker
+17. **Key-matched synthesis (Phase C)** — chromagram key detection, pentatonic action tones blended with boost
+18. **Custom music analysis** — pre-scan for BPM, sections, energy map
+19. **Platform expansion** — web (WebGPU), macOS, Steam
 
 ---
 

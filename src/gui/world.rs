@@ -17,6 +17,20 @@ use super::effects::themes;
 use super::renderer::{Uniforms, perspective, look_at, mat4_mul};
 use super::theme::{DEFAULT_CAM_ANGLE, THEME};
 
+// Journey mode: theme indices sorted by "coolness" (lowest → highest).
+// Themes escalate through this order every 25 lines. Reorder to taste.
+// Indices: 0=Default, 1=Water, 2=Space, 3=Flow, 4=Fluid, 5=Crystal, 6=Fractal, 7=Pipes
+const JOURNEY_ORDER: [usize; 8] = [
+    0, // Default — baseline
+    1, // Water — gentle
+    2, // Space — atmospheric
+    7, // Pipes — mechanical
+    4, // Fluid — dynamic
+    5, // Crystal — dramatic
+    3, // Flow — immersive
+    6, // Fractal — climax
+];
+
 pub struct GameWorld {
     pub session: GameSession,
     pub last_tick: Instant,
@@ -49,6 +63,9 @@ pub struct GameWorld {
     pub(super) toast_timer: f32,
     pub(super) theme_index: usize,
     theme_auto_timer: f32,
+    // Journey system — escalating theme progression during a game
+    journey_stage: usize,       // current stage (0..8), advances every 25 lines
+    journey_unlocked: bool,     // true after 200 lines — F1 unlocks for manual theme selection
     pub color_grade: [f32; 3],
     pub(super) music_folder: Option<String>,
     pub saved_window_width: u32,
@@ -61,7 +78,8 @@ pub struct GameWorld {
     pub(super) show_credits: bool,
     pub should_quit: bool,
     title_theme_idx: usize, // index into TITLE_THEMES
-    saved_theme_index: usize, // user's preferred theme, restored on Play
+    #[allow(dead_code)]
+    saved_theme_index: usize, // user's preferred theme, may be used for post-journey default
     pub(super) title_btn_rects: [[f32; 4]; 4], // Play, Settings, Credits, Exit — screen-space [x,y,w,h]
     pub(super) pause_exit_rect: [f32; 4],     // "EXIT TO TITLE" button in pause menu
     pub(super) title_selection: usize,        // 0=Play, 1=Settings, 2=Credits, 3=Exit
@@ -180,6 +198,8 @@ impl GameWorld {
             toast_timer: 0.0,
             theme_index,
             theme_auto_timer: 240.0, // 4 minutes
+            journey_stage: 0,
+            journey_unlocked: false,
             color_grade: theme.color_grade,
             music_folder: settings.music_folder.clone(),
             saved_window_width: settings.window_width,
@@ -330,6 +350,25 @@ impl GameWorld {
             self.last_level = current_level;
         }
 
+        // Journey system — theme escalation every 25 lines, 200 lines = full journey
+        if !self.journey_unlocked {
+            let new_stage = (self.session.total_lines as usize / 25).min(JOURNEY_ORDER.len());
+            if new_stage > self.journey_stage {
+                self.journey_stage = new_stage;
+                if new_stage >= JOURNEY_ORDER.len() {
+                    // Journey complete — unlock F1
+                    self.journey_unlocked = true;
+                    self.toast_text = "JOURNEY COMPLETE - F1 UNLOCKED".to_string();
+                    self.toast_timer = 3.0;
+                } else {
+                    // Advance to next theme in coolness order
+                    let next_theme = JOURNEY_ORDER[new_stage];
+                    self.theme_index = next_theme;
+                    self.apply_theme_by_index(next_theme);
+                }
+            }
+        }
+
         // Build AudioFrame BEFORE decay so effects see fresh beat triggers
         self.audio_frame = self.analysis.audio_frame(self.danger_level, dt as f32);
 
@@ -408,7 +447,7 @@ impl GameWorld {
             ];
         }
 
-        // Auto-cycle themes
+        // Auto-cycle themes (title screen + post-journey only, not during journey)
         self.theme_auto_timer -= dt as f32;
         if self.theme_auto_timer <= 0.0 {
             self.theme_auto_timer = 240.0;
@@ -419,8 +458,8 @@ impl GameWorld {
                 let idx = TITLE_THEMES[self.title_theme_idx];
                 self.theme_index = idx;
                 self.apply_theme_by_index(idx);
-            } else if self.theme_index != 8 {
-                // In-game: cycle all themes except Debug
+            } else if self.journey_unlocked && self.theme_index != 8 {
+                // In-game post-journey: cycle all themes except Debug
                 let next = (self.theme_index + 1) % 8;
                 self.theme_index = next;
                 self.apply_theme_by_index(next);
@@ -591,6 +630,12 @@ impl GameWorld {
     }
 
     pub fn cycle_theme(&mut self) {
+        if !self.journey_unlocked && !self.show_title && !self.demo_mode {
+            // F1 locked during journey — show hint
+            self.toast_text = format!("F1 UNLOCKS AT {} LINES", JOURNEY_ORDER.len() * 25);
+            self.toast_timer = 1.5;
+            return;
+        }
         let count = Self::theme_fns().len();
         self.theme_index = (self.theme_index + 1) % count;
         self.apply_theme_by_index(self.theme_index);
@@ -763,9 +808,12 @@ impl GameWorld {
         self.danger_level = 0.0;
         self.last_level = 1;
         self.camera.reset();
-        // Restore user's preferred theme
-        self.theme_index = self.saved_theme_index;
-        self.apply_theme_by_index(self.saved_theme_index);
+        // Reset journey — start from first theme in coolness order
+        self.journey_stage = 0;
+        self.journey_unlocked = false;
+        let first_theme = JOURNEY_ORDER[0];
+        self.theme_index = first_theme;
+        self.apply_theme_by_index(first_theme);
         // Switch from embedded track to user's music folder
         if self.music_folder.is_some() {
             let volume = if let Ok(a) = self.audio.try_lock() { a.volume } else { 0.8 };
@@ -948,13 +996,18 @@ impl GameWorld {
                     if self.show_title {
                         self.start_game_from_title();
                     } else {
-                        // Restart from game over
+                        // Restart from game over — reset journey
                         self.session = GameSession::new();
                         self.last_tick = Instant::now();
                         self.anims.clear();
                         self.danger_level = 0.0;
                         self.last_level = 1;
                         self.camera.reset();
+                        self.journey_stage = 0;
+                        self.journey_unlocked = false;
+                        let first_theme = JOURNEY_ORDER[0];
+                        self.theme_index = first_theme;
+                        self.apply_theme_by_index(first_theme);
                     }
                 }
                 if action == GameAction::BackToMenu {
