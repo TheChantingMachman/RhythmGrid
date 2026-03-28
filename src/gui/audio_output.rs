@@ -534,13 +534,24 @@ fn stream_decode_bytes(
     true
 }
 
+/// Starts audio with an explicit file list (playlist). Returns shared state + action channel.
+pub fn start_audio_playlist(files: Vec<String>) -> (Arc<Mutex<AudioState>>, Arc<AudioActions>) {
+    let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+    start_audio_inner(Some(paths), None)
+}
+
 /// Starts the audio output stream. Returns shared state + action channel.
 pub fn start_audio(music_folder: Option<&str>) -> (Arc<Mutex<AudioState>>, Arc<AudioActions>) {
+    let folder_owned = music_folder.map(|s| s.to_string());
+    let files = folder_owned.as_ref().map(|f| scan_folder(Path::new(f)));
+    start_audio_inner(files, folder_owned)
+}
+
+fn start_audio_inner(files: Option<Vec<PathBuf>>, _folder: Option<String>) -> (Arc<Mutex<AudioState>>, Arc<AudioActions>) {
     let state = Arc::new(Mutex::new(AudioState::new()));
     let actions = Arc::new(AudioActions::new());
     let state_clone = state.clone();
     let actions_clone = actions.clone();
-    let folder_owned = music_folder.map(|s| s.to_string());
 
     std::thread::spawn(move || {
         let host = cpal::default_host();
@@ -560,16 +571,14 @@ pub fn start_audio(music_folder: Option<&str>) -> (Arc<Mutex<AudioState>>, Arc<A
         let mut playlist: Option<Playlist> = None;
         let mut use_embedded = true;
 
-        if let Some(folder) = &folder_owned {
-            let files = scan_folder(Path::new(folder));
-            if !files.is_empty() {
-                // Populate track list for GUI display
+        if let Some(file_list) = files {
+            if !file_list.is_empty() {
                 if let Ok(mut s) = state_clone.lock() {
-                    s.track_list = files.iter()
+                    s.track_list = file_list.iter()
                         .map(|p| track_name_from_path(p))
                         .collect();
                 }
-                playlist = Some(Playlist::new(files));
+                playlist = Some(Playlist::new(file_list));
                 use_embedded = false;
             }
         }

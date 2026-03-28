@@ -31,6 +31,8 @@ pub struct Settings {
     pub window_x: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_y: Option<i32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub playlist: Vec<String>,
 }
 
 impl Default for Settings {
@@ -45,6 +47,7 @@ impl Default for Settings {
             window_height: 800,
             window_x: None,
             window_y: None,
+            playlist: Vec::new(),
         }
     }
 }

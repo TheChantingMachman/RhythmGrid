@@ -87,6 +87,18 @@ pub struct GameWorld {
     pub(super) title_idle_timer: f32,         // seconds since last input on title screen
     pub(super) title_buttons_visible: bool,
     pub(super) pause_selection: usize,        // 0=Resume, 1=Exit to Title
+    // Playlist panel
+    pub(super) show_playlist_panel: bool,
+    pub(super) playlist: Vec<String>,          // ordered file paths — the play order
+    pub(super) folder_tracks: Vec<String>,     // all tracks in current folder
+    pub(super) folder_display: Vec<String>,    // "Artist - Title" for folder_tracks
+    pub(super) playlist_display: Vec<String>,  // "Artist - Title" for playlist
+    pub(super) playlist_scroll: usize,
+    pub(super) folder_scroll: usize,
+    pub(super) folder_last_clicked: Option<usize>,
+    pub(super) playlist_panel_btn_rects: [[f32; 4]; 4], // Browse, Add All, Clear, Play
+    pub(super) playlist_panel_left_rect: [f32; 4],       // left column click area
+    pub(super) playlist_panel_right_rect: [f32; 4],      // right column click area
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -149,10 +161,50 @@ impl GameWorld {
             window_height: self.logical_window_size[1],
             window_x: self.saved_window_x,
             window_y: self.saved_window_y,
-            ..rhythm_grid::config::Settings::default()
+            playlist: self.playlist.clone(),
         };
         let path = config_dir().join("settings.toml");
         let _ = save_settings(&settings, &path);
+    }
+
+    /// Build display name for a track path using metadata with filename fallback.
+    fn track_display_name(path: &str) -> String {
+        let pb = std::path::PathBuf::from(path);
+        if let Some(meta) = rhythm_grid::audio::read_track_meta(&pb) {
+            match (meta.artist, meta.title) {
+                (Some(artist), Some(title)) => return format!("{} - {}", artist, title),
+                (None, Some(title)) => return title,
+                (Some(artist), None) => return artist,
+                _ => {}
+            }
+        }
+        pb.file_stem()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Unknown".to_string())
+    }
+
+    /// Scan folder and populate folder_tracks + folder_display.
+    fn load_folder_contents(&mut self) {
+        self.folder_tracks.clear();
+        self.folder_display.clear();
+        if let Some(ref folder) = self.music_folder {
+            let files = rhythm_grid::music::scan_folder(std::path::Path::new(folder));
+            for f in &files {
+                self.folder_tracks.push(f.to_string_lossy().to_string());
+            }
+            self.folder_display = self.folder_tracks.iter()
+                .map(|p| Self::track_display_name(p))
+                .collect();
+        }
+        self.folder_scroll = 0;
+    }
+
+    /// Rebuild playlist display names from paths, dropping missing files.
+    fn refresh_playlist_display(&mut self) {
+        self.playlist.retain(|p| std::path::Path::new(p).exists());
+        self.playlist_display = self.playlist.iter()
+            .map(|p| Self::track_display_name(p))
+            .collect();
     }
 
     pub fn new() -> Self {
@@ -244,6 +296,17 @@ impl GameWorld {
             title_idle_timer: 0.0,
             title_buttons_visible: true,
             pause_selection: 0,
+            show_playlist_panel: false,
+            playlist: settings.playlist.clone(),
+            folder_tracks: Vec::new(),
+            folder_display: Vec::new(),
+            playlist_display: Vec::new(),
+            playlist_scroll: 0,
+            folder_scroll: 0,
+            folder_last_clicked: None,
+            playlist_panel_btn_rects: [[0.0; 4]; 4],
+            playlist_panel_left_rect: [0.0; 4],
+            playlist_panel_right_rect: [0.0; 4],
             demo_mode: false,
             demo_idle_timer: 0.0,
             demo_action_timer: 0.0,
@@ -447,6 +510,46 @@ impl GameWorld {
                 btn_x / tw * sw, btn_y / th * sh,
                 btn_w / tw * sw, btn_h / th * sh,
             ];
+        }
+
+        // Playlist panel button rects (theme coords → screen coords)
+        if self.show_playlist_panel {
+            let tw = THEME.win_w as f32;
+            let th = THEME.win_h as f32;
+            let sw = self.window_size[0];
+            let sh = self.window_size[1];
+            let sx = |x: f32| x / tw * sw;
+            let sy = |y: f32| y / th * sh;
+            let scale_w = sw / tw;
+            let scale_h = sh / th;
+
+            let panel_w = tw * 0.85;
+            let panel_h = th * 0.80;
+            let panel_x = (tw - panel_w) / 2.0;
+            let panel_y = (th - panel_h) / 2.0;
+            let col_gap = 16.0;
+            let col_w = (panel_w - col_gap - 20.0) / 2.0;
+            let left_x = panel_x + 10.0;
+            let right_x = left_x + col_w + col_gap;
+            let list_top = panel_y + 36.0 + 16.0;
+            let list_h = panel_h - 80.0 - 16.0;
+
+            self.playlist_panel_left_rect = [sx(left_x), sy(list_top), col_w * scale_w, list_h * scale_h];
+            self.playlist_panel_right_rect = [sx(right_x), sy(list_top), col_w * scale_w, list_h * scale_h];
+
+            // Bottom buttons: Browse, Add All, Clear, Play
+            let btn_y = panel_y + panel_h - 32.0;
+            let btn_w_t = 70.0;
+            let btn_h_t = 20.0;
+            let btn_gap_t = 10.0;
+            let total_w = 4.0 * btn_w_t + 3.0 * btn_gap_t;
+            let btn_start_x = panel_x + (panel_w - total_w) / 2.0;
+            for i in 0..4 {
+                let bx = btn_start_x + i as f32 * (btn_w_t + btn_gap_t);
+                self.playlist_panel_btn_rects[i as usize] = [
+                    sx(bx), sy(btn_y), btn_w_t * scale_w, btn_h_t * scale_h,
+                ];
+            }
         }
 
         // Auto-cycle themes (title screen + post-journey only, not during journey)
@@ -738,6 +841,14 @@ impl GameWorld {
     /// Handle Up/Down/Enter for menu navigation. Returns true if key was consumed.
     pub fn handle_menu_key(&mut self, code: &winit::keyboard::KeyCode) -> bool {
         use winit::keyboard::KeyCode as K;
+        // Playlist panel absorbs all keys when open
+        if self.show_playlist_panel {
+            match code {
+                K::Escape => { self.show_playlist_panel = false; }
+                _ => {}
+            }
+            return true;
+        }
         if self.show_title {
             // Any navigation key wakes the buttons
             if matches!(code, K::ArrowUp | K::ArrowDown | K::Enter | K::Space) {
@@ -846,6 +957,12 @@ impl GameWorld {
             self.danger_level = 0.0;
             self.last_level = 1;
             self.camera.reset();
+            // Reset journey
+            self.journey_stage = 0;
+            self.journey_unlocked = false;
+            let first_theme = JOURNEY_ORDER[0];
+            self.theme_index = first_theme;
+            self.apply_theme_by_index(first_theme);
         }
         self.demo_idle_timer = 0.0;
     }
@@ -1165,6 +1282,38 @@ impl GameWorld {
             }
             return;
         }
+        // Playlist panel clicks
+        if self.show_playlist_panel {
+            let [mx, my] = self.cursor_pos;
+            let hit = |r: [f32; 4]| mx >= r[0] && mx <= r[0]+r[2] && my >= r[1] && my <= r[1]+r[3];
+
+            // Bottom buttons: Browse(0), Add All(1), Clear(2), Play(3)
+            if hit(self.playlist_panel_btn_rects[0]) { self.browse_folder(); }
+            else if hit(self.playlist_panel_btn_rects[1]) { self.playlist_add_all(); }
+            else if hit(self.playlist_panel_btn_rects[2]) { self.playlist_clear(); }
+            else if hit(self.playlist_panel_btn_rects[3]) { self.playlist_apply(); }
+            // Right column click — add track to playlist
+            else if hit(self.playlist_panel_right_rect) {
+                let r = self.playlist_panel_right_rect;
+                let rel_y = my - r[1];
+                let line_h = 12.0 * self.window_size[1] / THEME.win_h as f32;
+                let clicked_idx = self.folder_scroll + (rel_y / line_h) as usize;
+                if clicked_idx < self.folder_tracks.len() {
+                    self.folder_last_clicked = Some(clicked_idx);
+                }
+                self.playlist_add(clicked_idx);
+            }
+            // Left column click — remove track from playlist
+            else if hit(self.playlist_panel_left_rect) {
+                let r = self.playlist_panel_left_rect;
+                let rel_y = my - r[1];
+                let line_h = 12.0 * self.window_size[1] / THEME.win_h as f32;
+                let clicked_idx = self.playlist_scroll + (rel_y / line_h) as usize;
+                self.playlist_remove(clicked_idx);
+            }
+            return;
+        }
+
         // Pause menu "EXIT TO TITLE" click
         if self.session.state == GameState::Paused && !self.show_title {
             let [mx, my] = self.cursor_pos;
@@ -1207,35 +1356,80 @@ impl GameWorld {
     }
 
     fn pick_music_folder(&mut self) {
-        let was_playing = self.session.state == GameState::Playing;
-        if was_playing {
-            self.session.state = GameState::Paused;
+        // Toggle playlist panel
+        if self.show_playlist_panel {
+            self.show_playlist_panel = false;
+            return;
         }
+        self.show_playlist_panel = true;
+        self.load_folder_contents();
+        self.refresh_playlist_display();
         self.hud_opacity = 1.0;
         self.hud_fade_timer = 1.5;
+    }
 
+    fn browse_folder(&mut self) {
         let folder = rfd::FileDialog::new()
             .set_title("Select Music Folder")
             .pick_folder();
 
         if let Some(path) = folder {
             let folder_str = path.to_string_lossy().to_string();
-            self.music_folder = Some(folder_str.clone());
+            self.music_folder = Some(folder_str);
+            self.load_folder_contents();
             self.save_settings();
-            // Shut down old audio before starting new
-            if let Ok(mut audio) = self.audio.lock() {
-                audio.shutdown = true;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            let (new_audio, new_actions) = audio_output::start_audio(Some(&folder_str));
-            self.audio = new_audio;
-            self.audio_actions = new_actions;
         }
+    }
 
-        if was_playing {
-            self.session.state = GameState::Playing;
-            self.last_tick = Instant::now();
+    /// Add a track from folder to the playlist.
+    pub fn playlist_add(&mut self, folder_idx: usize) {
+        if folder_idx < self.folder_tracks.len() {
+            let path = self.folder_tracks[folder_idx].clone();
+            if !self.playlist.contains(&path) {
+                self.playlist.push(path);
+                self.refresh_playlist_display();
+                self.save_settings();
+            }
         }
+    }
+
+    /// Remove a track from the playlist.
+    pub fn playlist_remove(&mut self, playlist_idx: usize) {
+        if playlist_idx < self.playlist.len() {
+            self.playlist.remove(playlist_idx);
+            self.refresh_playlist_display();
+            self.save_settings();
+        }
+    }
+
+    /// Add all folder tracks to playlist.
+    pub fn playlist_add_all(&mut self) {
+        for path in &self.folder_tracks.clone() {
+            if !self.playlist.contains(path) {
+                self.playlist.push(path.clone());
+            }
+        }
+        self.refresh_playlist_display();
+        self.save_settings();
+    }
+
+    /// Clear the playlist.
+    pub fn playlist_clear(&mut self) {
+        self.playlist.clear();
+        self.playlist_display.clear();
+        self.save_settings();
+    }
+
+    /// Apply the playlist to audio playback — restart audio with playlist order.
+    pub fn playlist_apply(&mut self) {
+        if self.playlist.is_empty() { return; }
+        let volume = if let Ok(a) = self.audio.try_lock() { a.volume } else { 0.8 };
+        if let Ok(mut a) = self.audio.lock() { a.shutdown = true; }
+        let (new_audio, new_actions) = audio_output::start_audio_playlist(self.playlist.clone());
+        self.audio = new_audio;
+        self.audio_actions = new_actions;
+        if let Ok(mut a) = self.audio.try_lock() { a.volume = volume; }
+        self.show_playlist_panel = false;
     }
 
     pub fn compute_uniforms(&self, aspect: f32) -> Uniforms {
