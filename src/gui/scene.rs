@@ -771,8 +771,8 @@ fn build_playlist_panel(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, world: 
 
     // Left column header: PLAYLIST
     push_text_embossed(verts, indices, left_x, col_top, "PLAY ORDER", text_col, 1.8);
-    // Right column header: FOLDER
-    let folder_label = if let Some(ref f) = world.music_folder {
+    // Right column header: current browse path
+    let folder_label = if let Some(ref f) = world.browse_path {
         let name: String = std::path::Path::new(f)
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -809,13 +809,18 @@ fn build_playlist_panel(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, world: 
     let max_visible = ((list_h - 4.0) / line_h) as usize;
     let char_limit = (col_w / (4.0 * scale)) as usize;
 
-    // Left column: playlist tracks
+    // Left column: playlist tracks (with selection highlight)
+    let sel_bg = rgba_to_f32([80, 80, 120, 120]);
     for i in 0..max_visible {
         let idx = i + world.playlist_scroll;
         if idx >= world.playlist_display.len() { break; }
-        let name: String = world.playlist_display[idx].chars().take(char_limit).collect();
         let y = list_top + 4.0 + i as f32 * line_h;
-        push_text(verts, indices, left_x + 4.0, y, &name.to_uppercase(), text_col, scale);
+        if world.playlist_selected == Some(idx) {
+            push_quad(verts, indices, left_x + 1.0, y - 1.0, col_w - 2.0, line_h, sel_bg, 0.086);
+        }
+        let name: String = world.playlist_display[idx].chars().take(char_limit).collect();
+        let col = if world.playlist_selected == Some(idx) { highlight } else { text_col };
+        push_text(verts, indices, left_x + 4.0, y, &name.to_uppercase(), col, scale);
     }
     if world.playlist_display.is_empty() {
         push_text(verts, indices, left_x + 4.0, list_top + 4.0, "EMPTY", dim_col, scale);
@@ -844,9 +849,9 @@ fn build_playlist_panel(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, world: 
     let btn_h = 20.0;
     let btn_scale = 1.5;
 
-    let buttons = ["BROWSE", "ADD ALL", "CLEAR", "PLAY"];
-    let btn_w = 70.0;
-    let btn_gap = 10.0;
+    let buttons = ["BROWSE", "ADD ALL", "CLEAR", "PLAY", "UP", "DOWN"];
+    let btn_w = 56.0;
+    let btn_gap = 8.0;
     let total_w = buttons.len() as f32 * btn_w + (buttons.len() - 1) as f32 * btn_gap;
     let btn_start_x = panel_x + (panel_w - total_w) / 2.0;
 

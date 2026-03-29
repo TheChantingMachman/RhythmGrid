@@ -31,6 +31,13 @@ const JOURNEY_ORDER: [usize; 8] = [
     6, // Fractal — climax
 ];
 
+#[derive(Clone)]
+pub enum FolderEntry {
+    ParentDir,                    // ".." — go up one level
+    SubDir(String),               // subdirectory path
+    Track(String),                // audio file path
+}
+
 pub struct GameWorld {
     pub session: GameSession,
     pub last_tick: Instant,
@@ -90,13 +97,15 @@ pub struct GameWorld {
     // Playlist panel
     pub(super) show_playlist_panel: bool,
     pub(super) playlist: Vec<String>,          // ordered file paths — the play order
-    pub(super) folder_tracks: Vec<String>,     // all tracks in current folder
-    pub(super) folder_display: Vec<String>,    // "Artist - Title" for folder_tracks
-    pub(super) playlist_display: Vec<String>,  // "Artist - Title" for playlist
+    pub(super) folder_entries: Vec<FolderEntry>,  // files + subdirs in current browse path
+    pub(super) folder_display: Vec<String>,       // display names for folder_entries
+    pub(super) browse_path: Option<String>,       // current folder being browsed (may differ from music_folder)
+    pub(super) playlist_display: Vec<String>,     // "Artist - Title" for playlist
     pub(super) playlist_scroll: usize,
     pub(super) folder_scroll: usize,
     pub(super) folder_last_clicked: Option<usize>,
-    pub(super) playlist_panel_btn_rects: [[f32; 4]; 4], // Browse, Add All, Clear, Play
+    pub(super) playlist_selected: Option<usize>,  // selected item in playlist for reorder
+    pub(super) playlist_panel_btn_rects: [[f32; 4]; 6], // Browse, Add All, Clear, Play, Up, Down
     pub(super) playlist_panel_left_rect: [f32; 4],       // left column click area
     pub(super) playlist_panel_right_rect: [f32; 4],      // right column click area
     pub(super) demo_mode: bool,
@@ -183,18 +192,56 @@ impl GameWorld {
             .unwrap_or_else(|| "Unknown".to_string())
     }
 
-    /// Scan folder and populate folder_tracks + folder_display.
+    /// Scan browse_path and populate folder_entries + folder_display.
     fn load_folder_contents(&mut self) {
-        self.folder_tracks.clear();
+        self.folder_entries.clear();
         self.folder_display.clear();
-        if let Some(ref folder) = self.music_folder {
-            let files = rhythm_grid::music::scan_folder(std::path::Path::new(folder));
-            for f in &files {
-                self.folder_tracks.push(f.to_string_lossy().to_string());
+        self.folder_last_clicked = None;
+
+        let browse = match &self.browse_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let path = std::path::Path::new(&browse);
+        if !path.is_dir() { return; }
+
+        // ".." entry if not at root
+        if path.parent().is_some() {
+            self.folder_entries.push(FolderEntry::ParentDir);
+            self.folder_display.push("..".to_string());
+        }
+
+        // Read directory entries
+        let mut dirs = Vec::new();
+        let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_dir() {
+                    let name = entry_path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if !name.starts_with('.') {
+                        dirs.push((name, entry_path.to_string_lossy().to_string()));
+                    }
+                } else if let Some(ext) = entry_path.extension().and_then(|e| e.to_str()) {
+                    if rhythm_grid::audio::SUPPORTED_FORMATS.contains(&ext.to_lowercase().as_str()) {
+                        files.push(entry_path.to_string_lossy().to_string());
+                    }
+                }
             }
-            self.folder_display = self.folder_tracks.iter()
-                .map(|p| Self::track_display_name(p))
-                .collect();
+        }
+        dirs.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        files.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+
+        for (name, full_path) in dirs {
+            self.folder_entries.push(FolderEntry::SubDir(full_path));
+            self.folder_display.push(format!("[{}]", name.to_uppercase()));
+        }
+        for f in files {
+            let display = Self::track_display_name(&f);
+            self.folder_entries.push(FolderEntry::Track(f));
+            self.folder_display.push(display);
         }
         self.folder_scroll = 0;
     }
@@ -205,6 +252,53 @@ impl GameWorld {
         self.playlist_display = self.playlist.iter()
             .map(|p| Self::track_display_name(p))
             .collect();
+    }
+
+    /// Handle mouse wheel scroll.
+    pub fn handle_scroll(&mut self, lines: i32) {
+        if !self.show_playlist_panel { return; }
+        let [mx, my] = self.cursor_pos;
+        let hit = |r: [f32; 4]| mx >= r[0] && mx <= r[0]+r[2] && my >= r[1] && my <= r[1]+r[3];
+
+        if hit(self.playlist_panel_left_rect) {
+            let max = self.playlist_display.len().saturating_sub(1);
+            self.playlist_scroll = if lines > 0 {
+                self.playlist_scroll.saturating_sub(lines as usize)
+            } else {
+                (self.playlist_scroll + (-lines) as usize).min(max)
+            };
+        } else if hit(self.playlist_panel_right_rect) {
+            let max = self.folder_display.len().saturating_sub(1);
+            self.folder_scroll = if lines > 0 {
+                self.folder_scroll.saturating_sub(lines as usize)
+            } else {
+                (self.folder_scroll + (-lines) as usize).min(max)
+            };
+        }
+    }
+
+    /// Move selected playlist item up.
+    pub fn playlist_move_up(&mut self) {
+        if let Some(sel) = self.playlist_selected {
+            if sel > 0 {
+                self.playlist.swap(sel, sel - 1);
+                self.playlist_display.swap(sel, sel - 1);
+                self.playlist_selected = Some(sel - 1);
+                self.save_settings();
+            }
+        }
+    }
+
+    /// Move selected playlist item down.
+    pub fn playlist_move_down(&mut self) {
+        if let Some(sel) = self.playlist_selected {
+            if sel + 1 < self.playlist.len() {
+                self.playlist.swap(sel, sel + 1);
+                self.playlist_display.swap(sel, sel + 1);
+                self.playlist_selected = Some(sel + 1);
+                self.save_settings();
+            }
+        }
     }
 
     pub fn new() -> Self {
@@ -298,13 +392,15 @@ impl GameWorld {
             pause_selection: 0,
             show_playlist_panel: false,
             playlist: settings.playlist.clone(),
-            folder_tracks: Vec::new(),
+            folder_entries: Vec::new(),
             folder_display: Vec::new(),
+            browse_path: settings.music_folder.clone(),
             playlist_display: Vec::new(),
             playlist_scroll: 0,
             folder_scroll: 0,
             folder_last_clicked: None,
-            playlist_panel_btn_rects: [[0.0; 4]; 4],
+            playlist_selected: None,
+            playlist_panel_btn_rects: [[0.0; 4]; 6],
             playlist_panel_left_rect: [0.0; 4],
             playlist_panel_right_rect: [0.0; 4],
             demo_mode: false,
@@ -537,14 +633,14 @@ impl GameWorld {
             self.playlist_panel_left_rect = [sx(left_x), sy(list_top), col_w * scale_w, list_h * scale_h];
             self.playlist_panel_right_rect = [sx(right_x), sy(list_top), col_w * scale_w, list_h * scale_h];
 
-            // Bottom buttons: Browse, Add All, Clear, Play
+            // Bottom buttons: Browse, Add All, Clear, Play, Up, Down
             let btn_y = panel_y + panel_h - 32.0;
-            let btn_w_t = 70.0;
+            let btn_w_t = 56.0;
             let btn_h_t = 20.0;
-            let btn_gap_t = 10.0;
-            let total_w = 4.0 * btn_w_t + 3.0 * btn_gap_t;
+            let btn_gap_t = 8.0;
+            let total_w = 6.0 * btn_w_t + 5.0 * btn_gap_t;
             let btn_start_x = panel_x + (panel_w - total_w) / 2.0;
-            for i in 0..4 {
+            for i in 0..6 {
                 let bx = btn_start_x + i as f32 * (btn_w_t + btn_gap_t);
                 self.playlist_panel_btn_rects[i as usize] = [
                     sx(bx), sy(btn_y), btn_w_t * scale_w, btn_h_t * scale_h,
@@ -1287,29 +1383,35 @@ impl GameWorld {
             let [mx, my] = self.cursor_pos;
             let hit = |r: [f32; 4]| mx >= r[0] && mx <= r[0]+r[2] && my >= r[1] && my <= r[1]+r[3];
 
-            // Bottom buttons: Browse(0), Add All(1), Clear(2), Play(3)
+            // Bottom buttons: Browse(0), Add All(1), Clear(2), Play(3), Up(4), Down(5)
             if hit(self.playlist_panel_btn_rects[0]) { self.browse_folder(); }
             else if hit(self.playlist_panel_btn_rects[1]) { self.playlist_add_all(); }
             else if hit(self.playlist_panel_btn_rects[2]) { self.playlist_clear(); }
             else if hit(self.playlist_panel_btn_rects[3]) { self.playlist_apply(); }
-            // Right column click — add track to playlist
+            else if hit(self.playlist_panel_btn_rects[4]) { self.playlist_move_up(); }
+            else if hit(self.playlist_panel_btn_rects[5]) { self.playlist_move_down(); }
+            // Right column click — add track or drill into subfolder
             else if hit(self.playlist_panel_right_rect) {
                 let r = self.playlist_panel_right_rect;
                 let rel_y = my - r[1];
                 let line_h = 12.0 * self.window_size[1] / THEME.win_h as f32;
                 let clicked_idx = self.folder_scroll + (rel_y / line_h) as usize;
-                if clicked_idx < self.folder_tracks.len() {
-                    self.folder_last_clicked = Some(clicked_idx);
-                }
-                self.playlist_add(clicked_idx);
+                self.folder_entry_click(clicked_idx);
             }
-            // Left column click — remove track from playlist
+            // Left column click — select or remove (click selected = remove)
             else if hit(self.playlist_panel_left_rect) {
                 let r = self.playlist_panel_left_rect;
                 let rel_y = my - r[1];
                 let line_h = 12.0 * self.window_size[1] / THEME.win_h as f32;
                 let clicked_idx = self.playlist_scroll + (rel_y / line_h) as usize;
-                self.playlist_remove(clicked_idx);
+                if clicked_idx < self.playlist.len() {
+                    if self.playlist_selected == Some(clicked_idx) {
+                        // Click on already-selected item — remove it
+                        self.playlist_remove(clicked_idx);
+                    } else {
+                        self.playlist_selected = Some(clicked_idx);
+                    }
+                }
             }
             return;
         }
@@ -1375,20 +1477,36 @@ impl GameWorld {
 
         if let Some(path) = folder {
             let folder_str = path.to_string_lossy().to_string();
-            self.music_folder = Some(folder_str);
+            self.music_folder = Some(folder_str.clone());
+            self.browse_path = Some(folder_str);
             self.load_folder_contents();
             self.save_settings();
         }
     }
 
-    /// Add a track from folder to the playlist.
-    pub fn playlist_add(&mut self, folder_idx: usize) {
-        if folder_idx < self.folder_tracks.len() {
-            let path = self.folder_tracks[folder_idx].clone();
-            if !self.playlist.contains(&path) {
-                self.playlist.push(path);
-                self.refresh_playlist_display();
-                self.save_settings();
+    /// Handle a click on a folder entry — add track, drill into subdir, or go up.
+    pub fn folder_entry_click(&mut self, idx: usize) {
+        if idx >= self.folder_entries.len() { return; }
+        match &self.folder_entries[idx] {
+            FolderEntry::ParentDir => {
+                if let Some(ref bp) = self.browse_path.clone() {
+                    if let Some(parent) = std::path::Path::new(bp).parent() {
+                        self.browse_path = Some(parent.to_string_lossy().to_string());
+                        self.load_folder_contents();
+                    }
+                }
+            }
+            FolderEntry::SubDir(path) => {
+                self.browse_path = Some(path.clone());
+                self.load_folder_contents();
+            }
+            FolderEntry::Track(path) => {
+                if !self.playlist.contains(path) {
+                    self.playlist.push(path.clone());
+                    self.refresh_playlist_display();
+                    self.save_settings();
+                }
+                self.folder_last_clicked = Some(idx);
             }
         }
     }
@@ -1398,15 +1516,22 @@ impl GameWorld {
         if playlist_idx < self.playlist.len() {
             self.playlist.remove(playlist_idx);
             self.refresh_playlist_display();
+            if let Some(sel) = self.playlist_selected {
+                if sel >= self.playlist.len() {
+                    self.playlist_selected = if self.playlist.is_empty() { None } else { Some(self.playlist.len() - 1) };
+                }
+            }
             self.save_settings();
         }
     }
 
-    /// Add all folder tracks to playlist.
+    /// Add all tracks (not subdirs) from current folder to playlist.
     pub fn playlist_add_all(&mut self) {
-        for path in &self.folder_tracks.clone() {
-            if !self.playlist.contains(path) {
-                self.playlist.push(path.clone());
+        for entry in &self.folder_entries.clone() {
+            if let FolderEntry::Track(path) = entry {
+                if !self.playlist.contains(path) {
+                    self.playlist.push(path.clone());
+                }
             }
         }
         self.refresh_playlist_display();
