@@ -604,6 +604,11 @@ fn build_hud(world: &GameWorld) -> (Vec<Vertex>, Vec<u32>) {
             rank_col, 1.5);
     }
 
+    // Playlist panel (after HUD fade — always fully visible)
+    if world.show_playlist_panel {
+        build_playlist_panel(&mut verts, &mut indices, world);
+    }
+
     (verts, indices)
 }
 
@@ -726,4 +731,136 @@ fn build_credits_screen(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, w: f32,
     y += line_h + section_gap;
 
     centered(verts, indices, y + 20.0, "PRESS ANY KEY", dim_col, 1.5);
+}
+
+fn build_playlist_panel(verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, world: &GameWorld) {
+    let w = THEME.win_w as f32;
+    let h = THEME.win_h as f32;
+
+    // Fullscreen dim overlay
+    push_quad(verts, indices, 0.0, 0.0, w, h, rgba_to_f32([0, 0, 0, 160]), 0.08);
+
+    let panel_w = w * 0.85;
+    let panel_h = h * 0.80;
+    let panel_x = (w - panel_w) / 2.0;
+    let panel_y = (h - panel_h) / 2.0;
+    push_panel(verts, indices, panel_x, panel_y, panel_w, panel_h, 0.09);
+
+    let highlight = rgba_to_f32([255, 255, 100, 255]);
+    let text_col = rgba_to_f32([220, 220, 230, 255]);
+    let dim_col = rgba_to_f32([150, 150, 160, 200]);
+    let scale = 1.5;
+    let line_h = 12.0;
+
+    // Title bar
+    push_text_embossed(verts, indices, panel_x + 10.0, panel_y + 8.0, "PLAYLIST", highlight, 3.0);
+
+    // Close hint
+    let close_text = "ESC CLOSE";
+    let close_w = close_text.len() as f32 * 4.0 * 1.5;
+    push_text_embossed(verts, indices, panel_x + panel_w - close_w - 10.0, panel_y + 12.0,
+              close_text, dim_col, 1.5);
+
+    // Two columns
+    let col_gap = 16.0;
+    let col_w = (panel_w - col_gap - 20.0) / 2.0;
+    let col_top = panel_y + 36.0;
+    let col_h = panel_h - 80.0;
+    let left_x = panel_x + 10.0;
+    let right_x = left_x + col_w + col_gap;
+
+    // Left column header: PLAYLIST
+    push_text_embossed(verts, indices, left_x, col_top, "PLAY ORDER", text_col, 1.8);
+    // Right column header: current browse path
+    let folder_label = if let Some(ref f) = world.browse_path {
+        let name: String = std::path::Path::new(f)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| f.clone());
+        format!("FOLDER: {}", name.to_uppercase())
+    } else {
+        "NO FOLDER SELECTED".to_string()
+    };
+    let folder_label_trunc: String = folder_label.chars().take(28).collect();
+    push_text_embossed(verts, indices, right_x, col_top, &folder_label_trunc, text_col, 1.8);
+
+    // Column backgrounds with bevel borders
+    let list_top = col_top + 16.0;
+    let list_h = col_h - 16.0;
+    let bevel = 2.0;
+    let border_light = rgba_to_f32([60, 60, 80, 180]);
+    let border_dark = rgba_to_f32([15, 15, 20, 200]);
+    let bg_col = rgba_to_f32([10, 10, 15, 120]);
+
+    // Left column bevel + background
+    push_quad(verts, indices, left_x - bevel, list_top - bevel, col_w + bevel * 2.0, bevel, border_light, 0.084);
+    push_quad(verts, indices, left_x - bevel, list_top - bevel, bevel, list_h + bevel * 2.0, border_light, 0.084);
+    push_quad(verts, indices, left_x - bevel, list_top + list_h, col_w + bevel * 2.0, bevel, border_dark, 0.084);
+    push_quad(verts, indices, left_x + col_w, list_top - bevel, bevel, list_h + bevel * 2.0, border_dark, 0.084);
+    push_quad(verts, indices, left_x, list_top, col_w, list_h, bg_col, 0.085);
+
+    // Right column bevel + background
+    push_quad(verts, indices, right_x - bevel, list_top - bevel, col_w + bevel * 2.0, bevel, border_light, 0.084);
+    push_quad(verts, indices, right_x - bevel, list_top - bevel, bevel, list_h + bevel * 2.0, border_light, 0.084);
+    push_quad(verts, indices, right_x - bevel, list_top + list_h, col_w + bevel * 2.0, bevel, border_dark, 0.084);
+    push_quad(verts, indices, right_x + col_w, list_top - bevel, bevel, list_h + bevel * 2.0, border_dark, 0.084);
+    push_quad(verts, indices, right_x, list_top, col_w, list_h, bg_col, 0.085);
+
+    let max_visible = ((list_h - 4.0) / line_h) as usize;
+    let char_limit = (col_w / (4.0 * scale)) as usize;
+
+    // Left column: playlist tracks (with selection highlight)
+    let sel_bg = rgba_to_f32([80, 80, 120, 120]);
+    for i in 0..max_visible {
+        let idx = i + world.playlist_scroll;
+        if idx >= world.playlist_display.len() { break; }
+        let y = list_top + 4.0 + i as f32 * line_h;
+        if world.playlist_selected == Some(idx) {
+            push_quad(verts, indices, left_x + 1.0, y - 1.0, col_w - 2.0, line_h, sel_bg, 0.086);
+        }
+        let name: String = world.playlist_display[idx].chars().take(char_limit).collect();
+        let col = if world.playlist_selected == Some(idx) { highlight } else { text_col };
+        push_text(verts, indices, left_x + 4.0, y, &name.to_uppercase(), col, scale);
+    }
+    if world.playlist_display.is_empty() {
+        push_text(verts, indices, left_x + 4.0, list_top + 4.0, "EMPTY", dim_col, scale);
+    }
+
+    // Right column: folder tracks (with last-clicked highlight)
+    let highlight_bg = rgba_to_f32([60, 60, 100, 100]);
+    for i in 0..max_visible {
+        let idx = i + world.folder_scroll;
+        if idx >= world.folder_display.len() { break; }
+        let y = list_top + 4.0 + i as f32 * line_h;
+        // Highlight last-clicked track
+        if world.folder_last_clicked == Some(idx) {
+            push_quad(verts, indices, right_x + 1.0, y - 1.0, col_w - 2.0, line_h, highlight_bg, 0.086);
+        }
+        let name: String = world.folder_display[idx].chars().take(char_limit).collect();
+        let col = if world.folder_last_clicked == Some(idx) { highlight } else { text_col };
+        push_text(verts, indices, right_x + 4.0, y, &name.to_uppercase(), col, scale);
+    }
+    if world.folder_display.is_empty() {
+        push_text(verts, indices, right_x + 4.0, list_top + 4.0, "NO TRACKS", dim_col, scale);
+    }
+
+    // Bottom buttons
+    let btn_y = panel_y + panel_h - 32.0;
+    let btn_h = 20.0;
+    let btn_scale = 1.5;
+
+    let buttons = ["BROWSE", "ADD ALL", "CLEAR", "PLAY", "UP", "DOWN"];
+    let btn_w = 56.0;
+    let btn_gap = 8.0;
+    let total_w = buttons.len() as f32 * btn_w + (buttons.len() - 1) as f32 * btn_gap;
+    let btn_start_x = panel_x + (panel_w - total_w) / 2.0;
+
+    for (i, &label) in buttons.iter().enumerate() {
+        let bx = btn_start_x + i as f32 * (btn_w + btn_gap);
+        push_panel(verts, indices, bx, btn_y, btn_w, btn_h, 0.095);
+        let lw = label.len() as f32 * 4.0 * btn_scale;
+        let lx = bx + (btn_w - lw) / 2.0;
+        let ly = btn_y + (btn_h - 5.0 * btn_scale) / 2.0;
+        push_text_embossed(verts, indices, lx, ly, label, text_col, btn_scale);
+    }
 }

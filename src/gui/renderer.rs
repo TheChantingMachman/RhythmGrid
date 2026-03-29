@@ -172,6 +172,78 @@ fn normalize3(v: [f32; 3]) -> [f32; 3] {
     [v[0]/l, v[1]/l, v[2]/l]
 }
 
+// Journey transition: radial warp toward screen center (singularity effect)
+const WARP_SHADER: &str = r#"
+struct WarpUniforms { intensity: f32, _pad: f32, _pad2: f32, _pad3: f32 };
+@group(0) @binding(0) var scene_tex: texture_2d<f32>;
+@group(0) @binding(1) var tex_sampler: sampler;
+@group(0) @binding(2) var<uniform> warp_u: WarpUniforms;
+
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_full(@builtin(vertex_index) idx: u32) -> VsOut {
+    var pos = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    var uv = array<vec2<f32>, 3>(
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(2.0, 1.0),
+        vec2<f32>(0.0, -1.0),
+    );
+    var out: VsOut;
+    out.pos = vec4<f32>(pos[idx], 0.0, 1.0);
+    out.uv = uv[idx];
+    return out;
+}
+
+@fragment
+fn fs_warp(in: VsOut) -> @location(0) vec4<f32> {
+    let center = vec2<f32>(0.5, 0.5);
+    let uv = in.uv;
+    let to_center = center - uv;
+    let dist = length(to_center);
+    let dir = normalize(to_center);
+
+    // Warp UV toward center — stronger at edges, accelerates with intensity
+    let warp = warp_u.intensity * warp_u.intensity; // quadratic for dramatic acceleration
+    let pull = warp * dist * 1.8; // edges get pulled harder
+    let warped_uv = uv + dir * pull;
+
+    // Radial blur — sample multiple points along the pull direction
+    var color = vec3<f32>(0.0);
+    let blur_samples = 8;
+    let blur_spread = warp * 0.03;
+    for (var i = 0; i < blur_samples; i++) {
+        let t = f32(i) / f32(blur_samples - 1);
+        let sample_uv = warped_uv + dir * blur_spread * (t - 0.5);
+        let clamped = clamp(sample_uv, vec2(0.0), vec2(1.0));
+        color += textureSample(scene_tex, tex_sampler, clamped).rgb;
+    }
+    color /= f32(blur_samples);
+
+    // Vignette darkening — edges go black as warp intensifies
+    let vignette = 1.0 - warp * dist * 2.0;
+    color *= max(vignette, 0.0);
+
+    // Overall darken toward black at peak
+    let darken = 1.0 - warp * 0.7;
+    color *= max(darken, 0.0);
+
+    // ACES tonemap (same as bloom shader — HDR → displayable)
+    let a = color * (color * 2.51 + vec3<f32>(0.03));
+    let b = color * (color * 2.43 + vec3<f32>(0.59)) + vec3<f32>(0.14);
+    let tonemapped = a / b;
+
+    return vec4<f32>(tonemapped, 1.0);
+}
+"#;
+
 // Single-pass bloom: extract bright + box blur + composite in one fragment shader
 const BLOOM_SHADER: &str = r#"
 struct BloomUniforms { color_grade: vec4<f32> };
@@ -618,6 +690,10 @@ pub struct GpuState {
     mandelbrot_uniform_buffer: wgpu::Buffer,
     mandelbrot_bgl: wgpu::BindGroupLayout,
     pub mandelbrot_active: bool,
+    // Journey transition warp
+    warp_pipeline: wgpu::RenderPipeline,
+    warp_uniform_buffer: wgpu::Buffer,
+    pub warp_intensity: f32,
     // Scene bind group + layout (exposed for GpuEffect pipeline creation)
     scene_bind_group_layout: wgpu::BindGroupLayout,
     // Persistent GPU buffers — reused across frames, grown as needed
@@ -930,6 +1006,33 @@ impl GpuState {
             multiview: None, cache: None,
         });
 
+        // Journey warp transition pipeline (reuses bloom bind group layout)
+        let warp_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("warp_shader"), source: wgpu::ShaderSource::Wgsl(WARP_SHADER.into()),
+        });
+        let warp_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("warp"),
+            layout: Some(&bloom_layout),
+            vertex: wgpu::VertexState {
+                module: &warp_shader, entry_point: Some("vs_full"),
+                buffers: &[], compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &warp_shader, entry_point: Some("fs_warp"),
+                targets: &[Some(format.into())],
+                compilation_options: Default::default(),
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None, cache: None,
+        });
+        let warp_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("warp_uniforms"),
+            contents: bytemuck::cast_slice(&[0.0f32, 0.0, 0.0, 0.0]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
         // Mandelbrot background pipeline
         let mandelbrot_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mandelbrot_shader"), source: wgpu::ShaderSource::Wgsl(MANDELBROT_SHADER.into()),
@@ -1018,6 +1121,8 @@ impl GpuState {
             scene_bind_group_layout,
             mandelbrot_pipeline, mandelbrot_uniform_buffer, mandelbrot_bgl,
             mandelbrot_active: false,
+            warp_pipeline, warp_uniform_buffer,
+            warp_intensity: 0.0,
             opaque_bufs, transparent_bufs, hud_bufs,
         }
     }
@@ -1147,7 +1252,7 @@ impl GpuState {
                   opaque_verts: &[Vertex], opaque_indices: &[u32],
                   transparent_verts: &[Vertex], transparent_indices: &[u32],
                   hud_verts: &[Vertex], hud_indices: &[u32],
-                  gpu_oit: Option<&GpuOitDrawCmd>) {
+                  gpu_oit: &[GpuOitDrawCmd]) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
             Err(_) => return,
@@ -1235,7 +1340,7 @@ impl GpuState {
         }
 
         // Pass 2: OIT Accumulation (transparent geometry → accum + revealage targets)
-        let has_transparent = !transparent_indices.is_empty() || gpu_oit.is_some();
+        let has_transparent = !transparent_indices.is_empty() || !gpu_oit.is_empty();
         if has_transparent {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             {
@@ -1279,8 +1384,8 @@ impl GpuState {
                     pass.set_index_buffer(self.transparent_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..transparent_indices.len() as u32, 0, 0..1);
                 }
-                // GPU effect particles (same OIT pass, different pipeline)
-                if let Some(cmd) = gpu_oit {
+                // GPU effect particles (same OIT pass, different pipelines)
+                for cmd in gpu_oit {
                     pass.set_pipeline(cmd.pipeline);
                     pass.set_bind_group(0, &self.scene_bind_group, &[]);
                     pass.set_bind_group(1, cmd.bind_group_1, &[]);
@@ -1349,11 +1454,44 @@ impl GpuState {
             self.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        // Post-process chain (bloom + any future effects) → surface
-        self.post_process.execute(
-            &self.device, &self.queue, &self.sampler,
-            &self.scene_texture, &surface_view,
-        );
+        // Post-process: normal bloom, or warp transition when active
+        // Both read from scene_texture (HDR) and write to surface_view (sRGB)
+        if self.warp_intensity > 0.001 {
+            // Warp replaces bloom during transition
+            self.queue.write_buffer(&self.warp_uniform_buffer, 0,
+                bytemuck::cast_slice(&[self.warp_intensity, 0.0f32, 0.0, 0.0]));
+            let warp_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("warp_bg"),
+                layout: &self.post_process.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.scene_texture) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                    wgpu::BindGroupEntry { binding: 2, resource: self.warp_uniform_buffer.as_entire_binding() },
+                ],
+            });
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("warp_transition"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &surface_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.warp_pipeline);
+                pass.set_bind_group(0, &warp_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            self.queue.submit(std::iter::once(encoder.finish()));
+        } else {
+            self.post_process.execute(
+                &self.device, &self.queue, &self.sampler,
+                &self.scene_texture, &surface_view,
+            );
+        }
 
         output.present();
     }

@@ -31,6 +31,98 @@ const JOURNEY_ORDER: [usize; 8] = [
     6, // Fractal — climax
 ];
 
+/// Journey theme transition — radial warp singularity effect.
+pub struct JourneyTransition {
+    pub active: bool,
+    pub timer: f32,           // total elapsed time since transition started
+    pub phase: TransitionPhase,
+    pub next_theme: usize,    // theme to switch to at midpoint
+}
+
+#[derive(PartialEq)]
+pub enum TransitionPhase {
+    Idle,
+    WarpIn,    // scene warps toward center (0.0 → 0.5s)
+    Switch,    // black frame, apply theme (instant)
+    WarpOut,   // scene warps back from center (0.5 → 1.0s)
+}
+
+const WARP_IN_DURATION: f32 = 0.5;
+const WARP_OUT_DURATION: f32 = 1.5;
+
+impl JourneyTransition {
+    pub fn new() -> Self {
+        JourneyTransition {
+            active: false,
+            timer: 0.0,
+            phase: TransitionPhase::Idle,
+            next_theme: 0,
+        }
+    }
+
+    pub fn start(&mut self, next_theme: usize) {
+        self.active = true;
+        self.timer = 0.0;
+        self.phase = TransitionPhase::WarpIn;
+        self.next_theme = next_theme;
+    }
+
+    /// Returns warp intensity 0.0-1.0 for the shader.
+    pub fn warp_intensity(&self) -> f32 {
+        match self.phase {
+            TransitionPhase::WarpIn => {
+                let t = (self.timer / WARP_IN_DURATION).min(1.0);
+                t * t // ease-in: accelerates toward center
+            }
+            TransitionPhase::Switch => 1.0,
+            TransitionPhase::WarpOut => {
+                let t = ((self.timer - WARP_IN_DURATION) / WARP_OUT_DURATION).min(1.0);
+                let inv = 1.0 - t;
+                inv * inv * inv // cubic ease-out: very slow start, gentle reveal
+            }
+            TransitionPhase::Idle => 0.0,
+        }
+    }
+
+    /// Returns true when the theme should be switched (once, at midpoint).
+    pub fn should_switch_theme(&self) -> bool {
+        self.phase == TransitionPhase::Switch
+    }
+
+    /// Advance the transition. Returns true when finished.
+    pub fn update(&mut self, dt: f32) -> bool {
+        if !self.active { return false; }
+        self.timer += dt;
+        match self.phase {
+            TransitionPhase::WarpIn => {
+                if self.timer >= WARP_IN_DURATION {
+                    self.phase = TransitionPhase::Switch;
+                }
+            }
+            TransitionPhase::Switch => {
+                // Switch happens externally, then advance
+                self.phase = TransitionPhase::WarpOut;
+            }
+            TransitionPhase::WarpOut => {
+                if self.timer >= WARP_IN_DURATION + WARP_OUT_DURATION {
+                    self.active = false;
+                    self.phase = TransitionPhase::Idle;
+                    return true; // finished
+                }
+            }
+            TransitionPhase::Idle => {}
+        }
+        false
+    }
+}
+
+#[derive(Clone)]
+pub enum FolderEntry {
+    ParentDir,                    // ".." — go up one level
+    SubDir(String),               // subdirectory path
+    Track(String),                // audio file path
+}
+
 pub struct GameWorld {
     pub session: GameSession,
     pub last_tick: Instant,
@@ -67,6 +159,7 @@ pub struct GameWorld {
     // Journey system — escalating theme progression during a game
     journey_stage: usize,       // current stage (0..8), advances every 25 lines
     journey_unlocked: bool,     // true after 200 lines — F1 unlocks for manual theme selection
+    pub(super) journey_transition: JourneyTransition,
     pub color_grade: [f32; 3],
     pub(super) music_folder: Option<String>,
     pub saved_window_width: u32,
@@ -87,6 +180,20 @@ pub struct GameWorld {
     pub(super) title_idle_timer: f32,         // seconds since last input on title screen
     pub(super) title_buttons_visible: bool,
     pub(super) pause_selection: usize,        // 0=Resume, 1=Exit to Title
+    // Playlist panel
+    pub(super) show_playlist_panel: bool,
+    pub(super) playlist: Vec<String>,          // ordered file paths — the play order
+    pub(super) folder_entries: Vec<FolderEntry>,  // files + subdirs in current browse path
+    pub(super) folder_display: Vec<String>,       // display names for folder_entries
+    pub(super) browse_path: Option<String>,       // current folder being browsed (may differ from music_folder)
+    pub(super) playlist_display: Vec<String>,     // "Artist - Title" for playlist
+    pub(super) playlist_scroll: usize,
+    pub(super) folder_scroll: usize,
+    pub(super) folder_last_clicked: Option<usize>,
+    pub(super) playlist_selected: Option<usize>,  // selected item in playlist for reorder
+    pub(super) playlist_panel_btn_rects: [[f32; 4]; 6], // Browse, Add All, Clear, Play, Up, Down
+    pub(super) playlist_panel_left_rect: [f32; 4],       // left column click area
+    pub(super) playlist_panel_right_rect: [f32; 4],      // right column click area
     pub(super) demo_mode: bool,
     pub demo_idle_timer: f32,  // seconds since last player input
     demo_action_timer: f32,   // countdown to next AI action
@@ -149,10 +256,135 @@ impl GameWorld {
             window_height: self.logical_window_size[1],
             window_x: self.saved_window_x,
             window_y: self.saved_window_y,
-            ..rhythm_grid::config::Settings::default()
+            playlist: self.playlist.clone(),
         };
         let path = config_dir().join("settings.toml");
         let _ = save_settings(&settings, &path);
+    }
+
+    /// Build display name for a track path using metadata with filename fallback.
+    fn track_display_name(path: &str) -> String {
+        let pb = std::path::PathBuf::from(path);
+        if let Some(meta) = rhythm_grid::audio::read_track_meta(&pb) {
+            match (meta.artist, meta.title) {
+                (Some(artist), Some(title)) => return format!("{} - {}", artist, title),
+                (None, Some(title)) => return title,
+                (Some(artist), None) => return artist,
+                _ => {}
+            }
+        }
+        pb.file_stem()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Unknown".to_string())
+    }
+
+    /// Scan browse_path and populate folder_entries + folder_display.
+    fn load_folder_contents(&mut self) {
+        self.folder_entries.clear();
+        self.folder_display.clear();
+        self.folder_last_clicked = None;
+
+        let browse = match &self.browse_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let path = std::path::Path::new(&browse);
+        if !path.is_dir() { return; }
+
+        // ".." entry if not at root
+        if path.parent().is_some() {
+            self.folder_entries.push(FolderEntry::ParentDir);
+            self.folder_display.push("..".to_string());
+        }
+
+        // Read directory entries
+        let mut dirs = Vec::new();
+        let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_dir() {
+                    let name = entry_path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if !name.starts_with('.') {
+                        dirs.push((name, entry_path.to_string_lossy().to_string()));
+                    }
+                } else if let Some(ext) = entry_path.extension().and_then(|e| e.to_str()) {
+                    if rhythm_grid::audio::SUPPORTED_FORMATS.contains(&ext.to_lowercase().as_str()) {
+                        files.push(entry_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+        dirs.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        files.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+
+        for (name, full_path) in dirs {
+            self.folder_entries.push(FolderEntry::SubDir(full_path));
+            self.folder_display.push(format!("[{}]", name.to_uppercase()));
+        }
+        for f in files {
+            let display = Self::track_display_name(&f);
+            self.folder_entries.push(FolderEntry::Track(f));
+            self.folder_display.push(display);
+        }
+        self.folder_scroll = 0;
+    }
+
+    /// Rebuild playlist display names from paths, dropping missing files.
+    fn refresh_playlist_display(&mut self) {
+        self.playlist.retain(|p| std::path::Path::new(p).exists());
+        self.playlist_display = self.playlist.iter()
+            .map(|p| Self::track_display_name(p))
+            .collect();
+    }
+
+    /// Handle mouse wheel scroll.
+    pub fn handle_scroll(&mut self, lines: i32) {
+        if !self.show_playlist_panel { return; }
+        let [mx, my] = self.cursor_pos;
+        let hit = |r: [f32; 4]| mx >= r[0] && mx <= r[0]+r[2] && my >= r[1] && my <= r[1]+r[3];
+
+        if hit(self.playlist_panel_left_rect) {
+            let max = self.playlist_display.len().saturating_sub(1);
+            self.playlist_scroll = if lines > 0 {
+                self.playlist_scroll.saturating_sub(lines as usize)
+            } else {
+                (self.playlist_scroll + (-lines) as usize).min(max)
+            };
+        } else if hit(self.playlist_panel_right_rect) {
+            let max = self.folder_display.len().saturating_sub(1);
+            self.folder_scroll = if lines > 0 {
+                self.folder_scroll.saturating_sub(lines as usize)
+            } else {
+                (self.folder_scroll + (-lines) as usize).min(max)
+            };
+        }
+    }
+
+    /// Move selected playlist item up.
+    pub fn playlist_move_up(&mut self) {
+        if let Some(sel) = self.playlist_selected {
+            if sel > 0 {
+                self.playlist.swap(sel, sel - 1);
+                self.playlist_display.swap(sel, sel - 1);
+                self.playlist_selected = Some(sel - 1);
+                self.save_settings();
+            }
+        }
+    }
+
+    /// Move selected playlist item down.
+    pub fn playlist_move_down(&mut self) {
+        if let Some(sel) = self.playlist_selected {
+            if sel + 1 < self.playlist.len() {
+                self.playlist.swap(sel, sel + 1);
+                self.playlist_display.swap(sel, sel + 1);
+                self.playlist_selected = Some(sel + 1);
+                self.save_settings();
+            }
+        }
     }
 
     pub fn new() -> Self {
@@ -202,6 +434,7 @@ impl GameWorld {
             theme_auto_timer: 240.0, // 4 minutes
             journey_stage: 0,
             journey_unlocked: false,
+            journey_transition: JourneyTransition::new(),
             color_grade: theme.color_grade,
             music_folder: settings.music_folder.clone(),
             saved_window_width: settings.window_width,
@@ -219,6 +452,7 @@ impl GameWorld {
             audio_frame: AudioFrame {
                 bands: [0.0; 7], bands_norm: [0.0; 7], peak_bands: [0.0; 7],
                 band_beats: [0.0; 7], centroid: 0.0, flux: 0.0, danger: 0.0, dt: 0.0,
+                resolved_ranks: [0, 1, 2],
             },
             cursor_pos: [0.0; 2],
             window_size: [THEME.win_w as f32, THEME.win_h as f32],
@@ -244,6 +478,19 @@ impl GameWorld {
             title_idle_timer: 0.0,
             title_buttons_visible: true,
             pause_selection: 0,
+            show_playlist_panel: false,
+            playlist: settings.playlist.clone(),
+            folder_entries: Vec::new(),
+            folder_display: Vec::new(),
+            browse_path: settings.music_folder.clone(),
+            playlist_display: Vec::new(),
+            playlist_scroll: 0,
+            folder_scroll: 0,
+            folder_last_clicked: None,
+            playlist_selected: None,
+            playlist_panel_btn_rects: [[0.0; 4]; 6],
+            playlist_panel_left_rect: [0.0; 4],
+            playlist_panel_right_rect: [0.0; 4],
             demo_mode: false,
             demo_idle_timer: 0.0,
             demo_action_timer: 0.0,
@@ -353,22 +600,30 @@ impl GameWorld {
         }
 
         // Journey system — theme escalation every 25 lines, 200 lines = full journey
-        if !self.journey_unlocked {
+        if !self.journey_unlocked && !self.journey_transition.active {
             let new_stage = (self.session.total_lines as usize / 25).min(JOURNEY_ORDER.len());
             if new_stage > self.journey_stage {
                 self.journey_stage = new_stage;
                 if new_stage >= JOURNEY_ORDER.len() {
-                    // Journey complete — unlock F1
                     self.journey_unlocked = true;
                     self.toast_text = "JOURNEY COMPLETE - F1 UNLOCKED".to_string();
                     self.toast_timer = 3.0;
                 } else {
-                    // Advance to next theme in coolness order
+                    // Start warp transition instead of instant switch
                     let next_theme = JOURNEY_ORDER[new_stage];
-                    self.theme_index = next_theme;
-                    self.apply_theme_by_index(next_theme);
+                    self.journey_transition.start(next_theme);
                 }
             }
+        }
+
+        // Journey transition state machine
+        if self.journey_transition.active {
+            if self.journey_transition.should_switch_theme() {
+                let idx = self.journey_transition.next_theme;
+                self.theme_index = idx;
+                self.apply_theme_by_index(idx);
+            }
+            self.journey_transition.update(dt as f32);
         }
 
         // Build AudioFrame BEFORE decay so effects see fresh beat triggers
@@ -447,6 +702,46 @@ impl GameWorld {
                 btn_x / tw * sw, btn_y / th * sh,
                 btn_w / tw * sw, btn_h / th * sh,
             ];
+        }
+
+        // Playlist panel button rects (theme coords → screen coords)
+        if self.show_playlist_panel {
+            let tw = THEME.win_w as f32;
+            let th = THEME.win_h as f32;
+            let sw = self.window_size[0];
+            let sh = self.window_size[1];
+            let sx = |x: f32| x / tw * sw;
+            let sy = |y: f32| y / th * sh;
+            let scale_w = sw / tw;
+            let scale_h = sh / th;
+
+            let panel_w = tw * 0.85;
+            let panel_h = th * 0.80;
+            let panel_x = (tw - panel_w) / 2.0;
+            let panel_y = (th - panel_h) / 2.0;
+            let col_gap = 16.0;
+            let col_w = (panel_w - col_gap - 20.0) / 2.0;
+            let left_x = panel_x + 10.0;
+            let right_x = left_x + col_w + col_gap;
+            let list_top = panel_y + 36.0 + 16.0;
+            let list_h = panel_h - 80.0 - 16.0;
+
+            self.playlist_panel_left_rect = [sx(left_x), sy(list_top), col_w * scale_w, list_h * scale_h];
+            self.playlist_panel_right_rect = [sx(right_x), sy(list_top), col_w * scale_w, list_h * scale_h];
+
+            // Bottom buttons: Browse, Add All, Clear, Play, Up, Down
+            let btn_y = panel_y + panel_h - 32.0;
+            let btn_w_t = 56.0;
+            let btn_h_t = 20.0;
+            let btn_gap_t = 8.0;
+            let total_w = 6.0 * btn_w_t + 5.0 * btn_gap_t;
+            let btn_start_x = panel_x + (panel_w - total_w) / 2.0;
+            for i in 0..6 {
+                let bx = btn_start_x + i as f32 * (btn_w_t + btn_gap_t);
+                self.playlist_panel_btn_rects[i as usize] = [
+                    sx(bx), sy(btn_y), btn_w_t * scale_w, btn_h_t * scale_h,
+                ];
+            }
         }
 
         // Auto-cycle themes (title screen + post-journey only, not during journey)
@@ -640,12 +935,6 @@ impl GameWorld {
     }
 
     pub fn cycle_theme(&mut self) {
-        if !self.journey_unlocked && !self.show_title && !self.demo_mode {
-            // F1 locked during journey — show hint
-            self.toast_text = format!("F1 UNLOCKS AT {} LINES", JOURNEY_ORDER.len() * 25);
-            self.toast_timer = 1.5;
-            return;
-        }
         let count = Self::theme_fns().len();
         self.theme_index = (self.theme_index + 1) % count;
         self.apply_theme_by_index(self.theme_index);
@@ -738,6 +1027,14 @@ impl GameWorld {
     /// Handle Up/Down/Enter for menu navigation. Returns true if key was consumed.
     pub fn handle_menu_key(&mut self, code: &winit::keyboard::KeyCode) -> bool {
         use winit::keyboard::KeyCode as K;
+        // Playlist panel absorbs all keys when open
+        if self.show_playlist_panel {
+            match code {
+                K::Escape => { self.show_playlist_panel = false; }
+                _ => {}
+            }
+            return true;
+        }
         if self.show_title {
             // Any navigation key wakes the buttons
             if matches!(code, K::ArrowUp | K::ArrowDown | K::Enter | K::Space) {
@@ -846,6 +1143,12 @@ impl GameWorld {
             self.danger_level = 0.0;
             self.last_level = 1;
             self.camera.reset();
+            // Reset journey
+            self.journey_stage = 0;
+            self.journey_unlocked = false;
+            let first_theme = JOURNEY_ORDER[0];
+            self.theme_index = first_theme;
+            self.apply_theme_by_index(first_theme);
         }
         self.demo_idle_timer = 0.0;
     }
@@ -1165,6 +1468,44 @@ impl GameWorld {
             }
             return;
         }
+        // Playlist panel clicks
+        if self.show_playlist_panel {
+            let [mx, my] = self.cursor_pos;
+            let hit = |r: [f32; 4]| mx >= r[0] && mx <= r[0]+r[2] && my >= r[1] && my <= r[1]+r[3];
+
+            // Bottom buttons: Browse(0), Add All(1), Clear(2), Play(3), Up(4), Down(5)
+            if hit(self.playlist_panel_btn_rects[0]) { self.browse_folder(); }
+            else if hit(self.playlist_panel_btn_rects[1]) { self.playlist_add_all(); }
+            else if hit(self.playlist_panel_btn_rects[2]) { self.playlist_clear(); }
+            else if hit(self.playlist_panel_btn_rects[3]) { self.playlist_apply(); }
+            else if hit(self.playlist_panel_btn_rects[4]) { self.playlist_move_up(); }
+            else if hit(self.playlist_panel_btn_rects[5]) { self.playlist_move_down(); }
+            // Right column click — add track or drill into subfolder
+            else if hit(self.playlist_panel_right_rect) {
+                let r = self.playlist_panel_right_rect;
+                let rel_y = my - r[1];
+                let line_h = 12.0 * self.window_size[1] / THEME.win_h as f32;
+                let clicked_idx = self.folder_scroll + (rel_y / line_h) as usize;
+                self.folder_entry_click(clicked_idx);
+            }
+            // Left column click — select or remove (click selected = remove)
+            else if hit(self.playlist_panel_left_rect) {
+                let r = self.playlist_panel_left_rect;
+                let rel_y = my - r[1];
+                let line_h = 12.0 * self.window_size[1] / THEME.win_h as f32;
+                let clicked_idx = self.playlist_scroll + (rel_y / line_h) as usize;
+                if clicked_idx < self.playlist.len() {
+                    if self.playlist_selected == Some(clicked_idx) {
+                        // Click on already-selected item — remove it
+                        self.playlist_remove(clicked_idx);
+                    } else {
+                        self.playlist_selected = Some(clicked_idx);
+                    }
+                }
+            }
+            return;
+        }
+
         // Pause menu "EXIT TO TITLE" click
         if self.session.state == GameState::Paused && !self.show_title {
             let [mx, my] = self.cursor_pos;
@@ -1207,13 +1548,19 @@ impl GameWorld {
     }
 
     fn pick_music_folder(&mut self) {
-        let was_playing = self.session.state == GameState::Playing;
-        if was_playing {
-            self.session.state = GameState::Paused;
+        // Toggle playlist panel
+        if self.show_playlist_panel {
+            self.show_playlist_panel = false;
+            return;
         }
+        self.show_playlist_panel = true;
+        self.load_folder_contents();
+        self.refresh_playlist_display();
         self.hud_opacity = 1.0;
         self.hud_fade_timer = 1.5;
+    }
 
+    fn browse_folder(&mut self) {
         let folder = rfd::FileDialog::new()
             .set_title("Select Music Folder")
             .pick_folder();
@@ -1221,21 +1568,83 @@ impl GameWorld {
         if let Some(path) = folder {
             let folder_str = path.to_string_lossy().to_string();
             self.music_folder = Some(folder_str.clone());
+            self.browse_path = Some(folder_str);
+            self.load_folder_contents();
             self.save_settings();
-            // Shut down old audio before starting new
-            if let Ok(mut audio) = self.audio.lock() {
-                audio.shutdown = true;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            let (new_audio, new_actions) = audio_output::start_audio(Some(&folder_str));
-            self.audio = new_audio;
-            self.audio_actions = new_actions;
         }
+    }
 
-        if was_playing {
-            self.session.state = GameState::Playing;
-            self.last_tick = Instant::now();
+    /// Handle a click on a folder entry — add track, drill into subdir, or go up.
+    pub fn folder_entry_click(&mut self, idx: usize) {
+        if idx >= self.folder_entries.len() { return; }
+        match &self.folder_entries[idx] {
+            FolderEntry::ParentDir => {
+                if let Some(ref bp) = self.browse_path.clone() {
+                    if let Some(parent) = std::path::Path::new(bp).parent() {
+                        self.browse_path = Some(parent.to_string_lossy().to_string());
+                        self.load_folder_contents();
+                    }
+                }
+            }
+            FolderEntry::SubDir(path) => {
+                self.browse_path = Some(path.clone());
+                self.load_folder_contents();
+            }
+            FolderEntry::Track(path) => {
+                if !self.playlist.contains(path) {
+                    self.playlist.push(path.clone());
+                    self.refresh_playlist_display();
+                    self.save_settings();
+                }
+                self.folder_last_clicked = Some(idx);
+            }
         }
+    }
+
+    /// Remove a track from the playlist.
+    pub fn playlist_remove(&mut self, playlist_idx: usize) {
+        if playlist_idx < self.playlist.len() {
+            self.playlist.remove(playlist_idx);
+            self.refresh_playlist_display();
+            if let Some(sel) = self.playlist_selected {
+                if sel >= self.playlist.len() {
+                    self.playlist_selected = if self.playlist.is_empty() { None } else { Some(self.playlist.len() - 1) };
+                }
+            }
+            self.save_settings();
+        }
+    }
+
+    /// Add all tracks (not subdirs) from current folder to playlist.
+    pub fn playlist_add_all(&mut self) {
+        for entry in &self.folder_entries.clone() {
+            if let FolderEntry::Track(path) = entry {
+                if !self.playlist.contains(path) {
+                    self.playlist.push(path.clone());
+                }
+            }
+        }
+        self.refresh_playlist_display();
+        self.save_settings();
+    }
+
+    /// Clear the playlist.
+    pub fn playlist_clear(&mut self) {
+        self.playlist.clear();
+        self.playlist_display.clear();
+        self.save_settings();
+    }
+
+    /// Apply the playlist to audio playback — restart audio with playlist order.
+    pub fn playlist_apply(&mut self) {
+        if self.playlist.is_empty() { return; }
+        let volume = if let Ok(a) = self.audio.try_lock() { a.volume } else { 0.8 };
+        if let Ok(mut a) = self.audio.lock() { a.shutdown = true; }
+        let (new_audio, new_actions) = audio_output::start_audio_playlist(self.playlist.clone());
+        self.audio = new_audio;
+        self.audio_actions = new_actions;
+        if let Ok(mut a) = self.audio.try_lock() { a.volume = volume; }
+        self.show_playlist_panel = false;
     }
 
     pub fn compute_uniforms(&self, aspect: f32) -> Uniforms {

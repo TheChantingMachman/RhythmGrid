@@ -69,6 +69,19 @@ pub enum SignalRank {
     Fixed(usize),   // always use this band index (0-6)
 }
 
+impl SignalRank {
+    /// Resolve to a concrete band index given the current resolved ranks.
+    #[allow(dead_code)]
+    pub fn resolve(self, ranks: &[usize; 3]) -> usize {
+        match self {
+            SignalRank::First => ranks[0],
+            SignalRank::Second => ranks[1],
+            SignalRank::Third => ranks[2],
+            SignalRank::Fixed(band) => band.min(6),
+        }
+    }
+}
+
 /// Maps effects to analysis ranks. The runtime resolves ranks to actual
 /// band indices based on rolling_energy + beat_confidence analysis.
 #[derive(Clone)]
@@ -199,6 +212,7 @@ pub fn default_theme() -> VisualTheme {
         effects: {
             let mut f = EffectFlags::all_on();
             f.hex_background = false;
+            f.particle_beat_pulse = false;
             f
         },
         bindings: EffectBindings::default_bindings(),

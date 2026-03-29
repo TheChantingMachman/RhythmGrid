@@ -92,6 +92,13 @@ impl ApplicationHandler for App {
                 self.world.cursor_pos = [position.x as f32, position.y as f32];
                 self.world.on_mouse_activity();
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let lines = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y as i32,
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => (pos.y / 30.0) as i32,
+                };
+                self.world.handle_scroll(lines);
+            }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
                 // Refresh hover state before checking click — avoids stale hover from previous frame
                 if let Some(gpu) = &self.gpu {
@@ -139,9 +146,16 @@ impl ApplicationHandler for App {
                     }
                 }
                 let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
-                let gpu_draw = self.world.effects.flow_field.gpu_draw_cmd();
+                let mut gpu_draws: Vec<super::renderer::GpuOitDrawCmd> = Vec::new();
+                if let Some(cmd) = self.world.effects.flow_field.gpu_draw_cmd() {
+                    gpu_draws.push(cmd);
+                }
+                if let Some(cmd) = self.world.effects.fireworks.gpu_draw_cmd() {
+                    gpu_draws.push(cmd);
+                }
                 if let Some(gpu) = &mut self.gpu {
-                    gpu.render(&ov, &oi, &tv, &ti, &hv, &hi, gpu_draw.as_ref());
+                    gpu.warp_intensity = self.world.journey_transition.warp_intensity();
+                    gpu.render(&ov, &oi, &tv, &ti, &hv, &hi, &gpu_draws);
                 }
                 if self.world.should_quit {
                     self.world.save_settings();

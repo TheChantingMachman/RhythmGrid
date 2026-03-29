@@ -53,7 +53,9 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 
 ### High Priority
 
-*No high priority items currently. Next impactful work is in medium/low priority.*
+**Debug mode access** — F1 currently cycles all themes freely (including Debug). When journey mode is re-locked (currently unlocked for development), need a way to access the debug theme without breaking the journey. Options: separate debug key (F12?), debug toggle in settings menu, or debug theme excluded from journey but accessible via dedicated shortcut. The debug dashboard is essential for tuning audio analysis, beat confidence, and rank resolution — must remain accessible during development.
+
+**GPU fireworks tuning** — the GPU fireworks port works but has subtle visual differences from the CPU version that need investigation. Toggle `gpu_active()` to `false` in fireworks.rs to compare. Key areas: cascade trail density/distribution (CPU spawns per-frame, GPU pre-spawns at predicted positions), burst trail wake shape, smoke interaction with burst flash glow, overall "feel" of the detonation moment. The CPU version retains some qualities that the GPU version doesn't fully capture — needs a focused A/B comparison session.
 
 ### Medium Priority
 
@@ -83,6 +85,11 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 - *Gamer/audiophile quick-switch*: casual mouse unhides audio controls in either mode. In audiophile mode, space = play/pause (not hard drop).
 - *AI play toggle*: setting to allow demo AI during visualizer mode, or pure visualizer with no game. Deferred.
 - *Future considerations*: album art from ID3/Vorbis tags, track progress with click-to-seek, scrobble-friendly track change events.
+- *Dashboard rendering architecture*: the audio controls (FFT bars, volume, transport buttons) are currently 3D world-space objects in the transparent scene pass. This means they inherit camera shake, beat zoom, and any visual effects applied to the scene — making them hard to click and hard to read during gameplay. They need to be moved to a stable rendering layer that is:
+  - Exempt from camera shake, zoom, and all scene effects
+  - Independently fadeable (current HUD opacity works but affects everything)
+  - Always clickable regardless of visual effects state
+  - Options: move to HUD pass as 2D overlay (simplest, loses 3D look), add a dedicated "dashboard" render pass with a stable camera (preserves 3D, more plumbing), or pre-transform vertices CPU-side (attempted, problematic). Decide during overhaul.
 
 **Action audio feedback tuning** — the EQ boost approach (ActionAudioProcessor) gets ~80% there but needs further work:
 - Tune ramp rate, decay curves, and per-action intensity levels
@@ -188,22 +195,17 @@ The louder the music, the less the game adds. The quieter the music, the more th
 ## Roadmap
 
 ### Next up — near-term
-1. **Journey system polish (WIP)** — current implementation works but needs:
-   - *Transition effect/fanfare* — theme changes are abrupt. Add a visual transition (flash, fade, particle burst) when advancing to the next stage. Should feel like an event, not a glitch.
-   - *Auto-registration of new themes* — current JOURNEY_ORDER is a hardcoded array that must be manually updated when themes are added. Refactor so new themes auto-register with a coolness rank, and the journey builds the order dynamically. Eliminates maintenance.
-   - *Pro player scaling* — 200 lines is trivial for experienced players. Consider: journey length scales with game speed setting, or journey milestones are level-based not line-based, or journey is a percentage of the player's historical average game length. Default should never feel like a gate to someone who clears 200 lines in 5 minutes.
-   - *Settings exposure* — future settings menu should allow: journey length (100/200/500/endless), disable journey (free theme switching from start), lock to a single theme. The current defaults should be good for casual players without configuration.
-2. **Playlists** — save/load/reorder, track metadata
-3. **Controller support** — gamepad via gilrs + DAS/ARR (deprioritized)
+1. **Journey system polish (WIP)** — transition effects, auto-registration of new themes, pro player scaling, settings exposure. See priority backlog for details.
+2. **Settings menu** — expose journey config, audio feedback toggle, DAS/ARR, key bindings, volume. Currently buried in pause overlay.
+3. **Music UI overhaul** — dashboard rendering architecture, audiophile mode, track progress. See priority backlog.
 
 ### Medium-term — polish
-4. **Settings menu**
-5. **5-6 next preview** — minimalist, respects clean UI
-6. **Expand built-in music library**
-7. **Repeat mode**
-8. **Folder drag-and-drop**
-9. **3D font / SDF text**
-10. **Action audio feedback tuning** — further iteration on EQ boost + SFX experiments
+4. **5-6 next preview** — minimalist, respects clean UI
+5. **Expand built-in music library**
+6. **Repeat mode**
+7. **Folder drag-and-drop**
+8. **3D font / SDF text**
+9. **Controller support** — gamepad via gilrs + DAS/ARR
 
 ### Long-term — differentiation
 10. **Advanced visualizer AI** — music-aware demo that paces to the beat, chases tetrises during high-energy sections, times clears to strong beats
@@ -213,11 +215,15 @@ The louder the music, the less the game adds. The quieter the music, the more th
 14. **GPU particle generalization** — extend compute shader to all effects
 15. **Visualizer-only mode** — fullscreen music visualization, no game
 
-### Horizon — "rivals Tetris Effect"
-16. **Beat-quantized boost (Phase B)** — snap EQ boosts to beat subdivisions via tempo tracker
-17. **Key-matched synthesis (Phase C)** — chromagram key detection, pentatonic action tones blended with boost
-18. **Custom music analysis** — pre-scan for BPM, sections, energy map
-19. **Platform expansion** — web (WebGPU), macOS, Steam
+### Long-term — audio feedback (research blocked)
+Action-reactive audio (Phase A EQ boost) is implemented and ~80% there. Further iteration paused pending external research on audio theory and design philosophy. The ActionAudioProcessor architecture is in place and swappable. Resume when design direction is clear.
+16. **Action audio feedback tuning** — ramp/decay curves, per-action intensity, SFX experiments, song-profile-matched sound sets
+17. **Beat-quantized boost (Phase B)** — snap EQ boosts to beat subdivisions via tempo tracker
+18. **Key-matched synthesis (Phase C)** — chromagram key detection, pentatonic action tones
+19. **Custom music analysis** — pre-scan for BPM, sections, energy map
+
+### Horizon
+20. **Platform expansion** — web (WebGPU), macOS, Steam
 
 ---
 
@@ -283,7 +289,35 @@ These are future possibilities, not commitments. Explore when relevant.
 - **Cube material workshop** — debug slider panel for real-time material tuning
 - **Bitmap-extruded blocks** — pixel art silhouettes extruded into mini-voxel columns
 - **Particle cloud shapes** — dissolve/reform cycle on musical triggers
-- **Water surface background** — sine-wave vertex displacement, audio-driven wave params
+- **Water theme rework — above water variant:**
+  - Camera and board above the water surface, looking down at an angle
+  - Water surface fills the background below the board — scrolling normal-mapped shader with fresnel (bright at glancing angles, transparent looking down)
+  - Pond floor visible through shallow water near camera, fades to opaque blue-green in distance (natural depth fog)
+  - Caustics on the pond floor — two layers of scrolling voronoi noise multiplied together (classic cheap shader effect, high visual impact)
+  - Ripples/waves: vertex displacement on the surface plane, audio-reactive (bass = wavelength, mids = amplitude)
+  - Steep camera angle avoids need for horizon/skybox. If shallow angle desired, gradient sky quad behind water
+  - GPU-friendly: entire water surface is a fullscreen shader pass, similar to Mandelbrot background
+  - Layered effort: floor quad (easy) → surface overlay (medium) → caustics (medium) → ripples (medium-hard)
+
+- **Water theme rework — underwater variant:**
+  - Camera and board submerged — looking up through water at the surface
+  - Water surface above creates rippling light patterns on the board and background
+  - God rays: volumetric light shafts from the surface, animated, audio-reactive intensity
+  - Depth-based blue-green tint — objects farther from camera get more tinted/hazier
+  - Pond floor below with caustics (same as above variant)
+  - Bubbles: small particle system rising upward, affected by audio energy
+  - More complex: requires refraction distortion of the board through water, volumetric fog between camera and surface, god ray post-process pass
+  - Could be a separate theme ("Deep") rather than replacing the current Water theme
+
+- **Water theme rework — storm variant:**
+  - Above-water with dramatic mood: dark sky, lightning, sense of ocean scale
+  - Dark gradient sky quad (trivial) + mist/fog at far edge hides where water "ends" — implies vastness without rendering it
+  - Cloud layer: scrolling noise billboards (same technique as crystal fog, but horizontal + dark). Bass energy pulses darkness, mids shift speed.
+  - Lightning: bright forked line segments from clouds to water for 1-2 frames, followed by screen-wide flash. Triggered on rare strong beats or flux spikes. Fork is random line segments — similar to firework flash but vertical.
+  - Water surface reflects lightning — brief brightening of the surface normal map after a strike
+  - Sense of scale from: slow-moving clouds, distant small lightning, water fading to mist at horizon
+  - Could be its own theme ("Storm") — darker, moodier energy personality. Pairs with aggressive/dramatic music.
+  - Layered effort: gradient sky (easy) → cloud layer (medium) → lightning bolt + flash (medium) → water reflection (easy on top of existing water surface)
 
 ---
 

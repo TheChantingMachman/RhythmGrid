@@ -80,11 +80,10 @@ impl EffectManager {
         self.pipes = Pipes::new();
         self.fireworks.shells_only = false;
         self.fireworks.bursts_only = theme.name == "Debug";
-        // Reinit GPU resources if we have cached device info
+        // Reinit GPU resources — effects were just recreated with gpu: None
         if let Some((device, queue, scene_bgl)) = self.gpu_init.clone() {
-            if self.flags.flow_field {
-                self.flow_field.create_gpu_resources(&device, &queue, &scene_bgl);
-            }
+            self.flow_field.create_gpu_resources(&device, &queue, &scene_bgl);
+            self.fireworks.create_gpu_resources(&device, &queue, &scene_bgl);
         }
     }
 
@@ -136,7 +135,7 @@ impl EffectManager {
     /// Render background effects (transparent, behind board): fireworks, fire, starfield, aurora, flow_field.
     pub fn render_background(&self, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, ctx: &RenderContext) {
         let ef = &self.flags;
-        if ef.fireworks { self.fireworks.render(verts, indices, ctx); }
+        if ef.fireworks && !self.fireworks.gpu_active() { self.fireworks.render(verts, indices, ctx); }
         if ef.fire { self.fire.render(verts, indices, ctx); }
         if ef.starfield { self.starfield.render(verts, indices, ctx); }
         if ef.aurora { self.aurora.render(verts, indices, ctx); }
@@ -179,21 +178,28 @@ impl EffectManager {
         if self.gpu_init.is_none() {
             self.gpu_init = Some((device.clone(), queue.clone(), scene_bgl.clone()));
         }
-        if self.flags.flow_field {
-            self.flow_field.create_gpu_resources(device, queue, scene_bgl);
-        }
+        // Always init all GPU effects — resources are cheap, theme may change later
+        self.flow_field.create_gpu_resources(device, queue, scene_bgl);
+        self.fireworks.create_gpu_resources(device, queue, scene_bgl);
     }
 
     /// Dispatch compute work for all GPU effects.
     /// Call once per frame before rendering. Returns true if any compute work was submitted.
     pub fn dispatch_compute(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, audio: &AudioFrame) -> bool {
+        let mut submitted = false;
         if self.flags.flow_field && self.flow_field.gpu_active() {
             let mut encoder = device.create_command_encoder(&Default::default());
             self.flow_field.compute(device, queue, &mut encoder, audio);
             queue.submit(std::iter::once(encoder.finish()));
-            return true;
+            submitted = true;
         }
-        false
+        if self.flags.fireworks && self.fireworks.gpu_active() {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            self.fireworks.compute(device, queue, &mut encoder, audio);
+            queue.submit(std::iter::once(encoder.finish()));
+            submitted = true;
+        }
+        submitted
     }
 
     /// Returns a reference to flow_field if it's GPU-active, for the OIT render pass.
