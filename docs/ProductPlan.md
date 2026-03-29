@@ -83,6 +83,11 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 - *Gamer/audiophile quick-switch*: casual mouse unhides audio controls in either mode. In audiophile mode, space = play/pause (not hard drop).
 - *AI play toggle*: setting to allow demo AI during visualizer mode, or pure visualizer with no game. Deferred.
 - *Future considerations*: album art from ID3/Vorbis tags, track progress with click-to-seek, scrobble-friendly track change events.
+- *Dashboard rendering architecture*: the audio controls (FFT bars, volume, transport buttons) are currently 3D world-space objects in the transparent scene pass. This means they inherit camera shake, beat zoom, and any visual effects applied to the scene — making them hard to click and hard to read during gameplay. They need to be moved to a stable rendering layer that is:
+  - Exempt from camera shake, zoom, and all scene effects
+  - Independently fadeable (current HUD opacity works but affects everything)
+  - Always clickable regardless of visual effects state
+  - Options: move to HUD pass as 2D overlay (simplest, loses 3D look), add a dedicated "dashboard" render pass with a stable camera (preserves 3D, more plumbing), or pre-transform vertices CPU-side (attempted, problematic). Decide during overhaul.
 
 **Action audio feedback tuning** — the EQ boost approach (ActionAudioProcessor) gets ~80% there but needs further work:
 - Tune ramp rate, decay curves, and per-action intensity levels
