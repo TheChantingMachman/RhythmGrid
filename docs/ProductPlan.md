@@ -55,6 +55,8 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 
 **Debug mode access** — F1 currently cycles all themes freely (including Debug). When journey mode is re-locked (currently unlocked for development), need a way to access the debug theme without breaking the journey. Options: separate debug key (F12?), debug toggle in settings menu, or debug theme excluded from journey but accessible via dedicated shortcut. The debug dashboard is essential for tuning audio analysis, beat confidence, and rank resolution — must remain accessible during development.
 
+**GPU fireworks tuning** — the GPU fireworks port works but has subtle visual differences from the CPU version that need investigation. Toggle `gpu_active()` to `false` in fireworks.rs to compare. Key areas: cascade trail density/distribution (CPU spawns per-frame, GPU pre-spawns at predicted positions), burst trail wake shape, smoke interaction with burst flash glow, overall "feel" of the detonation moment. The CPU version retains some qualities that the GPU version doesn't fully capture — needs a focused A/B comparison session.
+
 ### Medium Priority
 
 **Playlists** — save/load named playlists, queue management, drag-to-reorder. Currently folder-only with sequential/shuffle play.
