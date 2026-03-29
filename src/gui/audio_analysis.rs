@@ -34,6 +34,11 @@ pub struct AudioAnalysis {
     pub energy_averages: [f32; 7],     // cached for debug dashboard
     pub confidence_values: [f32; 7],   // cached for debug dashboard
 
+    // Rolling EMA confidence for adaptive rank resolution
+    ema_confidence: [f32; 7],          // blended confidence that improves over time
+    ema_energy: [f32; 7],              // blended energy averages
+    last_sample_time: f64,             // when we last sampled for EMA update
+
     // Track change detection
     pub track_time: f64,
     last_track_name: String,
@@ -67,6 +72,9 @@ impl AudioAnalysis {
             beat_confidence: BeatConfidence::new(),
             energy_averages: [0.0; 7],
             confidence_values: [0.0; 7],
+            ema_confidence: [0.0; 7],
+            ema_energy: [0.0; 7],
+            last_sample_time: 0.0,
             track_time: 0.0,
             last_track_name: String::new(),
             prev_beat: false,
@@ -89,6 +97,9 @@ impl AudioAnalysis {
             self.beat_confidence = BeatConfidence::new();
             self.energy_averages = [0.0; 7];
             self.confidence_values = [0.0; 7];
+            self.ema_confidence = [0.0; 7];
+            self.ema_energy = [0.0; 7];
+            self.last_sample_time = 0.0;
             self.norm_ceil = [0.01; 7];
             self.peak_bands = [0.0; 7];
             self.bands_norm = [0.0; 7];
@@ -126,30 +137,44 @@ impl AudioAnalysis {
         self.energy_averages = self.rolling_energy.averages();
         self.confidence_values = self.beat_confidence.confidence();
 
-        // Track time + two-phase rank resolution
+        // Track time + adaptive rank resolution
         self.track_time += dt;
         self.toast = None;
         let band_names = ["SUB", "BASS", "LMID", "MID", "UMID", "PRES", "BRIL"];
 
-        // Phase labels
+        // Phase 1: initial sampling (0-7s)
         if self.track_time < 7.0 {
-            self.toast = Some((format!("SAMPLING {:.0}S", 7.0 - self.track_time), 2.0));
-        } else if self.track_time >= 30.0 && self.track_time < 45.0 {
-            self.toast = Some((format!("RESAMPLING {:.0}S", 45.0 - self.track_time), 2.0));
+            self.toast = Some((format!("ANALYZING {:.0}S", 7.0 - self.track_time), 2.0));
         }
 
-        // Phase 1: first lock at 7s
+        // Phase 1 lock: first rank resolution at 7s
         if !self.ranks_locked && self.track_time > 7.0 {
-            self.resolved_ranks = self.resolve_ranks();
+            // Seed EMA with initial values
+            self.ema_confidence = self.beat_confidence.confidence();
+            self.ema_energy = self.rolling_energy.averages();
+            self.resolved_ranks = self.resolve_ranks_from_ema();
             self.ranks_locked = true;
+            self.last_sample_time = self.track_time;
             let [r1, r2, r3] = self.resolved_ranks;
             self.toast = Some((format!("MAPPED: {} {} {}",
                 band_names[r1], band_names[r2], band_names[r3]), 3.0));
         }
 
-        // Phase 2: reapply at 45s after 15s of fresh sampling
-        if self.track_time > 45.0 && self.track_time - dt <= 45.0 {
-            let new_ranks = self.resolve_ranks();
+        // Rolling EMA update every 20s after initial lock
+        if self.ranks_locked && self.track_time - self.last_sample_time >= 20.0 {
+            self.last_sample_time = self.track_time;
+            let fresh_confidence = self.beat_confidence.confidence();
+            let fresh_energy = self.rolling_energy.averages();
+
+            // Confidence-weighted blend: high fresh confidence → small blend (stable),
+            // low fresh confidence → larger blend (ready to adapt when something clear emerges)
+            for i in 0..7 {
+                let blend = if fresh_confidence[i] > 0.5 { 0.15 } else { 0.35 };
+                self.ema_confidence[i] = self.ema_confidence[i] * (1.0 - blend) + fresh_confidence[i] * blend;
+                self.ema_energy[i] = self.ema_energy[i] * (1.0 - blend) + fresh_energy[i] * blend;
+            }
+
+            let new_ranks = self.resolve_ranks_from_ema();
             if new_ranks != self.resolved_ranks {
                 self.resolved_ranks = new_ranks;
                 let [r1, r2, r3] = self.resolved_ranks;
@@ -195,6 +220,7 @@ impl AudioAnalysis {
             flux: self.flux,
             danger,
             dt,
+            resolved_ranks: self.resolved_ranks,
         }
     }
 
@@ -208,17 +234,15 @@ impl AudioAnalysis {
         }
     }
 
-    /// Internal: compute rank resolution from current analysis state.
-    fn resolve_ranks(&self) -> [usize; 3] {
-        let dominant = self.rolling_energy.dominant_bands(3);
-        let confidence = self.beat_confidence.confidence();
-        let rank1 = *dominant.iter()
-            .max_by(|&&a, &&b| confidence[a].partial_cmp(&confidence[b]).unwrap())
-            .unwrap_or(&0);
-        let others: Vec<usize> = dominant.iter().filter(|&&b| b != rank1).copied().collect();
-        let rank2 = others.first().copied().unwrap_or(1);
-        let rank3 = others.get(1).copied().unwrap_or(2);
-        [rank1, rank2, rank3]
+    /// Compute rank resolution from blended EMA values.
+    /// Ranks by combined score: energy * 0.4 + confidence * 0.6 (confidence-weighted).
+    fn resolve_ranks_from_ema(&self) -> [usize; 3] {
+        let mut scores: Vec<(usize, f32)> = (0..7).map(|i| {
+            let score = self.ema_energy[i] * 0.4 + self.ema_confidence[i] * 0.6;
+            (i, score)
+        }).collect();
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        [scores[0].0, scores[1].0, scores[2].0]
     }
 
     /// Whether track change just happened (for external reset logic like firework cooldown)

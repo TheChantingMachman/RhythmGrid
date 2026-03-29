@@ -452,6 +452,7 @@ impl GameWorld {
             audio_frame: AudioFrame {
                 bands: [0.0; 7], bands_norm: [0.0; 7], peak_bands: [0.0; 7],
                 band_beats: [0.0; 7], centroid: 0.0, flux: 0.0, danger: 0.0, dt: 0.0,
+                resolved_ranks: [0, 1, 2],
             },
             cursor_pos: [0.0; 2],
             window_size: [THEME.win_w as f32, THEME.win_h as f32],
@@ -934,12 +935,6 @@ impl GameWorld {
     }
 
     pub fn cycle_theme(&mut self) {
-        if !self.journey_unlocked && !self.show_title && !self.demo_mode {
-            // F1 locked during journey — show hint
-            self.toast_text = format!("F1 UNLOCKS AT {} LINES", JOURNEY_ORDER.len() * 25);
-            self.toast_timer = 1.5;
-            return;
-        }
         let count = Self::theme_fns().len();
         self.theme_index = (self.theme_index + 1) % count;
         self.apply_theme_by_index(self.theme_index);

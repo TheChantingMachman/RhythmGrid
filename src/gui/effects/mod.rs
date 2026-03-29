@@ -30,6 +30,7 @@ pub struct AudioFrame {
     pub flux: f32,                 // spectral flux (rate of spectral change)
     pub danger: f32,               // escalation modifier 0-1
     pub dt: f32,                   // frame delta time in seconds
+    pub resolved_ranks: [usize; 3], // top 3 bands by energy+confidence (adaptive)
 }
 
 /// Rendering context — board geometry and window info.

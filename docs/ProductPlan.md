@@ -53,7 +53,7 @@ See [archive/CompletedWork.md](archive/CompletedWork.md) for full feature invent
 
 ### High Priority
 
-*No high priority items currently. Next impactful work is in medium/low priority.*
+**Debug mode access** — F1 currently cycles all themes freely (including Debug). When journey mode is re-locked (currently unlocked for development), need a way to access the debug theme without breaking the journey. Options: separate debug key (F12?), debug toggle in settings menu, or debug theme excluded from journey but accessible via dedicated shortcut. The debug dashboard is essential for tuning audio analysis, beat confidence, and rank resolution — must remain accessible during development.
 
 ### Medium Priority
 
