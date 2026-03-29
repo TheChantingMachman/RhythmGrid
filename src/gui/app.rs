@@ -146,10 +146,16 @@ impl ApplicationHandler for App {
                     }
                 }
                 let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
-                let gpu_draw = self.world.effects.flow_field.gpu_draw_cmd();
+                let mut gpu_draws: Vec<super::renderer::GpuOitDrawCmd> = Vec::new();
+                if let Some(cmd) = self.world.effects.flow_field.gpu_draw_cmd() {
+                    gpu_draws.push(cmd);
+                }
+                if let Some(cmd) = self.world.effects.fireworks.gpu_draw_cmd() {
+                    gpu_draws.push(cmd);
+                }
                 if let Some(gpu) = &mut self.gpu {
                     gpu.warp_intensity = self.world.journey_transition.warp_intensity();
-                    gpu.render(&ov, &oi, &tv, &ti, &hv, &hi, gpu_draw.as_ref());
+                    gpu.render(&ov, &oi, &tv, &ti, &hv, &hi, &gpu_draws);
                 }
                 if self.world.should_quit {
                     self.world.save_settings();

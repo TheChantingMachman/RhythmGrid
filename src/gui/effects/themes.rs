@@ -71,6 +71,7 @@ pub enum SignalRank {
 
 impl SignalRank {
     /// Resolve to a concrete band index given the current resolved ranks.
+    #[allow(dead_code)]
     pub fn resolve(self, ranks: &[usize; 3]) -> usize {
         match self {
             SignalRank::First => ranks[0],

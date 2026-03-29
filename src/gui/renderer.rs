@@ -1252,7 +1252,7 @@ impl GpuState {
                   opaque_verts: &[Vertex], opaque_indices: &[u32],
                   transparent_verts: &[Vertex], transparent_indices: &[u32],
                   hud_verts: &[Vertex], hud_indices: &[u32],
-                  gpu_oit: Option<&GpuOitDrawCmd>) {
+                  gpu_oit: &[GpuOitDrawCmd]) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
             Err(_) => return,
@@ -1340,7 +1340,7 @@ impl GpuState {
         }
 
         // Pass 2: OIT Accumulation (transparent geometry → accum + revealage targets)
-        let has_transparent = !transparent_indices.is_empty() || gpu_oit.is_some();
+        let has_transparent = !transparent_indices.is_empty() || !gpu_oit.is_empty();
         if has_transparent {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             {
@@ -1384,8 +1384,8 @@ impl GpuState {
                     pass.set_index_buffer(self.transparent_bufs.index.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..transparent_indices.len() as u32, 0, 0..1);
                 }
-                // GPU effect particles (same OIT pass, different pipeline)
-                if let Some(cmd) = gpu_oit {
+                // GPU effect particles (same OIT pass, different pipelines)
+                for cmd in gpu_oit {
                     pass.set_pipeline(cmd.pipeline);
                     pass.set_bind_group(0, &self.scene_bind_group, &[]);
                     pass.set_bind_group(1, cmd.bind_group_1, &[]);
