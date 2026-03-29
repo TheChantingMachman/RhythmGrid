@@ -289,7 +289,25 @@ These are future possibilities, not commitments. Explore when relevant.
 - **Cube material workshop** — debug slider panel for real-time material tuning
 - **Bitmap-extruded blocks** — pixel art silhouettes extruded into mini-voxel columns
 - **Particle cloud shapes** — dissolve/reform cycle on musical triggers
-- **Water surface background** — sine-wave vertex displacement, audio-driven wave params
+- **Water theme rework — above water variant:**
+  - Camera and board above the water surface, looking down at an angle
+  - Water surface fills the background below the board — scrolling normal-mapped shader with fresnel (bright at glancing angles, transparent looking down)
+  - Pond floor visible through shallow water near camera, fades to opaque blue-green in distance (natural depth fog)
+  - Caustics on the pond floor — two layers of scrolling voronoi noise multiplied together (classic cheap shader effect, high visual impact)
+  - Ripples/waves: vertex displacement on the surface plane, audio-reactive (bass = wavelength, mids = amplitude)
+  - Steep camera angle avoids need for horizon/skybox. If shallow angle desired, gradient sky quad behind water
+  - GPU-friendly: entire water surface is a fullscreen shader pass, similar to Mandelbrot background
+  - Layered effort: floor quad (easy) → surface overlay (medium) → caustics (medium) → ripples (medium-hard)
+
+- **Water theme rework — underwater variant:**
+  - Camera and board submerged — looking up through water at the surface
+  - Water surface above creates rippling light patterns on the board and background
+  - God rays: volumetric light shafts from the surface, animated, audio-reactive intensity
+  - Depth-based blue-green tint — objects farther from camera get more tinted/hazier
+  - Pond floor below with caustics (same as above variant)
+  - Bubbles: small particle system rising upward, affected by audio energy
+  - More complex: requires refraction distortion of the board through water, volumetric fog between camera and surface, god ray post-process pass
+  - Could be a separate theme ("Deep") rather than replacing the current Water theme
 
 ---
 
