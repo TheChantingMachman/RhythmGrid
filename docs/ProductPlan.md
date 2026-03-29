@@ -309,6 +309,16 @@ These are future possibilities, not commitments. Explore when relevant.
   - More complex: requires refraction distortion of the board through water, volumetric fog between camera and surface, god ray post-process pass
   - Could be a separate theme ("Deep") rather than replacing the current Water theme
 
+- **Water theme rework — storm variant:**
+  - Above-water with dramatic mood: dark sky, lightning, sense of ocean scale
+  - Dark gradient sky quad (trivial) + mist/fog at far edge hides where water "ends" — implies vastness without rendering it
+  - Cloud layer: scrolling noise billboards (same technique as crystal fog, but horizontal + dark). Bass energy pulses darkness, mids shift speed.
+  - Lightning: bright forked line segments from clouds to water for 1-2 frames, followed by screen-wide flash. Triggered on rare strong beats or flux spikes. Fork is random line segments — similar to firework flash but vertical.
+  - Water surface reflects lightning — brief brightening of the surface normal map after a strike
+  - Sense of scale from: slow-moving clouds, distant small lightning, water fading to mist at horizon
+  - Could be its own theme ("Storm") — darker, moodier energy personality. Pairs with aggressive/dramatic music.
+  - Layered effort: gradient sky (easy) → cloud layer (medium) → lightning bolt + flash (medium) → water reflection (easy on top of existing water surface)
+
 ---
 
 *Completed work and historical design notes: [archive/CompletedWork.md](archive/CompletedWork.md)*
