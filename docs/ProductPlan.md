@@ -193,22 +193,17 @@ The louder the music, the less the game adds. The quieter the music, the more th
 ## Roadmap
 
 ### Next up — near-term
-1. **Journey system polish (WIP)** — current implementation works but needs:
-   - *Transition effect/fanfare* — theme changes are abrupt. Add a visual transition (flash, fade, particle burst) when advancing to the next stage. Should feel like an event, not a glitch.
-   - *Auto-registration of new themes* — current JOURNEY_ORDER is a hardcoded array that must be manually updated when themes are added. Refactor so new themes auto-register with a coolness rank, and the journey builds the order dynamically. Eliminates maintenance.
-   - *Pro player scaling* — 200 lines is trivial for experienced players. Consider: journey length scales with game speed setting, or journey milestones are level-based not line-based, or journey is a percentage of the player's historical average game length. Default should never feel like a gate to someone who clears 200 lines in 5 minutes.
-   - *Settings exposure* — future settings menu should allow: journey length (100/200/500/endless), disable journey (free theme switching from start), lock to a single theme. The current defaults should be good for casual players without configuration.
-2. **Playlists** — save/load/reorder, track metadata
-3. **Controller support** — gamepad via gilrs + DAS/ARR (deprioritized)
+1. **Journey system polish (WIP)** — transition effects, auto-registration of new themes, pro player scaling, settings exposure. See priority backlog for details.
+2. **Settings menu** — expose journey config, audio feedback toggle, DAS/ARR, key bindings, volume. Currently buried in pause overlay.
+3. **Music UI overhaul** — dashboard rendering architecture, audiophile mode, track progress. See priority backlog.
 
 ### Medium-term — polish
-4. **Settings menu**
-5. **5-6 next preview** — minimalist, respects clean UI
-6. **Expand built-in music library**
-7. **Repeat mode**
-8. **Folder drag-and-drop**
-9. **3D font / SDF text**
-10. **Action audio feedback tuning** — further iteration on EQ boost + SFX experiments
+4. **5-6 next preview** — minimalist, respects clean UI
+5. **Expand built-in music library**
+6. **Repeat mode**
+7. **Folder drag-and-drop**
+8. **3D font / SDF text**
+9. **Controller support** — gamepad via gilrs + DAS/ARR
 
 ### Long-term — differentiation
 10. **Advanced visualizer AI** — music-aware demo that paces to the beat, chases tetrises during high-energy sections, times clears to strong beats
@@ -218,11 +213,15 @@ The louder the music, the less the game adds. The quieter the music, the more th
 14. **GPU particle generalization** — extend compute shader to all effects
 15. **Visualizer-only mode** — fullscreen music visualization, no game
 
-### Horizon — "rivals Tetris Effect"
-16. **Beat-quantized boost (Phase B)** — snap EQ boosts to beat subdivisions via tempo tracker
-17. **Key-matched synthesis (Phase C)** — chromagram key detection, pentatonic action tones blended with boost
-18. **Custom music analysis** — pre-scan for BPM, sections, energy map
-19. **Platform expansion** — web (WebGPU), macOS, Steam
+### Long-term — audio feedback (research blocked)
+Action-reactive audio (Phase A EQ boost) is implemented and ~80% there. Further iteration paused pending external research on audio theory and design philosophy. The ActionAudioProcessor architecture is in place and swappable. Resume when design direction is clear.
+16. **Action audio feedback tuning** — ramp/decay curves, per-action intensity, SFX experiments, song-profile-matched sound sets
+17. **Beat-quantized boost (Phase B)** — snap EQ boosts to beat subdivisions via tempo tracker
+18. **Key-matched synthesis (Phase C)** — chromagram key detection, pentatonic action tones
+19. **Custom music analysis** — pre-scan for BPM, sections, energy map
+
+### Horizon
+20. **Platform expansion** — web (WebGPU), macOS, Steam
 
 ---
 
