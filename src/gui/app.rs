@@ -148,6 +148,7 @@ impl ApplicationHandler for App {
                 let ((ov, oi), (tv, ti), (hv, hi)) = self.world.build_scene_and_hud();
                 let gpu_draw = self.world.effects.flow_field.gpu_draw_cmd();
                 if let Some(gpu) = &mut self.gpu {
+                    gpu.warp_intensity = self.world.journey_transition.warp_intensity();
                     gpu.render(&ov, &oi, &tv, &ti, &hv, &hi, gpu_draw.as_ref());
                 }
                 if self.world.should_quit {

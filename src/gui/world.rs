@@ -31,6 +31,91 @@ const JOURNEY_ORDER: [usize; 8] = [
     6, // Fractal — climax
 ];
 
+/// Journey theme transition — radial warp singularity effect.
+pub struct JourneyTransition {
+    pub active: bool,
+    pub timer: f32,           // total elapsed time since transition started
+    pub phase: TransitionPhase,
+    pub next_theme: usize,    // theme to switch to at midpoint
+}
+
+#[derive(PartialEq)]
+pub enum TransitionPhase {
+    Idle,
+    WarpIn,    // scene warps toward center (0.0 → 0.5s)
+    Switch,    // black frame, apply theme (instant)
+    WarpOut,   // scene warps back from center (0.5 → 1.0s)
+}
+
+const WARP_IN_DURATION: f32 = 0.5;
+const WARP_OUT_DURATION: f32 = 1.5;
+
+impl JourneyTransition {
+    pub fn new() -> Self {
+        JourneyTransition {
+            active: false,
+            timer: 0.0,
+            phase: TransitionPhase::Idle,
+            next_theme: 0,
+        }
+    }
+
+    pub fn start(&mut self, next_theme: usize) {
+        self.active = true;
+        self.timer = 0.0;
+        self.phase = TransitionPhase::WarpIn;
+        self.next_theme = next_theme;
+    }
+
+    /// Returns warp intensity 0.0-1.0 for the shader.
+    pub fn warp_intensity(&self) -> f32 {
+        match self.phase {
+            TransitionPhase::WarpIn => {
+                let t = (self.timer / WARP_IN_DURATION).min(1.0);
+                t * t // ease-in: accelerates toward center
+            }
+            TransitionPhase::Switch => 1.0,
+            TransitionPhase::WarpOut => {
+                let t = ((self.timer - WARP_IN_DURATION) / WARP_OUT_DURATION).min(1.0);
+                let inv = 1.0 - t;
+                inv * inv * inv // cubic ease-out: very slow start, gentle reveal
+            }
+            TransitionPhase::Idle => 0.0,
+        }
+    }
+
+    /// Returns true when the theme should be switched (once, at midpoint).
+    pub fn should_switch_theme(&self) -> bool {
+        self.phase == TransitionPhase::Switch
+    }
+
+    /// Advance the transition. Returns true when finished.
+    pub fn update(&mut self, dt: f32) -> bool {
+        if !self.active { return false; }
+        self.timer += dt;
+        match self.phase {
+            TransitionPhase::WarpIn => {
+                if self.timer >= WARP_IN_DURATION {
+                    self.phase = TransitionPhase::Switch;
+                }
+            }
+            TransitionPhase::Switch => {
+                // Switch happens externally, then advance
+                self.phase = TransitionPhase::WarpOut;
+            }
+            TransitionPhase::WarpOut => {
+                if self.timer >= WARP_IN_DURATION + WARP_OUT_DURATION {
+                    self.active = false;
+                    self.phase = TransitionPhase::Idle;
+                    return true; // finished
+                }
+            }
+            TransitionPhase::Idle => {}
+        }
+        false
+    }
+}
+
 #[derive(Clone)]
 pub enum FolderEntry {
     ParentDir,                    // ".." — go up one level
@@ -74,6 +159,7 @@ pub struct GameWorld {
     // Journey system — escalating theme progression during a game
     journey_stage: usize,       // current stage (0..8), advances every 25 lines
     journey_unlocked: bool,     // true after 200 lines — F1 unlocks for manual theme selection
+    pub(super) journey_transition: JourneyTransition,
     pub color_grade: [f32; 3],
     pub(super) music_folder: Option<String>,
     pub saved_window_width: u32,
@@ -348,6 +434,7 @@ impl GameWorld {
             theme_auto_timer: 240.0, // 4 minutes
             journey_stage: 0,
             journey_unlocked: false,
+            journey_transition: JourneyTransition::new(),
             color_grade: theme.color_grade,
             music_folder: settings.music_folder.clone(),
             saved_window_width: settings.window_width,
@@ -512,22 +599,30 @@ impl GameWorld {
         }
 
         // Journey system — theme escalation every 25 lines, 200 lines = full journey
-        if !self.journey_unlocked {
+        if !self.journey_unlocked && !self.journey_transition.active {
             let new_stage = (self.session.total_lines as usize / 25).min(JOURNEY_ORDER.len());
             if new_stage > self.journey_stage {
                 self.journey_stage = new_stage;
                 if new_stage >= JOURNEY_ORDER.len() {
-                    // Journey complete — unlock F1
                     self.journey_unlocked = true;
                     self.toast_text = "JOURNEY COMPLETE - F1 UNLOCKED".to_string();
                     self.toast_timer = 3.0;
                 } else {
-                    // Advance to next theme in coolness order
+                    // Start warp transition instead of instant switch
                     let next_theme = JOURNEY_ORDER[new_stage];
-                    self.theme_index = next_theme;
-                    self.apply_theme_by_index(next_theme);
+                    self.journey_transition.start(next_theme);
                 }
             }
+        }
+
+        // Journey transition state machine
+        if self.journey_transition.active {
+            if self.journey_transition.should_switch_theme() {
+                let idx = self.journey_transition.next_theme;
+                self.theme_index = idx;
+                self.apply_theme_by_index(idx);
+            }
+            self.journey_transition.update(dt as f32);
         }
 
         // Build AudioFrame BEFORE decay so effects see fresh beat triggers
