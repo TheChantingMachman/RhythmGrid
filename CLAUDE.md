@@ -67,7 +67,7 @@ Key rules:
 - **Auto-stale:** The pipeline auto-stales `implemented` entries that appear in a building spec's `modifies` field. No manual stale needed — just set `modifies` correctly and the pipeline handles the rest.
 - **Inline hints:** The CLI emits stderr hints at add/update time if modifies IDs are not in depends_on or if they're implemented.
 - **`fixture_patterns` field (v3.1.0+):** Optional free-form string describing how to construct test fixtures for a type. Use `specdb fixtures --id <id> --depth N` to walk the depends_on chain and collect fixture guidance.
-- **Current version:** v3.1.1 (constants comma parsing fix + replace-not-merge on update).
+- **Current version:** v3.4.0 (adds `deps` command — transitive forward dependency query via `--id`; YAML round-trip self-heal to canonical format; usage grouped by read/write capability).
 
 ### Fixture Patterns Policy
 
