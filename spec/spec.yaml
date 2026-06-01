@@ -558,3 +558,48 @@
   tags: [core, audio]
   status: implemented
   depends_on: [audio.streaming_decode]
+- id: input.auto_shift
+  section: Input
+  description: |-
+    DAS/ARR horizontal auto-shift timing state machine for held Left/Right movement. Pipeline-owned pure logic with no windowing or board dependency; the co-authored GUI loop feeds key press/release events plus a per-frame dt and applies the returned movement via game.move_horizontal.
+
+    Types:
+    - ShiftDir { Left, Right } — derives Clone, Copy, PartialEq, Eq, Debug.
+    - ShiftMove { Steps(u32), ChargeToWall } — derives PartialEq, Debug. Steps(n) means apply n horizontal moves this frame in the active direction (n >= 1). ChargeToWall means move repeatedly in the active direction until collision/wall (the ARR=0 instant charge); the consumer applies move_horizontal until it fails.
+    - AutoShift — struct holding config (das_ms: f64, arr_ms: f64) plus private runtime state.
+
+    API:
+    - AutoShift::new(das_ms: f64, arr_ms: f64) -> AutoShift
+    - AutoShift::default() -> AutoShift — uses das_default_ms = 150.0 and arr_default_ms = 33.0.
+    - press(&mut self, dir: ShiftDir) — register a direction key-down. Last-key-wins: if a different direction was already active, the new dir becomes active and the DAS charge restarts from zero. press() itself emits no movement.
+    - release(&mut self, dir: ShiftDir) — register a key-up. If the released dir is the active one and the opposite dir is still held, control reverts to the still-held dir as a fresh press (new initial tap + DAS recharge). If no directions remain held, active becomes None. Releasing a non-active held dir just removes it from the held set.
+    - update(&mut self, dt_ms: f64) -> Option<(ShiftDir, ShiftMove)> — advance internal time by dt_ms and return the movement to apply this frame, or None when nothing moves this frame (no key held, still within DAS, or between ARR repeats).
+    - active_dir(&self) -> Option<ShiftDir>
+    - reset(&mut self) — clear all held/active state, timers, and latches. Called on piece lock, pause, or window focus loss.
+
+    Timing behavior (deterministic for a given dt sequence):
+    1. Initial tap — the first update() after a press() emits exactly one Steps(1) in the pressed direction (a single tap always moves exactly once, independent of das/arr).
+    2. DAS delay — while the direction stays held, auto-repeat does not begin until cumulative held time since the press reaches das_ms.
+    3. ARR repeat (arr_ms > 0) — once past das_ms, emit one step per arr_ms elapsed beyond the das threshold, counted cumulatively from the threshold so frame quantization loses no time; a single large-dt frame may therefore return Steps(n) with n > 1. The initial tap and ARR repeats both count toward the Steps total emitted in a frame.
+    4. Instant charge (arr_ms == 0) — once cumulative held time reaches das_ms, emit ChargeToWall exactly once, then latch: subsequent updates emit None until release or a new press. (If das_ms is also 0, the first update after press emits ChargeToWall and the initial tap is subsumed by it.)
+    5. Opposite direction — pressing the other direction (last-key-wins) restarts the sequence at step 1 for the new direction.
+
+    Held time is measured from the most recent press() or direction switch, not from construction. Out of scope for v1: vertical / soft-drop auto-repeat. das_ms and arr_ms are constructor parameters; settings-menu wiring is a later config change.
+  tags: [input, controls, timing, movement]
+  status: draft
+  constants:
+    arr_default_ms: "33"
+    das_default_ms: "150"
+  depends_on: [input.key_map]
+  fixture_patterns: |
+    Construct: `let mut a = AutoShift::new(100.0, 50.0);` or `AutoShift::default()`. Drive by interleaving press()/release() with update(dt_ms); all movement comes from update(), never from press().
+    
+    Common sequences:
+    - Initial tap: `a.press(ShiftDir::Right); assert_eq!(a.update(16.0), Some((ShiftDir::Right, ShiftMove::Steps(1))));`
+    - Pre-DAS hold returns None: with new(100.0, 50.0), after the initial tap a further `a.update(50.0)` (cumulative held = 66ms < 100ms DAS) returns None.
+    - DAS then ARR: keep calling update() until cumulative held since press >= das_ms; the first repeat returns Some((dir, ShiftMove::Steps(1))). With small arr_ms or a large dt, expect Steps(n) with n > 1 in one frame.
+    - Instant charge: `let mut a = AutoShift::new(100.0, 0.0); a.press(ShiftDir::Left); a.update(50.0); /* initial tap */ assert_eq!(a.update(60.0), Some((ShiftDir::Left, ShiftMove::ChargeToWall)));` then `a.update(50.0)` returns None (charge is latched).
+    - Last-key-wins: press(Right), advance into the repeating phase, then press(Left) -> the next update emits Some((ShiftDir::Left, ShiftMove::Steps(1))) and DAS recharges. release(Left) while Right is still held reverts control to Right as a fresh tap.
+    - reset(): after reset(), active_dir() == None and update() returns None until the next press().
+    
+    Pitfalls: update() returns None (not Steps(0)) on no-movement frames; Steps(n) is the TOTAL moves to apply that frame; ChargeToWall is emitted once per charge (latched), not every frame; held time resets on every press()/direction switch.
