@@ -586,7 +586,7 @@
 
     Held time is measured from the most recent press() or direction switch, not from construction. Out of scope for v1: vertical / soft-drop auto-repeat. das_ms and arr_ms are constructor parameters; settings-menu wiring is a later config change.
   tags: [input, controls, timing, movement]
-  status: draft
+  status: implemented
   constants:
     arr_default_ms: "33"
     das_default_ms: "150"
