@@ -48,7 +48,7 @@
   section: Pieces
   description: SRS wall kick data per Tetris Guideline, converted to y-down coordinates. JLSTZ share one kick table, I-piece has a separate table, O-piece has no kicks (rotation is no-op on collision). 8 transitions (4 CW + 4 CCW), 4 kick offsets each. Offsets are (col_delta, row_delta).
   tags: [core, pieces, rotation]
-  status: stale
+  status: implemented
   constants:
     max_kick_tests: "4"
   depends_on: [pieces.rotation]
