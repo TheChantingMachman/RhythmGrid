@@ -6,7 +6,7 @@ use std::time::Instant;
 use rhythm_grid::config::{config_dir, load_settings, save_settings};
 use rhythm_grid::game::*;
 use rhythm_grid::grid::*;
-use rhythm_grid::input::GameAction;
+use rhythm_grid::input::{AutoShift, GameAction, ShiftDir, ShiftMove};
 use rhythm_grid::pieces::*;
 use rhythm_grid::render::{piece_color, board_state, held_piece_state, next_piece_state, game_status, BoardRenderState, GameStatusRender, HeldPieceRender, NextPieceRender};
 use super::audio_output::{self, AudioState};
@@ -126,6 +126,8 @@ pub enum FolderEntry {
 pub struct GameWorld {
     pub session: GameSession,
     pub last_tick: Instant,
+    /// DAS/ARR horizontal auto-shift state machine (held Left/Right repeat).
+    auto_shift: AutoShift,
     pub camera_angle: f32,
     pub(super) preview_angle: f32,
     pub(super) preview_rotation: usize,
@@ -409,6 +411,7 @@ impl GameWorld {
         let mut world = GameWorld {
             session: GameSession::new(),
             last_tick: Instant::now(),
+            auto_shift: AutoShift::default(),
             camera_angle: DEFAULT_CAM_ANGLE,
             preview_angle: 0.0,
             preview_rotation: 0,
@@ -765,6 +768,7 @@ impl GameWorld {
 
         // Title screen — only run audio analysis and effects, skip game logic
         if self.show_title {
+            self.auto_shift.reset();
             self.last_tick = now;
             return;
         }
@@ -788,6 +792,7 @@ impl GameWorld {
         }
 
         if self.session.state != GameState::Playing {
+            self.auto_shift.reset();
             self.last_tick = now;
             self.render_board = board_state(&self.session);
             self.render_status = game_status(&self.session);
@@ -796,6 +801,36 @@ impl GameWorld {
             return;
         }
         self.last_tick = now;
+
+        // DAS/ARR horizontal auto-shift: apply the held-key movement that the
+        // AutoShift state machine (rhythm_grid::input) emits for this frame.
+        // Runs before the gravity tick so the piece settles at its shifted column.
+        if let Some((dir, mv)) = self.auto_shift.update(dt * 1000.0) {
+            let d = match dir {
+                ShiftDir::Left => -1,
+                ShiftDir::Right => 1,
+            };
+            let mut moved = false;
+            match mv {
+                ShiftMove::Steps(n) => {
+                    for _ in 0..n {
+                        if self.session.move_horizontal(d) {
+                            moved = true;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                ShiftMove::ChargeToWall => {
+                    while self.session.move_horizontal(d) {
+                        moved = true;
+                    }
+                }
+            }
+            if moved {
+                self.audio_actions.trigger(audio_output::AudioActions::MOVE);
+            }
+        }
 
         // Capture pre-tick state for visual effects
         let pre_piece = self.session.active_piece;
@@ -1151,6 +1186,26 @@ impl GameWorld {
             self.apply_theme_by_index(first_theme);
         }
         self.demo_idle_timer = 0.0;
+    }
+
+    /// Direction key-down (Left/Right). Routes through DAS/ARR auto-shift so a
+    /// held key auto-repeats; the actual movement is applied per-frame in tick().
+    pub fn dir_press(&mut self, dir: ShiftDir) {
+        self.exit_demo();
+        if self.session.state == GameState::Playing {
+            self.auto_shift.press(dir);
+        }
+    }
+
+    /// Direction key-up (Left/Right).
+    pub fn dir_release(&mut self, dir: ShiftDir) {
+        self.auto_shift.release(dir);
+    }
+
+    /// Window focus lost — drop any held-key charge so the piece doesn't keep
+    /// sliding when the player tabs away.
+    pub fn on_focus_lost(&mut self) {
+        self.auto_shift.reset();
     }
 
     pub fn handle_action(&mut self, action: GameAction) {

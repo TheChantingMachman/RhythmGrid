@@ -8,7 +8,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 
-use rhythm_grid::input;
+use rhythm_grid::input::{self, ShiftDir};
 
 use super::input_bridge::winit_to_rg;
 use super::renderer::GpuState;
@@ -80,13 +80,32 @@ impl ApplicationHandler for App {
                     _ => {
                         // Menu navigation takes priority over game actions
                         if !self.world.handle_menu_key(&code) {
-                            let rg_key = winit_to_rg(code);
-                            if let Some(action) = input::map_key(rg_key) {
-                                self.world.handle_action(action);
+                            match code {
+                                // Left/Right go through DAS/ARR auto-shift instead of a
+                                // one-shot move, so holding the key auto-repeats.
+                                K::ArrowLeft => self.world.dir_press(ShiftDir::Left),
+                                K::ArrowRight => self.world.dir_press(ShiftDir::Right),
+                                _ => {
+                                    let rg_key = winit_to_rg(code);
+                                    if let Some(action) = input::map_key(rg_key) {
+                                        self.world.handle_action(action);
+                                    }
+                                }
                             }
                         }
                     }
                 }
+            }
+            WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Released, .. }, .. } => {
+                use winit::keyboard::KeyCode as K;
+                match code {
+                    K::ArrowLeft => self.world.dir_release(ShiftDir::Left),
+                    K::ArrowRight => self.world.dir_release(ShiftDir::Right),
+                    _ => {}
+                }
+            }
+            WindowEvent::Focused(false) => {
+                self.world.on_focus_lost();
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.world.cursor_pos = [position.x as f32, position.y as f32];
